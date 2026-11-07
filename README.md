@@ -17,13 +17,13 @@
 
 </div>
 
+![AgentBus cockpit](docs/assets/cockpit-design.png)
+
 A free, self-hosted browser cockpit for [AgentBus](https://github.com/staysup/agentbus). It shows
 your agents' turns, every model call, its cost, and the full conversation.
 
 The cockpit is a client of the AgentBus API. It uses only the public client API, so
 anything it shows, your own program can read too.
-
-![AgentBus cockpit](docs/assets/cockpit-design.png)
 
 ## Prerequisites
 
