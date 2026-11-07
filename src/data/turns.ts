@@ -181,12 +181,12 @@ export function replyPreview(text: string): { text: string; truncated: boolean }
 // A turn's state by the API's rule: a run's turn (it has session.opened) is
 // running until its session.closed, then finished on exit code 0 with no
 // error, else failed. Any other turn is finished once it has a turn.completed.
-function replayState(turnEvents: CockpitEvent[]): { state: TurnState; ended?: CockpitEvent } {
+function replayState(turnEvents: CockpitEvent[]): { state: TurnState; ended?: CockpitEvent; stopped?: boolean } {
   const opened = turnEvents.some((e) => e.kind === 'session.opened');
   const closed = turnEvents.find((e) => e.kind === 'session.closed');
   if (opened && closed) {
     const ok = closed.exit_code === 0 && !closed.error;
-    return { state: ok ? 'finished' : 'failed', ended: closed };
+    return { state: ok ? 'finished' : 'failed', ended: closed, stopped: closed.stopped === true || undefined };
   }
   const completions = turnEvents.filter((e) => e.kind === 'turn.completed');
   if (!opened && completions.length > 0) return { state: 'finished', ended: completions[completions.length - 1] };
@@ -243,7 +243,7 @@ export function buildTurns(sessionId: string, rawEvents: CockpitEvent[]): Turn[]
     const detail = turnDetail(turnEvents);
     const turnStart = turnEvents.find((e) => e.kind === 'turn.started') ?? turnEvents[0];
     const named = turnStart.kind === 'turn.started' ? turnStart : undefined;
-    const { state, ended } = replayState(turnEvents);
+    const { state, ended, stopped } = replayState(turnEvents);
     const completed = turnEvents.filter((e) => e.kind === 'turn.completed').pop();
 
     let usage: Usage | null = null;
@@ -275,6 +275,7 @@ export function buildTurns(sessionId: string, rawEvents: CockpitEvent[]): Turn[]
       agent: (named?.agent as string) || undefined,
       folder: (named?.folder as string) || undefined,
       state,
+      stopped,
       outcome: completed ? (completed.outcome as string) || 'finished' : undefined,
       usage,
       costUsd: cost.usd,

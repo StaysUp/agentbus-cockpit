@@ -1,6 +1,6 @@
 import React from 'react';
 import { SessionDetail, Turn } from '../types';
-import { formatDuration, formatTokens, stateClass, stateLabel } from '../utils/format';
+import { formatDuration, formatTokens, stateLabel, turnStateClass } from '../utils/format';
 import { Cost } from './Cost';
 import { CopyButton } from './Icons';
 import { PanelHead } from './PanelHead';
@@ -78,7 +78,7 @@ export const SessionPanel: React.FC<SessionPanelProps> = ({ session, costUsd, co
                 <td className="r">
                   <Cost usd={t.costUsd} complete={t.costComplete} />
                 </td>
-                <td className={stateClass(t.state)}>{stateLabel(t)}</td>
+                <td className={turnStateClass(t)}>{stateLabel(t)}</td>
               </tr>
             ))}
           </tbody>

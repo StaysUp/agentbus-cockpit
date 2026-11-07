@@ -387,6 +387,43 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
       }
     : undefined;
 
+  // The turns the person asked to stop, by id, from the click until the turn
+  // list says the turn is no longer running. Kept here rather than in the
+  // conversation, so it holds across a switch to another session and back.
+  const [stopping, setStopping] = useState<ReadonlySet<string>>(() => new Set());
+  // The same set, read by a click before the next render, so two quick clicks
+  // send one stop.
+  const stoppingRef = useRef(stopping);
+  stoppingRef.current = stopping;
+  const dropStopping = (turnId: string) =>
+    setStopping((cur) => {
+      if (!cur.has(turnId)) return cur;
+      const next = new Set(cur);
+      next.delete(turnId);
+      return next;
+    });
+  // POST /api/v0/turns/<id>/stop. The turn's end arrives through the stream
+  // (its session.closed reads the turn list again). A 409 means it had ended
+  // already: read the list again now. Any other refusal rejects with the
+  // API's words, for the conversation to show.
+  const stopTurn = dataSource.stopTurn
+    ? async (turn: Turn) => {
+        if (stoppingRef.current.has(turn.id)) return;
+        stoppingRef.current = new Set(stoppingRef.current).add(turn.id);
+        setStopping((cur) => new Set(cur).add(turn.id));
+        try {
+          const r = await dataSource.stopTurn!(turn.id);
+          if (r === 'not-running') {
+            dropStopping(turn.id);
+            refreshTurns.current(turn.sessionId);
+          }
+        } catch (err) {
+          dropStopping(turn.id);
+          throw err;
+        }
+      }
+    : undefined;
+
   // Read the selected session's turns when the selection changes, or on a
   // reload, with the events of the turn that will be selected, so the
   // session, its turns and the open turn change on screen together.
@@ -446,6 +483,12 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
     [shown]
   );
   const selectedTurn = turns.find((t) => t.id === selectedTurnId) ?? null;
+
+  // A stop is over once the shown turn list says its turn is not running.
+  useEffect(() => {
+    if (!shown || stopping.size === 0) return;
+    for (const t of shown.session.turnsList) if (stopping.has(t.id) && t.state !== 'running') dropStopping(t.id);
+  }, [shown, stopping]);
   // The session as the screens see it: its latest row and its turns.
   const sessionView: SessionDetail | null = shown ? { ...(shownRow ?? shown.session), turnsList: turns } : null;
 
@@ -560,6 +603,8 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
           resumable={sessionView.resumable}
           open={sessionView.open}
           onSend={sendMessage}
+          onStop={stopTurn}
+          stopping={stopping}
           selectedTurn={selectedTurn}
           onSelectTurn={clickTurn}
           level={shownLevel}

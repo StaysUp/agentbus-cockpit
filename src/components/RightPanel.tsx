@@ -6,8 +6,8 @@ import {
   formatDuration,
   formatTime,
   formatTokens,
-  stateClass,
   stateLabel,
+  turnStateClass,
   toolInputSummary,
 } from '../utils/format';
 import { Cost } from './Cost';
@@ -227,11 +227,11 @@ const TurnPanel: React.FC<TurnPanelProps> = ({
             <span>Time</span>
             <b>{turn.durationMs === undefined ? '—' : formatDuration(turn.durationMs)}</b>
           </div>
-          {turn.state !== 'finished' && (
+          {(turn.state !== 'finished' || turn.stopped) && (
             <div>
               <span>Status</span>
               <b>
-                <span className={turn.state === 'failed' ? 'bad' : ''}>{stateLabel(turn)}</span>
+                <span className={turn.state === 'failed' && !turn.stopped ? 'bad' : ''}>{stateLabel(turn)}</span>
               </b>
             </div>
           )}
@@ -768,7 +768,7 @@ export const TabSum: React.FC<{ tab: TabKey; turn: Turn; detail: TurnDetail }> =
   let head: React.ReactNode;
   switch (tab) {
     case 'result': {
-      head = <span className={stateClass(turn.state)}>{stateLabel(turn)}</span>;
+      head = <span className={turnStateClass(turn)}>{stateLabel(turn)}</span>;
       facts.push(plural(detail.modelCalls.length, 'model call'), plural(detail.toolCalls.length, 'tool call'));
       break;
     }

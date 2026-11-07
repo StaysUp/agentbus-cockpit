@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { turnNotes } from '../data/turns';
 import { Level, SessionDetail, Turn } from '../types';
-import { formatCost, formatTokens, stateClass } from '../utils/format';
+import { formatCost, formatTokens, stateLabel, turnStateClass } from '../utils/format';
 import { Cost } from './Cost';
 
 interface ConvoColumnProps {
@@ -21,6 +21,10 @@ interface ConvoColumnProps {
   open?: boolean;
   // Given only when the source can continue sessions. Rejects with the API's message.
   onSend?: (prompt: string, readOnly: boolean) => Promise<void>;
+  // Given only when the source can stop a turn. Rejects with the API's message.
+  onStop?: (turn: Turn) => Promise<void>;
+  // The turns the person asked to stop that have not ended yet.
+  stopping?: ReadonlySet<string>;
 }
 
 // The person's message from the moment it is sent until its turn arrives.
@@ -40,6 +44,8 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
   resumable,
   open,
   onSend,
+  onStop,
+  stopping,
 }) => {
   const [draft, setDraft] = useState('');
   const [readOnly, setReadOnly] = useState(false);
@@ -67,6 +73,22 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
       ? 'started in a terminal; continue it there'
       : null;
   const canSend = !!onSend && why === null;
+  // While the last turn runs, Send turns into Stop. Only a turn a run started
+  // (it names its agent) can be stopped: the service refuses any other. A
+  // turn whose reply is in and that only waits for its close keeps
+  // "finishing…", unless a stop was already asked for.
+  const lastStopping = !!lastTurn && lastState === 'running' && !!stopping?.has(lastTurn.id);
+  const showStop = !!onStop && !!lastTurn?.agent && lastState === 'running' && (lastStopping || (pending === null && !finishing));
+
+  const stop = async () => {
+    if (!lastTurn || lastStopping) return;
+    setSendError(null);
+    try {
+      await onStop!(lastTurn);
+    } catch (err) {
+      setSendError((err as Error).message);
+    }
+  };
 
   const send = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -164,8 +186,10 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
                   ))}
 
                   <div className="tb-foot">
-                    {turn.state !== 'finished' && (
-                      <span className={`tb-state ${stateClass(turn.state)}`}>{turn.state}</span>
+                    {(turn.state !== 'finished' || turn.stopped) && (
+                      <span className={`tb-state ${turnStateClass(turn)}`}>
+                        {turn.state === 'running' && stopping?.has(turn.id) ? 'stopping…' : stateLabel(turn)}
+                      </span>
                     )}
                     <span className="tb-stat">
                       {turn.folder && turn.folder !== session.folder ? (
@@ -215,9 +239,15 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
             }}
             disabled={!canSend}
           />
-          <button type="submit" className="go" disabled={!canSend || draft.trim() === ''}>
-            {finishing ? 'finishing…' : 'Send'}
-          </button>
+          {showStop ? (
+            <button type="button" className="go stop" disabled={lastStopping} onClick={stop}>
+              {lastStopping ? 'Stopping…' : 'Stop'}
+            </button>
+          ) : (
+            <button type="submit" className="go" disabled={!canSend || draft.trim() === ''}>
+              {finishing ? 'finishing…' : 'Send'}
+            </button>
+          )}
         </form>
         {onSend && (
           <div className="reply-foot">

@@ -7,9 +7,17 @@ export function stateClass(state: TurnState): string {
   return 'dim';
 }
 
-// How a turn's state reads: a finished turn by its outcome, when it has one.
-export function stateLabel(turn: { state: TurnState; outcome?: string }): string {
+// How a turn's state reads: a stopped turn as stopped, a finished turn by its
+// outcome, when it has one.
+export function stateLabel(turn: { state: TurnState; outcome?: string; stopped?: boolean }): string {
+  if (turn.stopped) return 'Stopped by you';
   return turn.state === 'finished' ? turn.outcome || 'finished' : turn.state;
+}
+
+// The colour of a turn's state. A turn the person stopped did not fail on its
+// own, so it is not red.
+export function turnStateClass(turn: { state: TurnState; stopped?: boolean }): string {
+  return turn.stopped ? 'dim' : stateClass(turn.state);
 }
 
 // Tokens in all. Unknown usage (null: no reply carried any) is a dash, never 0.

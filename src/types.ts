@@ -80,6 +80,8 @@ export interface Turn {
   agent?: string;
   folder?: string;
   state: TurnState;
+  // True when the person stopped the turn (POST /api/v0/turns/<id>/stop).
+  stopped?: boolean;
   outcome?: string;
   // Sums the turn's replies that carried usage; null when none did.
   usage: Usage | null;
@@ -222,6 +224,10 @@ export interface DataSource {
   getInstalledAgents?(): Promise<InstalledAgent[]>;
   startRun?(req: RunRequest): Promise<Started>;
   sendMessage?(sessionId: string, req: { prompt: string; read_only?: boolean; model?: string }): Promise<Started>;
+  // A source that runs turns can stop one: 'stopping' when the service took
+  // the stop (202, also when it was already stopping), 'not-running' when the
+  // turn has already ended (409). Rejects with an Error in the API's own words.
+  stopTurn?(turnId: string): Promise<'stopping' | 'not-running'>;
   // A source that keeps request bodies has this: one model call's request
   // and reply by its exchange. Rejects with an Error in the API's own words.
   getCallContext?(exchange: string, full: boolean): Promise<CallContext>;

@@ -48,6 +48,7 @@ interface ApiTurn {
   started: string;
   ended?: string;
   state: TurnState;
+  stopped?: boolean;
   outcome?: string;
   exit_code?: number;
   usage: Usage | null;
@@ -75,6 +76,7 @@ function turnRow(t: ApiTurn, n: number): Turn {
     agent: t.agent || undefined,
     folder: t.folder || undefined,
     state: t.state,
+    stopped: t.stopped === true || undefined,
     outcome: t.outcome,
     usage: t.usage ?? null,
     costUsd: t.cost_usd,
@@ -229,6 +231,18 @@ export class LiveDataSource implements DataSource {
     const body: Record<string, unknown> = { session: sessionId, prompt: req.prompt, read_only: req.read_only };
     if (req.model) body.model = req.model;
     return this.post('/api/v0/turns', body);
+  }
+
+  // POST /api/v0/turns/<id>/stop: 202 when the service stops the turn, or
+  // is stopping it already; 409 when the turn is not running (it has ended).
+  async stopTurn(turnId: string): Promise<'stopping' | 'not-running'> {
+    const res = await fetch(`${this.baseUrl}/api/v0/turns/${encodeURIComponent(turnId)}/stop`, {
+      method: 'POST',
+      headers: this.headers(),
+    });
+    if (res.status === 409) return 'not-running';
+    if (!res.ok) throw new Error(await apiError(res));
+    return 'stopping';
   }
 
   private async post(path: string, body: unknown): Promise<Started> {

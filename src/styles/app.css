@@ -91,6 +91,8 @@ button.sess:hover { background: rgba(0,0,0,.04); }
 #c-reply .box { padding: 0.75rem 4.75rem 0.75rem 1rem; border-radius: 1rem; }
 #c-reply #input { font-size: 0.9375rem; }
 #c-reply .go { height: 2rem; bottom: 0.5rem; right: 0.5rem; font-size: 0.8438rem; }
+/* Stopping… stays readable while it waits for the turn to end. */
+#c-reply .go.stop:disabled { opacity: .5; }
 
 /* ---------- right panel ---------- */
 #p-head { height: 3.75rem; flex: none; padding: 0 1rem 0 1.5rem; }
