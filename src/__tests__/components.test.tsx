@@ -114,7 +114,7 @@ describe('RightPanel ledger rows', () => {
 describe('ConvoColumn', () => {
   it('R3#2 the first Hide details click hides the details', async () => {
     const session = await sessionFrom(toolSession(), 'c1');
-    const r = await render(<ConvoColumn session={session} selectedTurn={null} onSelectTurn={() => {}} />);
+    const r = await render(<ConvoColumn session={session} selectedTurn={session.turnsList[0]} panelOpen level="turn" onSelectTurn={() => {}} />);
     // Details start hidden; Show details shows them.
     expect(r.container.querySelectorAll('.wlines')).toHaveLength(0);
     expect(r.container.querySelector('.work-h')!.textContent).toContain('Show details');

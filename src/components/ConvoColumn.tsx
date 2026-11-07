@@ -91,13 +91,19 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
     }
   };
 
-  // Store expanded work details per turn ID
-  const [expandedTurns, setExpandedTurns] = useState<Record<string, boolean>>({});
-
-  // Details are closed until the user shows them (mockup v3: "Show details"
-  // opens the model calls). The render and the toggle both read through this,
-  // so they agree on the default.
-  const detailsOpen = (open: Record<string, boolean>, turnId: string) => open[turnId] ?? false;
+  // Only the selected turn shows its working: "Show details", its calls and
+  // how it continued. Every other turn shows its prompt and its reply, so the
+  // chat reads like a plain chat. A turn is selected while the panel is open
+  // on it or on one of its calls; at the session level, or with the panel
+  // closed, no turn is.
+  const activeTurnId = panelOpen && level !== 'session' ? (selectedTurn?.id ?? null) : null;
+  // Whether the selected turn's details are shown. Picking another turn, or
+  // closing the panel, hides them again.
+  const [expanded, setExpanded] = useState<{ turnId: string; open: boolean } | null>(null);
+  useEffect(() => {
+    setExpanded(null);
+  }, [activeTurnId]);
+  const detailsOpen = (turnId: string) => expanded?.turnId === turnId && expanded.open;
 
   // The selected thing always stays visible: a turn whose call is selected
   // shows its details, and hiding them moves the selection to the turn.
@@ -106,7 +112,7 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
   const toggleTurnDetails = (turn: Turn, shownOpen: boolean, e: React.MouseEvent) => {
     e.stopPropagation();
     if (shownOpen && holdsSelectedCall(turn)) onSelectTurn(turn);
-    setExpandedTurns((prev) => ({ ...prev, [turn.id]: !shownOpen }));
+    setExpanded({ turnId: turn.id, open: !shownOpen });
   };
 
   return (
@@ -122,7 +128,8 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
             // The turn carries the mark at the turn level; at the call level it
             // only holds the marked call.
             const mark = !panelOpen || !isSelected || level === 'session' ? '' : level === 'turn' ? 'sel lvl-sel' : 'holds';
-            const isDetailsOpen = detailsOpen(expandedTurns, turn.id) || holdsSelectedCall(turn);
+            const isActive = activeTurnId === turn.id;
+            const isDetailsOpen = isActive && (detailsOpen(turn.id) || holdsSelectedCall(turn));
             // Calls and the answer come from the turn's events, which are
             // loaded when the turn is opened. Until then the list's row gives
             // the call count, the last call's model and a preview of its reply.
@@ -135,7 +142,7 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
             const answer = detail ? detail.agentResponse : turn.reply;
             const answerCut = !detail && turn.replyTruncated;
             const notes = turnNotes(detail);
-            const contLabel = continuityLabel(notes, session.turnsList);
+            const contLabel = isActive ? continuityLabel(notes, session.turnsList) : null;
             // The turn header's facts: the model that made the turn, then its
             // calls. A line breaks between facts, never inside one.
             const facts = [
@@ -195,7 +202,7 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
                     </div>
                   </div>
 
-                  {hasWork && (
+                  {hasWork && isActive && (
                     <div className="work">
                       <button className="work-h" onClick={(e) => toggleTurnDetails(turn, isDetailsOpen, e)}>
                         {isDetailsOpen ? 'Hide details' : 'Show details'}
@@ -255,7 +262,7 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
                     </div>
                   )}
 
-                  {notes.replayErrors.map((msg, i) => (
+                  {isActive && notes.replayErrors.map((msg, i) => (
                     <div key={i} className="form-error turn-error">
                       The earlier turns could not be replayed: {msg}
                     </div>

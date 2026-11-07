@@ -704,6 +704,30 @@ const headers = (r: { container: HTMLElement }) =>
   Array.from(r.container.querySelectorAll('.tb .tb-h')).map((h) => h.querySelector('.tb-cont')?.textContent ?? null);
 
 describe('How a turn continued', () => {
+  it('shows how a turn continued only while that turn is selected', async () => {
+    const svc = fakeService({
+      sessions: [row('s1', { resumable: true, turns: 2 })],
+      events: { s1: [...oneTurn('s1', 'first'), ...nextTurn('s1', { continuity: 'replay', replay_from: 'T1-s1' })] },
+    });
+    const r = await mount(svc);
+    // Nothing picked: a plain chat.
+    expect(headers(r)).toEqual([null, null]);
+    const blocks = () => r.container.querySelectorAll('.tb');
+    await click(blocks()[1]);
+    await settle();
+    expect(headers(r)).toEqual([null, 'continued from turn 1']);
+    // Another turn picked: the note goes with the selection.
+    await click(blocks()[0]);
+    await settle();
+    expect(headers(r)).toEqual([null, null]);
+    // The panel closed: none.
+    await click(blocks()[1]);
+    await settle();
+    await click(r.container.querySelector('#p-head .p-close'));
+    expect(headers(r)).toEqual([null, null]);
+    r.unmount();
+  });
+
   it('shows "continued from turn N" for own replay, quietly in the header', async () => {
     const { r } = await openTurn2([
       ...oneTurn('s1', 'first'),

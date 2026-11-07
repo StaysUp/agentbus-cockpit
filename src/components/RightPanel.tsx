@@ -226,7 +226,9 @@ const TurnPanel: React.FC<TurnPanelProps> = ({
           {turn.state !== 'finished' && (
             <div>
               <span>Status</span>
-              <b className={`tb-state ${stateClass(turn.state)}`}>{stateLabel(turn)}</b>
+              <b>
+                <span className={turn.state === 'failed' ? 'bad' : ''}>{stateLabel(turn)}</span>
+              </b>
             </div>
           )}
           <div>

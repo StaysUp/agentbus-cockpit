@@ -116,7 +116,7 @@ describe('Context tab, codex', () => {
     const qa = (s: string) => Array.from(r.container.querySelectorAll(s));
     await click(qa('#convo .tb')[1]);
     await flush();
-    await showDetails(r.container);
+    await showDetails(r.container, 1);
     await click(qa('#convo .tb')[1].querySelector('.wl.model'));
     await click(qa('#d-tabs .tab').find((t) => t.textContent === 'Context'));
     for (let i = 0; i < 4; i++) await flush();

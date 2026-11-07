@@ -53,7 +53,7 @@ export const SessionPanel: React.FC<SessionPanelProps> = ({ session, costUsd, co
           <span>Agent</span>
           <span>{agentName}</span>
           <span>Folder</span>
-          <span>{session.folder ? <code>{session.folder}</code> : <span className="dim">not known</span>}</span>
+          <span>{session.folder ? session.folder : <span className="dim">not known</span>}</span>
         </div>
       </div>
 

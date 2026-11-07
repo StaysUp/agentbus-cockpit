@@ -38,7 +38,6 @@ async function app() {
   await flush();
   await flush();
   await showDetails(r.container);
-  await click(r.container.querySelector('#convo .tb'));
   await flush();
   const q = (sel: string) => r.container.querySelector(sel);
   const qa = (sel: string) => Array.from(r.container.querySelectorAll(sel));
@@ -81,16 +80,63 @@ describe('selection levels', () => {
     r.unmount();
   });
 
-  it('a click on a call opens the closed panel at that call', async () => {
+  it('with nothing picked the chat is plain: no Show details, no calls, no continuity notes', async () => {
     const r = await render(<App dataSource={new ReplayDataSource(jsonl(events()))} />);
     await flush();
     await flush();
-    await showDetails(r.container);
     expect(panelOpen(r.container)).toBe(false);
-    await click(r.container.querySelectorAll('#convo .wl.model')[1]);
-    expect(panelOpen(r.container)).toBe(true);
-    expect(r.container.querySelector('#p-head .colhead-title')!.textContent).toContain('Call 2 of 2');
+    expect(r.container.querySelectorAll('#convo .work-h')).toHaveLength(0);
+    expect(r.container.querySelectorAll('#convo .wlines')).toHaveLength(0);
+    expect(r.container.querySelectorAll('#convo .tb-cont')).toHaveLength(0);
+    // Each turn still shows its prompt and its reply.
+    expect(r.container.querySelectorAll('#convo .tb .bubble')).toHaveLength(2);
+    expect(r.container.querySelectorAll('#convo .tb .m-agent')).toHaveLength(2);
     r.unmount();
+  });
+
+  it('only the selected turn shows Show details; picking another turn hides the first one\'s details', async () => {
+    const a = await app();
+    const workH = (n: number) => a.turnBlock(n).querySelector('.work-h');
+    const lines = (n: number) => a.turnBlock(n).querySelector('.wlines');
+    // app() picked turn 1 and showed its details.
+    expect(workH(1)!.textContent).toBe('Hide details');
+    expect(lines(1)).not.toBeNull();
+    expect(workH(2)).toBeNull();
+
+    await click(a.turnBlock(2));
+    expect(workH(1)).toBeNull();
+    expect(lines(1)).toBeNull();
+    expect(workH(2)!.textContent).toBe('Show details');
+    expect(lines(2)).toBeNull();
+
+    // Back on turn 1, its details start hidden again.
+    await click(a.turnBlock(1));
+    expect(workH(1)!.textContent).toBe('Show details');
+    expect(lines(1)).toBeNull();
+    expect(workH(2)).toBeNull();
+    a.r.unmount();
+  });
+
+  it('closing the panel or going to the session level hides Show details everywhere', async () => {
+    const a = await app();
+    await click(a.crumb('Session'));
+    expect(a.qa('#convo .work-h')).toHaveLength(0);
+    await click(a.turnBlock(1));
+    expect(a.qa('#convo .work-h')).toHaveLength(1);
+    await click(a.q('#p-head .p-close'));
+    expect(a.qa('#convo .work-h')).toHaveLength(0);
+    expect(a.qa('#convo .wlines')).toHaveLength(0);
+    a.r.unmount();
+  });
+
+  it('a call row click goes to the call level', async () => {
+    const a = await app();
+    await click(a.callRows()[1]);
+    expect(a.open()).toBe(true);
+    expect(a.head()).toContain('Call 2 of 2');
+    // The turn holding the call keeps its details shown.
+    expect(a.turnBlock(1).querySelector('.wlines')).not.toBeNull();
+    a.r.unmount();
   });
 
   it('picking an agent or a session leaves a closed panel closed', async () => {
@@ -115,6 +161,7 @@ describe('selection levels', () => {
     expect(a.marks()).toHaveLength(1);
     expect(a.marks()[0]).toBe(a.turnBlock(2));
 
+    await showDetails(a.r.container, 0);
     await click(a.callRows()[1]);
     expect(a.marks()).toHaveLength(1);
     expect(a.marks()[0]).toBe(a.callRows()[1]);
@@ -616,10 +663,10 @@ describe('failed calls and hidden details', () => {
     await flush();
     const q = (s: string) => r.container.querySelector(s);
     expect(shownSession(r.container)).toBe('lv');
-    await showDetails(r.container);
     const rowB = Array.from(r.container.querySelectorAll('#sessions .sess')).find((b) => (b as HTMLElement).dataset.session === 'bee');
     await click(rowB);
     // A is still on screen; a call clicked there acts on A.
+    await showDetails(r.container);
     await click(q('#convo .wl.model'));
     expect(shownSession(r.container)).toBe('lv');
     expect(q('#p-head .colhead-title')!.textContent).toContain('Call 1 of 2');

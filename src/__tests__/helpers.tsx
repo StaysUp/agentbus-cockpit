@@ -107,12 +107,15 @@ export function liveReplay(base: CockpitEvent[], extra: Partial<DataSource> = {}
   return { source, push, unsubscribed: () => unsubscribed, replay: () => replay };
 }
 
-// The conversation's turns start with their details hidden (mockup v3). This
-// clicks every "Show details", so the call and tool rows are on screen.
-export async function showDetails(container: HTMLElement): Promise<void> {
-  for (const b of Array.from(container.querySelectorAll('#convo .work-h'))) {
-    if (b.textContent === 'Show details') await click(b);
-  }
+// Only the selected turn shows "Show details" (and its details). This selects
+// the turn at `index` with a click, which opens the panel there, then shows
+// its details, so its call and tool rows are on screen.
+export async function showDetails(container: HTMLElement, index = 0): Promise<void> {
+  const turn = () => container.querySelectorAll('#convo .tb')[index];
+  if (!turn()) return;
+  if (!turn().querySelector('.work-h')) await click(turn());
+  const b = turn().querySelector('.work-h');
+  if (b && b.textContent === 'Show details') await click(b);
 }
 
 // The id of the session the conversation column shows.

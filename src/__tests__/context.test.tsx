@@ -126,7 +126,7 @@ describe('Context tab', () => {
 
     await click(qa('#convo .tb')[1]);
     await flush();
-    await showDetails(r.container);
+    await showDetails(r.container, 1);
     await click(qa('#convo .tb')[1].querySelector('.wl.model'));
     await click(qa('#d-tabs .tab').find((t) => t.textContent === 'Context'));
     await flush();
@@ -343,7 +343,7 @@ describe('Context tab, a three-turn chain', () => {
     const qa = (s: string) => Array.from(r.container.querySelectorAll(s));
     await click(qa('#convo .tb')[2]);
     await flush();
-    await showDetails(r.container);
+    await showDetails(r.container, 2);
     await click(qa('#convo .tb')[2].querySelector('.wl.model'));
     await click(qa('#d-tabs .tab').find((t) => t.textContent === 'Context'));
     for (let i = 0; i < 5; i++) await flush();
