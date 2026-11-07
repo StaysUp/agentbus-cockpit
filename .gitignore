@@ -1,0 +1,15 @@
+node_modules
+dist
+*.local
+.DS_Store
+
+# internal planning docs, kept on disk and not published
+/TODO.md
+/BUGS.md
+/REPORT.md
+/NEEDS.md
+/reference/
+
+# local, internal-only agent rules (CLAUDE.local.md is a symlink to AGENTS.local.md)
+/AGENTS.local.md
+/CLAUDE.local.md
