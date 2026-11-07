@@ -2,7 +2,7 @@
 import { act } from 'react';
 import { describe, expect, it } from 'vitest';
 import { App } from '../App';
-import { SessionsColumn, sessionsTotal } from '../components/SessionsColumn';
+import { SessionsColumn } from '../components/SessionsColumn';
 import { ReplayDataSource } from '../data/ReplayDataSource';
 import { applyList, countedIn, isNewerList } from '../data/sessionList';
 import { addStreamedCost, buildTurns, summarizeSession } from '../data/turns';
@@ -509,16 +509,10 @@ describe('cost rendering', () => {
     expect(rows[0].textContent).toContain('≥$0.42');
     expect(rows[0].querySelector('span[title]')?.getAttribute('title')).toBe(COST_INCOMPLETE_TITLE);
     expect(rows[1].textContent).not.toContain('$');
-    // The header total is a lower bound too: one session has no cost.
-    expect(r.container.querySelector('.colhead .ch-sub')?.textContent).toBe('≥$0.42');
+    // No cost total in the header, as in the mockup: it reads "Sessions".
+    expect(r.container.querySelector('.colhead .colhead-title')?.textContent).toBe('Sessions');
+    expect(r.container.querySelector('.colhead .ch-sub')).toBeNull();
     r.unmount();
   });
 
-  it('totals the listed sessions', () => {
-    expect(sessionsTotal([row({ cost_usd: 0.1, cost_complete: true }), row({ cost_usd: 0.2, cost_complete: true })])).toEqual({
-      usd: expect.closeTo(0.3),
-      complete: true,
-    });
-    expect(sessionsTotal([row({ cost_usd: null })])).toBeNull();
-  });
 });

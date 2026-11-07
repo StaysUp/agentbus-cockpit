@@ -1,23 +1,20 @@
 import React, { useEffect, useState } from 'react';
-import { callFailed, callGroups, continuityLabel, turnNotes } from '../data/turns';
-import { Level, SessionDetail, ToolCallPair, Turn } from '../types';
-import { formatCost, formatCount, formatDuration, formatTokens, stateClass, toolInputSummary } from '../utils/format';
+import { turnNotes } from '../data/turns';
+import { Level, SessionDetail, Turn } from '../types';
+import { formatCost, formatTokens, stateClass } from '../utils/format';
 import { Cost } from './Cost';
 
 interface ConvoColumnProps {
   session: SessionDetail;
   selectedTurn: Turn | null;
   onSelectTurn: (turn: Turn) => void;
-  onSelectEvent?: (eventId: string) => void;
-  // The selected level and, at the call level, the model.requested id of the
-  // call. While the panel is open, a turn or a call carries the mark; at the
-  // session level, and while the panel is closed, nothing here does.
+  // The selected level. While the panel is open on a turn or one of its
+  // calls, that turn carries the mark; at the session level, and while the
+  // panel is closed, nothing here does.
   level?: Level;
   panelOpen?: boolean;
-  selectedCallId?: string | null;
   // The agent's name, for the message box.
   agentName?: string;
-  onSelectCall?: (turn: Turn, callId: string) => void;
   // From the session's row: whether the service takes a next message, and
   // whether a run still holds the session open.
   resumable?: boolean;
@@ -37,12 +34,9 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
   session,
   selectedTurn,
   onSelectTurn,
-  onSelectEvent,
   level = 'turn',
   panelOpen = true,
-  selectedCallId = null,
   agentName,
-  onSelectCall,
   resumable,
   open,
   onSend,
@@ -91,30 +85,9 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
     }
   };
 
-  // Only the selected turn shows its working: "Show details", its calls and
-  // how it continued. Every other turn shows its prompt and its reply, so the
-  // chat reads like a plain chat. An error line on a turn is the exception:
-  // it shows on every turn, selected or not. A turn is selected while the panel is open
-  // on it or on one of its calls; at the session level, or with the panel
-  // closed, no turn is.
-  const activeTurnId = panelOpen && level !== 'session' ? (selectedTurn?.id ?? null) : null;
-  // Whether the selected turn's details are shown. Picking another turn, or
-  // closing the panel, hides them again.
-  const [expanded, setExpanded] = useState<{ turnId: string; open: boolean } | null>(null);
-  useEffect(() => {
-    setExpanded(null);
-  }, [activeTurnId]);
-  const detailsOpen = (turnId: string) => expanded?.turnId === turnId && expanded.open;
-
-  // The selected thing always stays visible: a turn whose call is selected
-  // shows its details, and hiding them moves the selection to the turn.
-  const holdsSelectedCall = (turn: Turn) =>
-    panelOpen && level === 'call' && !!turn.detail?.modelCalls.some((p) => p.requested.id === selectedCallId);
-  const toggleTurnDetails = (turn: Turn, shownOpen: boolean, e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (shownOpen && holdsSelectedCall(turn)) onSelectTurn(turn);
-    setExpanded({ turnId: turn.id, open: !shownOpen });
-  };
+  // The chat is prompts and replies, under one header line per turn. A turn's
+  // calls and how it continued are in the panel, so opening a turn never
+  // makes the chat move. An error line is the exception: it stays on its turn.
 
   return (
     <main id="convo" data-session={session.id}>
@@ -126,55 +99,24 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
         <div className="c-in">
           {session.turnsList.map((turn, ti) => {
             const isSelected = selectedTurn?.id === turn.id;
-            // The turn carries the mark at the turn level; at the call level it
-            // only holds the marked call.
-            const mark = !panelOpen || !isSelected || level === 'session' ? '' : level === 'turn' ? 'sel lvl-sel' : 'holds';
-            const isActive = activeTurnId === turn.id;
-            const isDetailsOpen = isActive && (detailsOpen(turn.id) || holdsSelectedCall(turn));
+            // The selected turn carries the mark at the turn and call levels.
+            const mark = panelOpen && isSelected && level !== 'session' ? 'sel lvl-sel' : '';
             // Calls and the answer come from the turn's events, which are
             // loaded when the turn is opened. Until then the list's row gives
             // the call count, the last call's model and a preview of its reply.
             const detail = turn.detail;
-            const hasWork = !!detail && (detail.modelCalls.length > 0 || detail.toolCalls.length > 0);
-            const { groups, unmatched } = detail ? callGroups(detail) : { groups: [], unmatched: [] };
             const calls = detail ? detail.modelCalls.length : turn.modelCalls;
             const lastCall = detail?.modelCalls[detail.modelCalls.length - 1];
             const model = detail ? lastCall?.requested.model : turn.model;
             const answer = detail ? detail.agentResponse : turn.reply;
             const answerCut = !detail && turn.replyTruncated;
             const notes = turnNotes(detail);
-            const contLabel = isActive ? continuityLabel(notes, session.turnsList) : null;
             // The turn header's facts: the model that made the turn, then its
             // calls. A line breaks between facts, never inside one.
             const facts = [
               model ? <i className="tb-model">{model}</i> : null,
               calls !== undefined ? <i className="tb-calls">{calls} {calls === 1 ? 'model call' : 'model calls'}</i> : null,
-              contLabel ? <i className="tb-cont">{contLabel}</i> : null,
             ].filter((x): x is React.ReactElement => x !== null);
-
-            const toolRow = (tc: ToolCallPair) => {
-              const evt = tc.requested;
-              // Matched by tool_id in the turn's tool calls; no match means pending.
-              const comp = tc.completed;
-              const hasError = comp?.tool_error;
-              return (
-                <button
-                  key={evt.id}
-                  className={`wl tool ${hasError ? 'denied' : ''}`}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onSelectTurn(turn);
-                    onSelectEvent?.(evt.id);
-                  }}
-                >
-                  <span className="wk">{evt.tool_name || 'tool'}</span>
-                  <span className="wt">
-                    <code>{toolInputSummary(evt.tool_input)}</code>
-                  </span>
-                  <span className="wd">{hasError ? 'error' : comp ? 'ok' : 'pending'}</span>
-                </button>
-              );
-            };
 
             return (
               <React.Fragment key={turn.id}>
@@ -203,55 +145,6 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
                     </div>
                   </div>
 
-                  {hasWork && isActive && (
-                    <div className="work">
-                      <button className="work-h" onClick={(e) => toggleTurnDetails(turn, isDetailsOpen, e)}>
-                        {isDetailsOpen ? 'Hide details' : 'Show details'}
-                      </button>
-
-                      {isDetailsOpen && (
-                        <div className="wlines">
-                          {groups.map(({ pair, number, tools }) => {
-                            const req = pair.requested;
-                            const resp = pair.responded;
-                            const on = panelOpen && level === 'call' && selectedCallId === req.id;
-                            return (
-                              <React.Fragment key={req.id}>
-                                <button
-                                  className={`wl model ${on ? 'lvl-sel' : ''}`}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    onSelectCall?.(turn, req.id);
-                                  }}
-                                >
-                                  <span className="wk">
-                                    call {number} of {calls}
-                                  </span>
-                                  <span className="wt">
-                                    {resp ? (
-                                      <>
-                                        {formatCount(resp.usage?.input_tokens ?? 0)} in · {formatCount(resp.usage?.output_tokens ?? 0)} out ·{' '}
-                                        {callFailed(resp) ? <span className="bad">failed</span> : <code>{resp.stop_reason || 'stop'}</code>}
-                                      </>
-                                    ) : (
-                                      'waiting for the reply'
-                                    )}
-                                  </span>
-                                  <span className="wd">{resp?.latency_ms ? formatDuration(resp.latency_ms) : ''}</span>
-                                </button>
-                                {tools.map(toolRow)}
-                              </React.Fragment>
-                            );
-                          })}
-                          {unmatched.length > 0 && (
-                            <div className="wl-unmatched">not matched to a model call</div>
-                          )}
-                          {unmatched.map(toolRow)}
-                        </div>
-                      )}
-                    </div>
-                  )}
-
                   {answer && (
                     <div className={`m-agent${detail ? '' : ' preview'}`}>
                       {answer.split('\n\n').map((para, i, all) => (
@@ -263,7 +156,7 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
                     </div>
                   )}
 
-                  {/* An error shows whichever turn is selected. */}
+                  {/* An error stays on its turn, selected or not. */}
                   {notes.replayErrors.map((msg, i) => (
                     <div key={i} className="form-error turn-error">
                       The earlier turns could not be replayed: {msg}

@@ -5,7 +5,7 @@ import { App } from '../App';
 import { ReplayDataSource } from '../data/ReplayDataSource';
 import { callGroups } from '../data/turns';
 import { DataSource, SessionSummary } from '../types';
-import { click, ev, flush, jsonl, render, openSession, panelOpen, showDetails, shownSession } from './helpers';
+import { click, ev, flush, jsonl, render, openCall, openSession, panelOpen, shownSession } from './helpers';
 
 // One session, two turns. Turn 1 makes two model calls; the first asks for two
 // tools. Turn 2 makes one call and answers.
@@ -37,7 +37,7 @@ async function app() {
   const r = await render(<App dataSource={new ReplayDataSource(jsonl(events()))} />);
   await flush();
   await flush();
-  await showDetails(r.container);
+  await click(r.container.querySelector('#convo .tb'));
   await flush();
   const q = (sel: string) => r.container.querySelector(sel);
   const qa = (sel: string) => Array.from(r.container.querySelectorAll(sel));
@@ -50,7 +50,8 @@ async function app() {
     open: () => panelOpen(r.container),
     crumb: (label: string) => qa('#p-head .crumb').find((c) => c.textContent === label),
     tabs: () => qa('#d-tabs .tab').map((t) => t.textContent!.replace(/ \(\d+\)$/, '')),
-    callRows: () => qa('#convo .wl.model'),
+    // Opens call n of turn 1 through the panel: the chat has no call rows.
+    call: (n: number) => openCall(r.container, 0, n),
     turnBlock: (n: number) => qa('#convo .tb')[n - 1],
   };
 }
@@ -88,55 +89,34 @@ describe('selection levels', () => {
     expect(r.container.querySelectorAll('#convo .work-h')).toHaveLength(0);
     expect(r.container.querySelectorAll('#convo .wlines')).toHaveLength(0);
     expect(r.container.querySelectorAll('#convo .tb-cont')).toHaveLength(0);
+    expect(r.container.querySelectorAll('#convo .wl')).toHaveLength(0);
     // Each turn still shows its prompt and its reply.
     expect(r.container.querySelectorAll('#convo .tb .bubble')).toHaveLength(2);
     expect(r.container.querySelectorAll('#convo .tb .m-agent')).toHaveLength(2);
     r.unmount();
   });
 
-  it('only the selected turn shows Show details; picking another turn hides the first one\'s details', async () => {
+  it('a call opened from the panel leaves the chat as it was, with its turn marked', async () => {
     const a = await app();
-    const workH = (n: number) => a.turnBlock(n).querySelector('.work-h');
-    const lines = (n: number) => a.turnBlock(n).querySelector('.wlines');
-    // app() picked turn 1 and showed its details.
-    expect(workH(1)!.textContent).toBe('Hide details');
-    expect(lines(1)).not.toBeNull();
-    expect(workH(2)).toBeNull();
-
-    await click(a.turnBlock(2));
-    expect(workH(1)).toBeNull();
-    expect(lines(1)).toBeNull();
-    expect(workH(2)!.textContent).toBe('Show details');
-    expect(lines(2)).toBeNull();
-
-    // Back on turn 1, its details start hidden again.
-    await click(a.turnBlock(1));
-    expect(workH(1)!.textContent).toBe('Show details');
-    expect(lines(1)).toBeNull();
-    expect(workH(2)).toBeNull();
-    a.r.unmount();
-  });
-
-  it('closing the panel or going to the session level hides Show details everywhere', async () => {
-    const a = await app();
-    await click(a.crumb('Session'));
-    expect(a.qa('#convo .work-h')).toHaveLength(0);
-    await click(a.turnBlock(1));
-    expect(a.qa('#convo .work-h')).toHaveLength(1);
-    await click(a.q('#p-head .p-close'));
-    expect(a.qa('#convo .work-h')).toHaveLength(0);
-    expect(a.qa('#convo .wlines')).toHaveLength(0);
-    a.r.unmount();
-  });
-
-  it('a call row click goes to the call level', async () => {
-    const a = await app();
-    await click(a.callRows()[1]);
+    await a.call(1);
     expect(a.open()).toBe(true);
     expect(a.head()).toContain('Call 2 of 2');
-    // The turn holding the call keeps its details shown.
-    expect(a.turnBlock(1).querySelector('.wlines')).not.toBeNull();
+    expect(a.qa('#convo .wl, #convo .work-h, #convo .wlines')).toHaveLength(0);
+    expect(a.marks()).toEqual([a.turnBlock(1)]);
     a.r.unmount();
+  });
+
+  it('clicking a turn opens the panel and adds nothing to the chat', async () => {
+    const r = await render(<App dataSource={new ReplayDataSource(jsonl(events()))} />);
+    await flush();
+    await flush();
+    const before = r.container.querySelector('#c-msgs')!.innerHTML.replace(/ class="[^"]*"/g, '');
+    await click(r.container.querySelector('#convo .tb'));
+    await flush();
+    expect(panelOpen(r.container)).toBe(true);
+    // Only the turn's mark changes; no element is added or removed.
+    expect(r.container.querySelector('#c-msgs')!.innerHTML.replace(/ class="[^"]*"/g, '')).toBe(before);
+    r.unmount();
   });
 
   it('picking an agent or a session leaves a closed panel closed', async () => {
@@ -161,12 +141,10 @@ describe('selection levels', () => {
     expect(a.marks()).toHaveLength(1);
     expect(a.marks()[0]).toBe(a.turnBlock(2));
 
-    await showDetails(a.r.container, 0);
-    await click(a.callRows()[1]);
+    await a.call(1);
+    // At the call level the turn holding the call carries the mark.
     expect(a.marks()).toHaveLength(1);
-    expect(a.marks()[0]).toBe(a.callRows()[1]);
-    // The turn holding the call is not marked as well.
-    expect(a.turnBlock(1).classList.contains('lvl-sel')).toBe(false);
+    expect(a.marks()[0]).toBe(a.turnBlock(1));
 
     // The session level marks nothing in the conversation: the session card is selected.
     await click(a.crumb('Session'));
@@ -187,7 +165,7 @@ describe('selection levels', () => {
 
   it('Esc closes the panel, and the × closes it too', async () => {
     const a = await app();
-    await click(a.callRows()[1]);
+    await a.call(1);
     expect(a.head()).toContain('Call 2 of 2');
     await esc();
     expect(a.open()).toBe(false);
@@ -240,7 +218,7 @@ describe('selection levels', () => {
 
   it('Esc in a text box first leaves the box, and only the next Esc closes the panel', async () => {
     const a = await app();
-    await click(a.callRows()[0]);
+    await a.call(0);
     const box = a.q('#input') as HTMLTextAreaElement;
     box.disabled = false;
     box.focus();
@@ -258,7 +236,7 @@ describe('selection levels', () => {
 describe('the right panel header', () => {
   it('shows the path back up, and each part goes to its level', async () => {
     const a = await app();
-    await click(a.callRows()[1]);
+    await a.call(1);
     const crumbs = () => a.qa('#p-head .crumb').map((c) => c.textContent);
     expect(crumbs()).toEqual(['Session', 'Turn 1']);
     expect(a.head()).toContain('Session›Turn 1›Call 2 of 2');
@@ -359,13 +337,13 @@ describe('the model call panel', () => {
     await click(a.qa('#d-body tr.ev')[1]);
     await click(a.q('#d-body .open-call'));
     expect(a.head()).toContain('Call 2 of 2');
-    expect(a.marks()).toEqual([a.callRows()[1]]);
+    expect(a.marks()).toEqual([a.turnBlock(1)]);
     a.r.unmount();
   });
 
   it('shows the call strip and the Reply, Sent and Context tabs', async () => {
     const a = await app();
-    await click(a.callRows()[0]);
+    await a.call(0);
     const strip = a.q('#d-head .strip')!.textContent!;
     expect(strip).toContain('$0.25');
     expect(strip).toContain('1,200 in / 40 out');
@@ -391,7 +369,7 @@ describe('the model call panel', () => {
 
   it('an incomplete call cost shows as a lower bound', async () => {
     const a = await app();
-    await click(a.callRows()[1]);
+    await a.call(1);
     expect(a.q('#d-head .strip')!.textContent).toContain('≥$0.10');
     a.r.unmount();
   });
@@ -412,22 +390,6 @@ describe('the conversation column', () => {
     a.r.unmount();
   });
 
-  it('Show details lists numbered calls with the tools each asked for under it', async () => {
-    const a = await app();
-    const lines = a.qa('#convo .tb')[0].querySelectorAll('.wlines .wl');
-    const text = Array.from(lines).map((l) => `${l.className.includes('model') ? 'M' : 'T'} ${l.querySelector('.wk')!.textContent}`);
-    expect(text).toEqual(['M call 1 of 2', 'T Read', 'T Bash', 'M call 2 of 2']);
-    a.r.unmount();
-  });
-
-  it('a tool row opens that tool in the turn panel Events tab', async () => {
-    const a = await app();
-    await click(a.qa('#convo .wl.tool')[0]);
-    expect(a.marks()[0]).toBe(a.turnBlock(1));
-    expect(a.q('#d-tabs .tab.on')!.textContent).toBe('Events');
-    expect(a.q('#d-body tr.ev-open')!.textContent).toContain('tA');
-    a.r.unmount();
-  });
 });
 
 describe('selection edge cases', () => {
@@ -447,15 +409,14 @@ describe('selection edge cases', () => {
     expect(groups[0].tools.map((t) => t.requested.tool_name)).toEqual(['Own', 'Bare']);
     expect(unmatched.map((t) => t.requested.tool_name)).toEqual(['Lost']);
 
-    // In the conversation, Lost is listed apart, after a label, not under call 1.
+    // In the panel, call 1's Reply lists only the tools it asked for.
     const r = await render(<App dataSource={new ReplayDataSource(jsonl(evs))} />);
     await flush();
     await flush();
-    await showDetails(r.container);
-    const lines = Array.from(r.container.querySelectorAll('#convo .wlines > *')).map((l) =>
-      l.classList.contains('wl-unmatched') ? 'LABEL' : l.querySelector('.wk')!.textContent
-    );
-    expect(lines).toEqual(['call 1 of 1', 'Own', 'Bare', 'LABEL', 'Lost']);
+    await openCall(r.container, 0, 0);
+    await click(Array.from(r.container.querySelectorAll('#d-tabs .tab')).find((t) => t.textContent === 'Reply'));
+    const asked = Array.from(r.container.querySelectorAll('#d-body .asked tbody tr')).map((tr) => tr.querySelector('code')!.textContent);
+    expect(asked).toEqual(['Own', 'Bare']);
     r.unmount();
   });
 
@@ -489,8 +450,7 @@ describe('selection edge cases', () => {
     const r = await render(<App dataSource={source} />);
     await flush();
     await flush();
-    await showDetails(r.container);
-    await click(r.container.querySelector('#convo .wl.model'));
+    await openCall(r.container, 0, 0);
     expect(r.container.querySelector('#p-head .colhead-title')!.textContent).toContain('Call 1 of 2');
 
     await click(r.container.querySelector('#sessions .new-session'));
@@ -526,8 +486,7 @@ describe('selection edge cases', () => {
     const r = await render(<App dataSource={new ReplayDataSource(jsonl(both))} />);
     await flush();
     await flush();
-    await showDetails(r.container);
-    await click(r.container.querySelector('#convo .wl.model'));
+    await openCall(r.container, 0, 0);
     expect(r.container.querySelector('#p-head .colhead-title')!.textContent).toContain('Call 1 of 2');
     const shown = shownSession(r.container);
     const otherRow = Array.from(r.container.querySelectorAll('#sessions .sess')).find(
@@ -602,9 +561,6 @@ describe('failed calls and hidden details', () => {
     await flush();
     const q = (s: string) => r.container.querySelector(s);
     const qa = (s: string) => Array.from(r.container.querySelectorAll(s));
-    await showDetails(r.container);
-    // The conversation's call row.
-    expect(q('#convo .wl.model .wt')!.textContent).toContain('failed');
     // The turn level: the Events row for the reply, and the Model calls row.
     await click(q('#convo .tb'));
     await click(qa('#d-tabs .tab').find((t) => t.textContent === 'Events'));
@@ -615,33 +571,11 @@ describe('failed calls and hidden details', () => {
     await click(qa('#d-tabs .tab').find((t) => t.textContent!.startsWith('Model calls')));
     expect(q('#d-body tr.ev')!.textContent).toContain('failed');
     // The call level: the strip and the Reply tab.
-    await click(q('#convo .wl.model'));
+    await openCall(r.container, 0, 0);
     expect(q('#d-head .strip')!.textContent).toContain('failed');
     await click(qa('#d-tabs .tab').find((t) => t.textContent === 'Reply'));
     expect(q('#d-body')!.textContent).toContain('stream interrupted');
     r.unmount();
-  });
-
-  it('hiding the details of a turn whose call is selected moves the selection to the turn', async () => {
-    const a = await app();
-    await click(a.callRows()[1]);
-    await click(a.turnBlock(1).querySelector('.work-h'));
-    expect(a.turnBlock(1).querySelector('.wlines')).toBeNull();
-    expect(a.marks()).toEqual([a.turnBlock(1)]);
-    expect(a.head()).toContain('turn 1 of 2');
-    a.r.unmount();
-  });
-
-  it('opening a call from the panel shows its row even when that turn hid its details', async () => {
-    const a = await app();
-    await click(a.turnBlock(1).querySelector('.work-h'));
-    expect(a.turnBlock(1).querySelector('.wlines')).toBeNull();
-    await click(a.qa('#d-tabs .tab').find((t) => t.textContent!.startsWith('Model calls')));
-    await click(a.qa('#d-body tr.ev')[1]);
-    await click(a.q('#d-body .open-call'));
-    expect(a.marks()).toHaveLength(1);
-    expect(a.marks()[0].classList.contains('wl')).toBe(true);
-    a.r.unmount();
   });
 
   it('a call clicked in A while B loads acts on A; B still opens on its session panel', async () => {
@@ -666,8 +600,7 @@ describe('failed calls and hidden details', () => {
     const rowB = Array.from(r.container.querySelectorAll('#sessions .sess')).find((b) => (b as HTMLElement).dataset.session === 'bee');
     await click(rowB);
     // A is still on screen; a call clicked there acts on A.
-    await showDetails(r.container);
-    await click(q('#convo .wl.model'));
+    await openCall(r.container, 0, 0);
     expect(shownSession(r.container)).toBe('lv');
     expect(q('#p-head .colhead-title')!.textContent).toContain('Call 1 of 2');
     await act(async () => release());

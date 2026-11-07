@@ -147,19 +147,12 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
     selectTurnLevel(turn);
     selectEvent(eventId);
   };
-  // The clicks that open the panel: a turn, a call, or a tool line of a turn.
+  // The one click in the chat that opens the panel: a turn.
   const clickTurn = (turn: Turn) => {
     selectTurnLevel(turn);
     setPanelOpen(true);
   };
-  const clickCall = (turn: Turn, callId: string) => {
-    selectCall(turn, callId);
-    setPanelOpen(true);
-  };
-  const clickEvent = (id: string) => {
-    selectEvent(id);
-    setPanelOpen(true);
-  };
+
 
   const agents = useMemo(() => buildAgents(allSessions ?? []), [allSessions]);
   const sessions = useMemo(
@@ -569,12 +562,9 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
           onSend={sendMessage}
           selectedTurn={selectedTurn}
           onSelectTurn={clickTurn}
-          onSelectEvent={clickEvent}
           level={shownLevel}
           panelOpen={panelOpen}
           agentName={agents.find((x) => x.id === sessionView.agent)?.name}
-          selectedCallId={selectedCallId}
-          onSelectCall={clickCall}
         />
       ) : (
         <main id="convo">

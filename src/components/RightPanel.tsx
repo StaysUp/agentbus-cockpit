@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { callFailed, callGroups } from '../data/turns';
+import { callFailed, callGroups, continuityLabel, turnNotes } from '../data/turns';
 import { CockpitEvent, EventSelection, Level, SessionDetail, Turn, TurnDetail } from '../types';
 import {
   formatCost,
@@ -129,6 +129,7 @@ const TurnPanel: React.FC<TurnPanelProps> = ({
   onSelectCall,
   onClose,
   escRef,
+  session,
   activeTab,
   setActiveTab,
   openRow,
@@ -195,6 +196,9 @@ const TurnPanel: React.FC<TurnPanelProps> = ({
   // its latest run's, so it is not offered for an earlier turn.
   const folder = turn.folder;
 
+  // How the turn continued, from its turn.started: the chat no longer shows it.
+  const continued = continuedLine(turn.detail, session?.turnsList ?? []);
+
   // The head reads the turn list's row, so it shows while the events load.
   const head = (
     <>
@@ -246,6 +250,7 @@ const TurnPanel: React.FC<TurnPanelProps> = ({
             </div>
           )}
         </div>
+        {continued && <div className="turn-cont">{continued}</div>}
       </div>
 
     </>
@@ -726,6 +731,19 @@ export function turnModels(turn: TurnDetail): string[] {
     if (typeof m === 'string' && m && !seen.includes(m)) seen.push(m);
   }
   return seen;
+}
+
+// How a turn continued, as one line for the turn panel: "Continued from
+// turn 1 (replay)", "Resumed (vendor resume)", or "Continued after turn 1 was
+// interrupted (reason)". null for a turn that started fresh.
+export function continuedLine(detail: TurnDetail | undefined, turns: { id: string; turnNumber: number }[]): string | null {
+  if (!detail) return null;
+  const notes = turnNotes(detail);
+  const label = continuityLabel(notes, turns);
+  if (!label) return null;
+  if (notes.recovered) return label.charAt(0).toUpperCase() + label.slice(1);
+  if (notes.continuity === 'resume') return 'Resumed (vendor resume)';
+  return `${label.charAt(0).toUpperCase() + label.slice(1)} (replay)`;
 }
 
 // The turn tabs, in the mockup's order. Reasoning and CI/CD are not here:

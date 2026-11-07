@@ -8,7 +8,7 @@ import { checkConnection } from '../data/connection';
 import { LiveDataSource } from '../data/LiveDataSource';
 import { buildTurns } from '../data/turns';
 import { CockpitEvent } from '../types';
-import { click, ev, flush, panelOpen, render, rowSession, showDetails, shownSession } from './helpers';
+import { click, continuedLine, ev, flush, panelOpen, render, rowSession, shownSession } from './helpers';
 
 const BASE = 'http://cockpit.test';
 
@@ -657,8 +657,9 @@ describe('The turn list from the API', () => {
     await settle();
     expect(eventReads(svc, 'T1-s1')).toBe(1);
     expect(turnReads(svc)).toBe(reads);
-    await showDetails(r.container);
-    expect(Array.from(r.container.querySelectorAll('#convo .wl.tool .wk')).map((w) => w.textContent)).toEqual(['Zed']);
+    await click(r.container.querySelectorAll('#convo .tb')[0]);
+    await click(Array.from(r.container.querySelectorAll('#d-tabs .tab')).find((t) => t.textContent === 'Tools'));
+    expect(Array.from(r.container.querySelectorAll('#d-body tr.ev')).map((tr) => tr.querySelectorAll('td')[2].textContent)).toEqual(['Zed']);
 
     // The new turn ends: the list is read again and its state follows.
     await svc.push(ev({ session: 's1', kind: 'turn.completed', turn: 'T9', exchange: 'x9', outcome: 'finished' }));
@@ -700,72 +701,68 @@ async function openTurn2(events: CockpitEvent[]) {
   return { svc, r };
 }
 
-const headers = (r: { container: HTMLElement }) =>
-  Array.from(r.container.querySelectorAll('.tb .tb-h')).map((h) => h.querySelector('.tb-cont')?.textContent ?? null);
+// How a turn continued is in the turn panel, under its strip; the chat never shows it.
+const chatNotes = (r: { container: HTMLElement }) => r.container.querySelectorAll('#convo .tb-cont').length;
 
 describe('How a turn continued', () => {
-  it('shows how a turn continued only while that turn is selected', async () => {
+  it('is in the turn panel, never in the chat', async () => {
     const svc = fakeService({
       sessions: [row('s1', { resumable: true, turns: 2 })],
       events: { s1: [...oneTurn('s1', 'first'), ...nextTurn('s1', { continuity: 'replay', replay_from: 'T1-s1' })] },
     });
     const r = await mount(svc);
-    // Nothing picked: a plain chat.
-    expect(headers(r)).toEqual([null, null]);
+    expect(chatNotes(r)).toBe(0);
     const blocks = () => r.container.querySelectorAll('.tb');
     await click(blocks()[1]);
     await settle();
-    expect(headers(r)).toEqual([null, 'continued from turn 1']);
-    // Another turn picked: the note goes with the selection.
+    expect(chatNotes(r)).toBe(0);
+    expect(continuedLine(r.container)).toBe('Continued from turn 1 (replay)');
+    // Turn 1 started fresh: no line.
     await click(blocks()[0]);
     await settle();
-    expect(headers(r)).toEqual([null, null]);
-    // The panel closed: none.
-    await click(blocks()[1]);
-    await settle();
-    await click(r.container.querySelector('#p-head .p-close'));
-    expect(headers(r)).toEqual([null, null]);
+    expect(continuedLine(r.container)).toBeNull();
     r.unmount();
   });
 
-  it('shows "continued from turn N" for own replay, quietly in the header', async () => {
+  it('shows "Continued from turn N (replay)" for own replay', async () => {
     const { r } = await openTurn2([
       ...oneTurn('s1', 'first'),
       ...nextTurn('s1', { continuity: 'replay', replay_from: 'T1-s1' }),
     ]);
-    expect(headers(r)).toEqual([null, 'continued from turn 1']);
+    expect(continuedLine(r.container)).toBe('Continued from turn 1 (replay)');
+    expect(chatNotes(r)).toBe(0);
     r.unmount();
   });
 
-  it('shows "resumed" for the vendor resume, and nothing without continuity', async () => {
+  it('shows "Resumed (vendor resume)" for the vendor resume, and nothing without continuity', async () => {
     const a = await openTurn2([...oneTurn('s1', 'first'), ...nextTurn('s1', { continuity: 'resume' })]);
-    expect(headers(a.r)).toEqual([null, 'resumed']);
+    expect(continuedLine(a.r.container)).toBe('Resumed (vendor resume)');
     a.r.unmount();
     const b = await openTurn2([...oneTurn('s1', 'first'), ...nextTurn('s1', {})]);
-    expect(headers(b.r)).toEqual([null, null]);
+    expect(continuedLine(b.r.container)).toBeNull();
     b.r.unmount();
   });
 
-  it('shows "continued after turn N was interrupted (reason)" from recovered_from and recovered_reason', async () => {
+  it('shows "Continued after turn N was interrupted (reason)" from recovered_from and recovered_reason', async () => {
     const a = await openTurn2([
       ...oneTurn('s1', 'first'),
       ...nextTurn('s1', { continuity: 'replay', replay_from: 'T1-s1', recovered_from: ' T1-s1 ', recovered_reason: 'the agent stopped' }),
     ]);
-    expect(headers(a.r)[1]).toBe('continued after turn 1 was interrupted (the agent stopped)');
+    expect(continuedLine(a.r.container)).toBe('Continued after turn 1 was interrupted (the agent stopped)');
     a.r.unmount();
     const b = await openTurn2([...oneTurn('s1', 'first'), ...nextTurn('s1', { recovered_from: 'T1-s1' })]);
-    expect(headers(b.r)[1]).toBe('continued after turn 1 was interrupted');
+    expect(continuedLine(b.r.container)).toBe('Continued after turn 1 was interrupted');
     b.r.unmount();
   });
 
   it.each([['{}', {}], ['[]', []], ['{foo}', { foo: 'bar' }], ['blank', '   '], ['number', 42]])(
-    'ignores a recovered_from of %s and shows the replay label',
+    'ignores a recovered_from of %s and shows the replay line',
     async (_n, value) => {
       const { r } = await openTurn2([
         ...oneTurn('s1', 'first'),
         ...nextTurn('s1', { continuity: 'replay', replay_from: 'T1-s1', recovered_from: value }),
       ]);
-      expect(headers(r)).toEqual([null, 'continued from turn 1']);
+      expect(continuedLine(r.container)).toBe('Continued from turn 1 (replay)');
       r.unmount();
     }
   );
@@ -792,10 +789,9 @@ describe('Failures in a turn', () => {
     const errs = () => Array.from(r.container.querySelectorAll('.tb')).map((t) => t.querySelector('.turn-error')?.textContent ?? null);
     const want = [null, 'The earlier turns could not be replayed: history unreadable'];
     expect(errs()).toEqual(want);
-    // Turn 1 picked: turn 2's continuity note goes, its error stays.
+    // Turn 1 picked: turn 2's error stays.
     await click(r.container.querySelectorAll('.tb')[0]);
     await settle();
-    expect(headers(r)).toEqual([null, null]);
     expect(errs()).toEqual(want);
     // The panel closed: still there.
     await click(r.container.querySelector('#p-head .p-close'));

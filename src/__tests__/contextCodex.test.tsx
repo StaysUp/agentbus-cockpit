@@ -5,7 +5,7 @@ import { ContextTab } from '../components/ContextTab';
 import { ReplayDataSource } from '../data/ReplayDataSource';
 import { blocksOf, itemRole, layoutContext, NOTE_PREFIX } from '../data/context';
 import { CallContext, ContextPiece, DataSource } from '../types';
-import { click, ev, flush, jsonl, render, showDetails } from './helpers';
+import { click, ev, flush, jsonl, render, openCall } from './helpers';
 
 // Shapes follow the framework's codex fixtures (adapter/openai/testdata).
 function item(json: Record<string, unknown>): ContextPiece {
@@ -114,10 +114,7 @@ describe('Context tab, codex', () => {
     await flush();
     await flush();
     const qa = (s: string) => Array.from(r.container.querySelectorAll(s));
-    await click(qa('#convo .tb')[1]);
-    await flush();
-    await showDetails(r.container, 1);
-    await click(qa('#convo .tb')[1].querySelector('.wl.model'));
+    await openCall(r.container, 1, 0);
     await click(qa('#d-tabs .tab').find((t) => t.textContent === 'Context'));
     for (let i = 0; i < 4; i++) await flush();
     const body = r.container.querySelector('#d-body .ctx')!;

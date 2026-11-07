@@ -21,7 +21,6 @@ export const SessionsColumn: React.FC<SessionsColumnProps> = ({
   onNewSession,
   empty,
 }) => {
-  const total = sessionsTotal(sessions);
   // "3 min ago" moves on with the clock, not only when an event arrives.
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -31,14 +30,8 @@ export const SessionsColumn: React.FC<SessionsColumnProps> = ({
   return (
     <section id="sessions">
       <header className="colhead">
-        <div className="colhead-title">
-          Sessions
-          {total ? (
-            <span className="ch-sub">
-              <Cost usd={total.usd} complete={total.complete} />
-            </span>
-          ) : null}
-        </div>
+        {/* No cost total here, as in the mockup: each card and the panel carry the cost. */}
+        <div className="colhead-title">Sessions</div>
         {onNewSession && !empty && (
           <button className="new-session head-btn" onClick={onNewSession} aria-label="New session" title="New session">
             <PlusIcon />
@@ -100,17 +93,6 @@ export const SessionsColumn: React.FC<SessionsColumnProps> = ({
   );
 };
 
-// The cost of every listed session. Complete only if every session's is known
-// and complete. null when no session has a cost.
+
 // How often the last-active times are read again.
 export const AGO_TICK_MS = 30_000;
-
-export function sessionsTotal(sessions: SessionSummary[]): { usd: number; complete: boolean } | null {
-  let usd: number | null = null;
-  let complete = true;
-  for (const s of sessions) {
-    if (typeof s.cost_usd === 'number') usd = (usd ?? 0) + s.cost_usd;
-    if (typeof s.cost_usd !== 'number' || s.cost_complete !== true) complete = false;
-  }
-  return usd === null ? null : { usd, complete };
-}

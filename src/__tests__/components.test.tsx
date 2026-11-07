@@ -8,7 +8,7 @@ import { formatAgo } from '../utils/format';
 import { ReplayDataSource } from '../data/ReplayDataSource';
 import { replyPreview, turnDetail } from '../data/turns';
 import { SessionDetail, Turn } from '../types';
-import { click, ev, jsonl, render, useSelection, openSession, showDetails } from './helpers';
+import { click, ev, jsonl, render, useSelection, openSession } from './helpers';
 
 async function sessionFrom(events: ReturnType<typeof ev>[], id: string) {
   const src = new ReplayDataSource(jsonl(events));
@@ -112,37 +112,27 @@ describe('RightPanel ledger rows', () => {
 });
 
 describe('ConvoColumn', () => {
-  it('R3#2 the first Hide details click hides the details', async () => {
+  it('#2 matches tool results by tool_id and shows error, ok or pending in the Tools tab', async () => {
     const session = await sessionFrom(toolSession(), 'c1');
-    const r = await render(<ConvoColumn session={session} selectedTurn={session.turnsList[0]} panelOpen level="turn" onSelectTurn={() => {}} />);
-    // Details start hidden; Show details shows them.
-    expect(r.container.querySelectorAll('.wlines')).toHaveLength(0);
-    expect(r.container.querySelector('.work-h')!.textContent).toContain('Show details');
-    await click(r.container.querySelector('.work-h'));
-    expect(r.container.querySelectorAll('.wlines')).toHaveLength(1);
-    await click(r.container.querySelector('.work-h'));
-    expect(r.container.querySelectorAll('.wlines')).toHaveLength(0);
-    expect(r.container.querySelector('.work-h')!.textContent).toContain('Show details');
-    await click(r.container.querySelector('.work-h'));
-    expect(r.container.querySelectorAll('.wlines')).toHaveLength(1);
-    r.unmount();
-  });
-
-  it('#2 matches tool results by tool_id and shows error, ok or pending', async () => {
-    const session = await sessionFrom(toolSession(), 'c1');
-    const r = await render(
-      <ConvoColumn session={session} selectedTurn={session.turnsList[0]} onSelectTurn={() => {}} />
-    );
-    await showDetails(r.container);
+    const r = await render(<RightPanel turn={session.turnsList[0]} totalTurns={1} />);
+    await click(Array.from(r.container.querySelectorAll('#d-tabs .tab')).find((b) => b.textContent === 'Tools'));
     const status = (name: string) => {
-      const row = Array.from(r.container.querySelectorAll('.wl.tool')).find(
-        (b) => b.querySelector('.wk')!.textContent === name
+      const row = Array.from(r.container.querySelectorAll('#d-body tr.ev')).find(
+        (tr) => tr.querySelectorAll('td')[2].textContent === name
       );
-      return row!.querySelector('.wd')!.textContent;
+      return row!.querySelectorAll('td')[4].textContent;
     };
     expect(status('Alpha')).toBe('error');
     expect(status('Beta')).toBe('ok');
     expect(status('Gamma')).toBe('pending');
+    r.unmount();
+  });
+
+  it('the chat shows each turn\'s prompt and reply, and no calls, tools or Show details', async () => {
+    const session = await sessionFrom(toolSession(), 'c1');
+    const r = await render(<ConvoColumn session={session} selectedTurn={session.turnsList[0]} panelOpen level="turn" onSelectTurn={() => {}} />);
+    expect(r.container.querySelector('.tb .bubble')!.textContent).toBe('run two tools');
+    expect(r.container.querySelectorAll('.wl, .wlines, .work-h, .tb-cont')).toHaveLength(0);
     r.unmount();
   });
 

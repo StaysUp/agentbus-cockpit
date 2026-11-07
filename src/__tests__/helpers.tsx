@@ -107,15 +107,23 @@ export function liveReplay(base: CockpitEvent[], extra: Partial<DataSource> = {}
   return { source, push, unsubscribed: () => unsubscribed, replay: () => replay };
 }
 
-// Only the selected turn shows "Show details" (and its details). This selects
-// the turn at `index` with a click, which opens the panel there, then shows
-// its details, so its call and tool rows are on screen.
-export async function showDetails(container: HTMLElement, index = 0): Promise<void> {
-  const turn = () => container.querySelectorAll('#convo .tb')[index];
-  if (!turn()) return;
-  if (!turn().querySelector('.work-h')) await click(turn());
-  const b = turn().querySelector('.work-h');
-  if (b && b.textContent === 'Show details') await click(b);
+// The chat shows prompts and replies only; a call is reached through the
+// panel. This clicks turn `turn` (which opens the panel there), its Model
+// calls tab, the row of call `call` (unless it is open already) and "Open call".
+export async function openCall(container: HTMLElement, turn = 0, call = 0): Promise<void> {
+  await click(container.querySelectorAll('#convo .tb')[turn]);
+  await flush();
+  const tab = Array.from(container.querySelectorAll('#d-tabs .tab')).find((t) => t.textContent!.startsWith('Model calls'));
+  await click(tab);
+  const row = container.querySelectorAll('#d-body tr.ev')[call];
+  if (!row) throw new Error(`no call row ${call}`);
+  if (!row.classList.contains('sel')) await click(row);
+  await click(container.querySelector('#d-body .open-call'));
+}
+
+// The line under the turn strip that says how the turn continued, or null.
+export function continuedLine(container: HTMLElement): string | null {
+  return container.querySelector('#d-head .turn-cont')?.textContent ?? null;
 }
 
 // The id of the session the conversation column shows.

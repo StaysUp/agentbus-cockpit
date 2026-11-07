@@ -5,7 +5,7 @@ import { App } from '../App';
 import { ReplayDataSource } from '../data/ReplayDataSource';
 import { buildAgents } from '../data/turns';
 import { CockpitEvent, DataSource, SessionSummary } from '../types';
-import { click, ev, flush, jsonl, liveReplay, render, rowSession, showDetails, shownSession } from './helpers';
+import { click, ev, flush, jsonl, liveReplay, render, openCall, rowSession, shownSession } from './helpers';
 
 describe('App', () => {
   it('#9 subscribes, applies new events to the shown session, and unsubscribes on unmount', async () => {
@@ -36,8 +36,10 @@ describe('App', () => {
       push(ev({ seq: 8, session: 'live1', kind: 'tool.requested', turn: 'T1', exchange: 'x1', tool_id: 'late', tool_name: 'Late' }));
     });
     await flush();
-    await showDetails(r.container);
-    expect(Array.from(r.container.querySelectorAll('#convo .wl.tool .wk')).map((w) => w.textContent)).toEqual(['Late']);
+    // It shows in the panel's Tools tab.
+    await click(r.container.querySelector('#convo .tb'));
+    await click(Array.from(r.container.querySelectorAll('#d-tabs .tab')).find((t) => t.textContent === 'Tools'));
+    expect(Array.from(r.container.querySelectorAll('#d-body tr.ev')).map((tr) => tr.querySelectorAll('td')[2].textContent)).toEqual(['Late']);
 
     r.unmount();
     expect(unsubscribed()).toBe(1);
@@ -242,21 +244,23 @@ describe('App', () => {
     r.unmount();
   });
 
-  // A tool row opens in the turn's Events tab; a model call row selects the
-  // call level instead (levels.test.tsx).
-  it('R4#3 clicking the same conversation tool row again reopens it in Events', async () => {
+  // A tool a call asked for (its Reply tab) opens in the turn's Events tab.
+  it('R4#3 clicking the same tool row of a call again reopens it in Events', async () => {
     const r = await render(<App />);
     await flush();
     await flush();
     const tab = (label: string) =>
       Array.from(r.container.querySelectorAll('#d-tabs .tab')).find((b) => b.textContent!.startsWith(label))!;
-    await showDetails(r.container);
-    const row = () => r.container.querySelector('#convo .wl.tool')!;
-    await click(row());
+    const toTool = async () => {
+      await openCall(r.container, 0, 0);
+      await click(tab('Reply'));
+      await click(r.container.querySelector('#d-body .asked tbody tr'));
+    };
+    await toTool();
     expect(tab('Events').className).toContain('on');
     await click(tab('Prompt'));
     expect(tab('Prompt').className).toContain('on');
-    await click(row());
+    await toTool();
     expect(tab('Events').className).toContain('on');
     expect(r.container.querySelectorAll('#d-body tr.ev-open')).toHaveLength(1);
     r.unmount();
