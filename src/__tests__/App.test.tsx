@@ -5,7 +5,7 @@ import { App } from '../App';
 import { ReplayDataSource } from '../data/ReplayDataSource';
 import { buildAgents } from '../data/turns';
 import { CockpitEvent, DataSource, SessionSummary } from '../types';
-import { click, ev, flush, jsonl, liveReplay, render } from './helpers';
+import { click, ev, flush, jsonl, liveReplay, render, rowSession, showDetails, shownSession } from './helpers';
 
 describe('App', () => {
   it('#9 subscribes, applies new events to the shown session, and unsubscribes on unmount', async () => {
@@ -36,6 +36,7 @@ describe('App', () => {
       push(ev({ seq: 8, session: 'live1', kind: 'tool.requested', turn: 'T1', exchange: 'x1', tool_id: 'late', tool_name: 'Late' }));
     });
     await flush();
+    await showDetails(r.container);
     expect(Array.from(r.container.querySelectorAll('#convo .wl.tool .wk')).map((w) => w.textContent)).toEqual(['Late']);
 
     r.unmount();
@@ -59,14 +60,14 @@ describe('App', () => {
     const head = (i: number) => r.container.querySelectorAll('#convo .tb-h')[i].textContent;
     const answer = (i: number) => r.container.querySelectorAll('#convo .tb')[i].querySelector('.m-agent');
     // The first load opens turn 1; turn 2 is read from the list.
-    expect(head(1)).toBe('Turn 2 · 1 model call · m1');
+    expect(head(1)).toBe('Turn 2 m1 · 1 model call');
     expect(answer(1)!.className).toContain('preview');
     expect(answer(1)!.textContent).toBe('two');
     await act(async () => {
       push(ev({ seq: 8, session: 'mc', kind: 'model.requested', turn: 'T2', exchange: 'y2', model: 'm2' }));
     });
     await flush();
-    expect(head(1)).toBe('Turn 2 · 2 model calls · m2');
+    expect(head(1)).toBe('Turn 2 m2 · 2 model calls');
     // Its last call has no reply yet, so the earlier reply is not shown as the answer.
     expect(answer(1)).toBeNull();
     r.unmount();
@@ -83,7 +84,7 @@ describe('App', () => {
     errors.mockRestore();
   });
 
-  it('R2#3 live events refresh the turn count, tokens and header of the shown session', async () => {
+  it('R2#3 live events refresh the tokens of the shown session and its turns', async () => {
     const base = [
       ev({ seq: 1, session: 'up', kind: 'session.registered', agent: 'claude', folder: '/w' }),
       ev({ seq: 2, session: 'up', kind: 'turn.started', turn: 'T1', exchange: 'x1', text: 'first prompt' }),
@@ -97,9 +98,8 @@ describe('App', () => {
     await flush();
     await flush();
     const row = () => r.container.querySelector('#sessions .sess .s-m')!.textContent;
-    const header = () => r.container.querySelector('#c-meta .subline')!.textContent;
     expect(row()).toContain('100 tokens');
-    expect(row()).toContain('1 turn');
+    expect(r.container.querySelectorAll('#convo .tb')).toHaveLength(1);
 
     await act(async () => {
       push(ev({ seq: 6, session: 'up', kind: 'turn.started', turn: 'T2', exchange: 'x2', text: 'second' }));
@@ -112,8 +112,7 @@ describe('App', () => {
       await flush();
       expect(row()).toContain('2.1k tokens');
     }, { timeout: 3000 });
-    expect(row()).toContain('2 turns');
-    expect(header()).toContain('2.1k tokens');
+    expect(r.container.querySelectorAll('#convo .tb')).toHaveLength(2);
     r.unmount();
   });
 
@@ -154,7 +153,7 @@ describe('App', () => {
     r.unmount();
   });
 
-  it('R3#1 an unselected session that receives events gets fresh turn and token counts', async () => {
+  it('R3#1 an unselected session that receives events gets fresh token counts and last active time', async () => {
     const row = (id: string, last: string, turns: number, tokens: number): SessionSummary => ({
       id, agent: 'claude', client: 'c', title: id, started: '2026-11-05T09:00:00Z', last, open: true, turns,
       usage: { input_tokens: tokens, output_tokens: 0 },
@@ -177,9 +176,9 @@ describe('App', () => {
     await flush();
     const meta = (id: string) =>
       Array.from(r.container.querySelectorAll('#sessions .sess'))
-        .find((b) => b.querySelector('code')!.textContent === id)!
+        .find((b) => rowSession(b) === id)!
         .querySelector('.s-m')!.textContent;
-    expect(meta('other')).toContain('1 turn');
+    expect(meta('other')).toContain('10 tokens');
 
     // The service stored a new turn for "other"; its snapshot row now says so.
     rows = [rows[0], row('other', '2026-11-05T09:21:00Z', 2, 5000)];
@@ -188,9 +187,8 @@ describe('App', () => {
     });
     await vi.waitFor(async () => {
       await flush();
-      expect(meta('other')).toContain('2 turns');
+      expect(meta('other')).toContain('5.0k tokens');
     }, { timeout: 3000 });
-    expect(meta('other')).toContain('5.0k tokens');
     r.unmount();
   });
 
@@ -212,14 +210,14 @@ describe('App', () => {
     expect(agent?.querySelector('b')?.textContent).toBe('claude-cli');
     expect(agent?.className).toContain('on');
     expect(r.container.querySelector('#sessions .sess code')?.textContent).toBe('plain');
-    expect(r.container.querySelector('#c-meta code')?.textContent).toBe('plain');
+    expect(shownSession(r.container)).toBe('plain');
     r.unmount();
   });
 
   it('R4#2 the list shown comes from the same snapshot the stream starts from', async () => {
     const row = (id: string, last: string, turns: number): SessionSummary => ({
       id, agent: 'claude', client: 'c', title: id, started: '2026-11-05T09:00:00Z',
-      last, open: true, turns, usage: { input_tokens: 1, output_tokens: 0 },
+      last, open: true, turns, usage: { input_tokens: turns * 1000, output_tokens: 0 },
     });
     // An older snapshot (seq 10): "other" has one turn.
     const older = [row('abc', '2026-11-05T09:30:00Z', 1), row('other', '2026-11-05T09:10:00Z', 1)];
@@ -239,10 +237,8 @@ describe('App', () => {
     await flush();
     await flush();
     await flush();
-    const other = Array.from(r.container.querySelectorAll('#sessions .sess')).find(
-      (b) => b.querySelector('code')!.textContent === 'other'
-    );
-    expect(other?.querySelector('.s-m')?.textContent).toContain('3 turns');
+    const other = Array.from(r.container.querySelectorAll('#sessions .sess')).find((b) => rowSession(b) === 'other');
+    expect(other?.querySelector('.s-m')?.textContent).toContain('3.0k tokens');
     r.unmount();
   });
 
@@ -254,6 +250,7 @@ describe('App', () => {
     await flush();
     const tab = (label: string) =>
       Array.from(r.container.querySelectorAll('#d-tabs .tab')).find((b) => b.textContent!.startsWith(label))!;
+    await showDetails(r.container);
     const row = () => r.container.querySelector('#convo .wl.tool')!;
     await click(row());
     expect(tab('Events').className).toContain('on');

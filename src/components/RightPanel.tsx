@@ -40,6 +40,12 @@ interface RightPanelProps {
   loadContext?: LoadContext;
   // Reads one turn's events, to split a call's replayed history by turn.
   loadTurn?: (sessionId: string, turnId: string) => Promise<TurnDetail | null>;
+  // Closes the panel (its ×).
+  onClose?: () => void;
+  // Esc collapses an open row first, and only the next Esc closes the
+  // panel. The turn level puts a function here that collapses its open row
+  // and says whether there was one; App calls it before closing the panel.
+  escRef?: React.MutableRefObject<(() => boolean) | null>;
 }
 
 type TabKey = 'result' | 'events' | 'model' | 'tools' | 'prompt' | 'skills' | 'mcp';
@@ -48,8 +54,9 @@ type TabKey = 'result' | 'events' | 'model' | 'tools' | 'prompt' | 'skills' | 'm
 // turn and call tabs are kept here, so stepping down and back keeps them.
 export const RightPanel: React.FC<RightPanelProps> = (props) => {
   const { level = 'turn', turn, session, callId } = props;
-  const [turnTab, setTurnTab] = useState<TabKey>('events');
-  const [callTab, setCallTab] = useState<CallTab>('reply');
+  // Each level opens on its first tab, as in the mockup: Result, and Sent.
+  const [turnTab, setTurnTab] = useState<TabKey>('result');
+  const [callTab, setCallTab] = useState<CallTab>('sent');
   // The turn panel's open row, for the turn it was opened in. Kept here so a
   // visit to the session or a call does not lose it; another turn starts
   // with its default row.
@@ -63,6 +70,7 @@ export const RightPanel: React.FC<RightPanelProps> = (props) => {
         costComplete={props.sessionCostComplete}
         agentName={props.agentName ?? session.agent}
         onSelectTurn={(t) => props.onSelectTurn?.(t)}
+        onClose={props.onClose}
       />
     );
   }
@@ -80,6 +88,7 @@ export const RightPanel: React.FC<RightPanelProps> = (props) => {
         loadContext={props.loadContext}
         loadTurn={props.loadTurn}
         turns={session?.turnsList}
+        onClose={props.onClose}
       />
     );
   }
@@ -99,6 +108,7 @@ interface TurnPanelProps extends RightPanelProps {
   setOpenRow: (row: OpenRow | null) => void;
 }
 
+// Whether the tab draws the row of eventId (Events draws every event).
 function tabShows(tab: TabKey, turn: TurnDetail | undefined, eventId: string): boolean {
   if (!turn) return false;
   if (tab === 'model') {
@@ -117,16 +127,16 @@ const TurnPanel: React.FC<TurnPanelProps> = ({
   onSelectEvent,
   onLevel,
   onSelectCall,
+  onClose,
+  escRef,
   activeTab,
   setActiveTab,
   openRow,
   setOpenRow,
 }) => {
-  // The open row: what was opened or collapsed in this turn, else the turn's
-  // first tool request or model reply, so details show at once.
-  const defaultRow =
-    turn?.detail?.events.find((e) => e.kind === 'tool.requested' || e.kind === 'model.responded')?.id ?? null;
-  const expandedEventId = turn && openRow?.turnId === turn.id ? openRow.id : defaultRow;
+  // The open row: what was opened or collapsed in this turn. Rows start
+  // collapsed; a click opens one.
+  const expandedEventId = turn && openRow?.turnId === turn.id ? openRow.id : null;
   const setExpandedEventId = (id: string | null) => {
     if (turn) setOpenRow({ turnId: turn.id, id });
   };
@@ -142,12 +152,38 @@ const TurnPanel: React.FC<TurnPanelProps> = ({
     setActiveTab((tab) => (tabShows(tab, turn?.detail, selectedEventId) ? tab : 'events'));
   }, [selection?.nonce]);
 
+  // Esc collapses the open row before the panel closes (see escRef).
+  // Only a row the shown tab draws counts: one opened in Events and left
+  // there while Result is shown is not on screen, so Esc closes the panel.
+  const openRef = React.useRef<string | null>(null);
+  openRef.current =
+    expandedEventId !== null && tabShows(activeTab, turn?.detail, expandedEventId)
+      ? expandedEventId
+      : null;
+  const collapseRef = React.useRef<() => void>(() => {});
+  collapseRef.current = () => {
+    setExpandedEventId(null);
+    onSelectEvent?.(null);
+  };
+  React.useEffect(() => {
+    if (!escRef) return;
+    const collapse = () => {
+      if (openRef.current === null) return false;
+      collapseRef.current();
+      return true;
+    };
+    escRef.current = collapse;
+    return () => {
+      if (escRef.current === collapse) escRef.current = null;
+    };
+  }, [escRef]);
+
   if (!turn) {
     return (
       <section id="right">
-        <header id="p-head" className="colhead">
-          <div className="colhead-title">Select a turn</div>
-        </header>
+        <PanelHead up={[]} onClose={onClose}>
+          Select a turn
+        </PanelHead>
         <div id="d-body">
           <p className="dim">Click a turn in the session column to view its timeline and details.</p>
         </div>
@@ -155,10 +191,14 @@ const TurnPanel: React.FC<TurnPanelProps> = ({
     );
   }
 
+  // The turn's own folder, from its turn.started. The session's folder is
+  // its latest run's, so it is not offered for an earlier turn.
+  const folder = turn.folder;
+
   // The head reads the turn list's row, so it shows while the events load.
   const head = (
     <>
-      <PanelHead up={[{ level: 'session', label: 'Session' }]} onLevel={onLevel}>
+      <PanelHead up={[{ level: 'session', label: 'Session' }]} onLevel={onLevel} onClose={onClose}>
         {turn.prompt.length > 50 || turn.promptTruncated ? `${turn.prompt.slice(0, 50)}…` : turn.prompt}
         <span className="ch-sub">
           turn {turn.turnNumber} of {totalTurns}
@@ -183,19 +223,26 @@ const TurnPanel: React.FC<TurnPanelProps> = ({
             <span>Time</span>
             <b>{turn.durationMs === undefined ? '—' : formatDuration(turn.durationMs)}</b>
           </div>
-          <div>
-            <span>Status</span>
-            <b className={`tb-state ${stateClass(turn.state)}`}>
-              {stateLabel(turn)}
-            </b>
-          </div>
+          {turn.state !== 'finished' && (
+            <div>
+              <span>Status</span>
+              <b className={`tb-state ${stateClass(turn.state)}`}>{stateLabel(turn)}</b>
+            </div>
+          )}
           <div>
             <span>Turn</span>
-            <b>
-              <code>{turn.id.slice(0, 10)}…</code>
+            <b title={turn.id}>
+              {turn.id.length > 10 ? `${turn.id.slice(0, 10)}…` : turn.id}
               <CopyButton text={turn.id} />
             </b>
           </div>
+          {/* The folder the turn ran in, cut with an ellipsis; the full path is its tooltip. */}
+          {folder && (
+            <div className="fold">
+              <span>Folder</span>
+              <b title={folder}>{folder}</b>
+            </div>
+          )}
         </div>
       </div>
 
@@ -440,51 +487,16 @@ const TurnPanel: React.FC<TurnPanelProps> = ({
       {head}
 
       <div id="d-tabs">
-        <button
-          className={`tab ${activeTab === 'result' ? 'on' : ''}`}
-          onClick={() => setActiveTab('result')}
-        >
-          Result
-        </button>
-        <button
-          className={`tab ${activeTab === 'events' ? 'on' : ''}`}
-          onClick={() => setActiveTab('events')}
-        >
-          Events
-        </button>
-        <button
-          className={`tab ${activeTab === 'model' ? 'on' : ''}`}
-          onClick={() => setActiveTab('model')}
-        >
-          Model calls
-        </button>
-        <button
-          className={`tab ${activeTab === 'tools' ? 'on' : ''}`}
-          onClick={() => setActiveTab('tools')}
-        >
-          Tool calls
-        </button>
-        <button
-          className={`tab ${activeTab === 'prompt' ? 'on' : ''}`}
-          onClick={() => setActiveTab('prompt')}
-        >
-          Prompt
-        </button>
-        <button
-          className={`tab ${activeTab === 'skills' ? 'on' : ''}`}
-          onClick={() => setActiveTab('skills')}
-        >
-          Skills
-        </button>
-        <button
-          className={`tab ${activeTab === 'mcp' ? 'on' : ''}`}
-          onClick={() => setActiveTab('mcp')}
-        >
-          MCP
-        </button>
+        {TURN_TABS.map(([key, label]) => (
+          <button key={key} className={`tab ${activeTab === key ? 'on' : ''}`} onClick={() => setActiveTab(key)}>
+            {label}
+          </button>
+        ))}
       </div>
 
       <div id="d-body">
+        <TabSum tab={activeTab} turn={turn} detail={detail} />
+
         {activeTab === 'result' && (
           <div>
             {detail.agentResponse ? (
@@ -543,10 +555,6 @@ const TurnPanel: React.FC<TurnPanelProps> = ({
 
         {activeTab === 'model' && (
           <div>
-            <div className="ledger-head" style={{ marginBottom: '0.625rem' }}>
-              {turnModels(detail).length > 0 ? `${turnModels(detail).join(', ')} · ` : ''}
-              {detail.modelCalls.length} {detail.modelCalls.length === 1 ? 'call' : 'calls'} in this turn
-            </div>
             <table className="grid events">
               <thead>
                 <tr>
@@ -617,9 +625,6 @@ const TurnPanel: React.FC<TurnPanelProps> = ({
 
         {activeTab === 'tools' && (
           <div>
-            <div className="ledger-head" style={{ marginBottom: '0.625rem' }}>
-              {detail.toolCalls.length} {detail.toolCalls.length === 1 ? 'tool call' : 'tool calls'} in this turn
-            </div>
             <table className="grid events">
               <thead>
                 <tr>
@@ -684,17 +689,9 @@ const TurnPanel: React.FC<TurnPanelProps> = ({
           </div>
         )}
 
-        {activeTab === 'skills' && (
-          <ComingNext what="The skills this agent can use, and which ones this turn loaded." />
-        )}
-
-        {activeTab === 'mcp' && (
-          <ComingNext what="The MCP servers this agent connects to, and the calls this turn made to each." />
-        )}
 
         {activeTab === 'prompt' && (
           <div>
-            <div className="sub-h">Prompt</div>
             <textarea
               className="prompt"
               readOnly
@@ -729,10 +726,73 @@ export function turnModels(turn: TurnDetail): string[] {
   return seen;
 }
 
-// A tab whose data the API does not offer yet. Says what it will show; no sample data.
-const ComingNext: React.FC<{ what: string }> = ({ what }) => (
-  <div className="coming">
-    <span className="coming-tag">Coming next</span>
-    <p>{what}</p>
-  </div>
-);
+// The turn tabs, in the mockup's order. Reasoning and CI/CD are not here:
+// the API has no data for them yet.
+const TURN_TABS: [TabKey, string][] = [
+  ['result', 'Result'],
+  ['prompt', 'Prompt'],
+  ['events', 'Events'],
+  ['model', 'Model calls'],
+  ['tools', 'Tools'],
+  ['skills', 'Skills'],
+  ['mcp', 'MCP'],
+];
+
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
+// Every turn tab opens with one summary line in one style: a count or a
+// state in bold, then plain facts. Skills and MCP say what they will show:
+// the API does not offer that data yet.
+export const TabSum: React.FC<{ tab: TabKey; turn: Turn; detail: TurnDetail }> = ({ tab, turn, detail }) => {
+  const facts: React.ReactNode[] = [];
+  let head: React.ReactNode;
+  switch (tab) {
+    case 'result': {
+      head = <span className={stateClass(turn.state)}>{stateLabel(turn)}</span>;
+      facts.push(plural(detail.modelCalls.length, 'model call'), plural(detail.toolCalls.length, 'tool call'));
+      break;
+    }
+    case 'prompt': {
+      const text = (detail.prompt ?? turn.prompt).trim();
+      head = plural(text === '' ? 0 : text.split(/\s+/).length, 'word');
+      break;
+    }
+    case 'events':
+      head = plural(detail.events.length, 'event');
+      facts.push('click a row to open it');
+      break;
+    case 'model': {
+      head = plural(detail.modelCalls.length, 'call');
+      const models = turnModels(detail);
+      if (models.length) facts.push(models.join(', '));
+      facts.push('click a call to open it');
+      break;
+    }
+    case 'tools': {
+      head = plural(detail.toolCalls.length, 'tool call');
+      const failed = detail.toolCalls.filter((p) => p.completed?.tool_error).length;
+      if (failed) facts.push(<span className="bad">{failed} failed</span>);
+      facts.push('click a row to open it');
+      break;
+    }
+    case 'skills':
+      head = 'Coming next';
+      facts.push('the skills this agent can use, and which ones this turn loaded');
+      break;
+    case 'mcp':
+      head = 'Coming next';
+      facts.push('the MCP servers this agent connects to, and the calls this turn made to each');
+      break;
+  }
+  return (
+    <div className="tab-sum">
+      <b>{head}</b>
+      {facts.map((f, i) => (
+        <React.Fragment key={i}>
+          <span className="sep"> · </span>
+          {f}
+        </React.Fragment>
+      ))}
+    </div>
+  );
+};

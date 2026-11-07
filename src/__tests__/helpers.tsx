@@ -106,3 +106,27 @@ export function liveReplay(base: CockpitEvent[], extra: Partial<DataSource> = {}
   };
   return { source, push, unsubscribed: () => unsubscribed, replay: () => replay };
 }
+
+// The conversation's turns start with their details hidden (mockup v3). This
+// clicks every "Show details", so the call and tool rows are on screen.
+export async function showDetails(container: HTMLElement): Promise<void> {
+  for (const b of Array.from(container.querySelectorAll('#convo .work-h'))) {
+    if (b.textContent === 'Show details') await click(b);
+  }
+}
+
+// The id of the session the conversation column shows.
+export function shownSession(container: HTMLElement): string | undefined {
+  return (container.querySelector('#convo') as HTMLElement | null)?.dataset.session;
+}
+
+// Whether the right panel is open. It starts closed; a turn or a call opens it.
+export function panelOpen(container: HTMLElement): boolean {
+  const slot = container.querySelector('.panel-slot') as HTMLElement | null;
+  return !!slot && !slot.hidden;
+}
+
+// The id of a row in the Sessions column.
+export function rowSession(row: Element): string | undefined {
+  return (row as HTMLElement).dataset.session;
+}

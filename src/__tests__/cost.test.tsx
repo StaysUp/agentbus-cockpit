@@ -8,7 +8,7 @@ import { applyList, countedIn, isNewerList } from '../data/sessionList';
 import { addStreamedCost, buildTurns, summarizeSession } from '../data/turns';
 import { CockpitEvent, DataSource, SessionList, SessionSummary } from '../types';
 import { COST_INCOMPLETE_TITLE, formatCost } from '../utils/format';
-import { click, ev, flush, jsonl, render, openSession } from './helpers';
+import { click, ev, flush, jsonl, render, openSession, shownSession } from './helpers';
 
 function row(fields: Partial<SessionSummary> = {}): SessionSummary {
   return {
@@ -253,10 +253,13 @@ describe('live rows in the app', () => {
     const r = await render(<App dataSource={source} />);
     await flush();
     await flush();
-    const rowText = (id: string) =>
-      Array.from(r.container.querySelectorAll('#sessions .sess'))
-        .find((b) => b.querySelector('.s-from')?.textContent === id)
-        ?.querySelector('.s-m')?.textContent ?? '';
+    // The row's quiet line, and its tooltip, which holds the turn count.
+    const rowText = (id: string) => {
+      const m = Array.from(r.container.querySelectorAll('#sessions .sess'))
+        .find((b) => (b as HTMLElement).dataset.session === id)
+        ?.querySelector('.s-m');
+      return m ? `${m.textContent} | ${m.getAttribute('title')}` : '';
+    };
     const send = async (e: Partial<CockpitEvent> & { kind: string }) => {
       await act(async () => push!(ev(e)));
     };
@@ -272,7 +275,7 @@ describe('live rows in the app', () => {
 
   it('a late, older list does not wipe a streamed cost', async () => {
     const { r, rowText, send, refresh, lists, rowsAt } = await setup();
-    expect(r.container.querySelector('#sessions .sess.on .s-from')?.textContent).toBe('a');
+    expect((r.container.querySelector('#sessions .sess.on') as HTMLElement | null)?.dataset.session).toBe('a');
     expect(rowText('b')).toContain('$0.30');
     await send({ seq: 11, session: 'b', kind: 'model.responded', cost_usd: 0.05, cost_complete: true });
     expect(rowText('b')).toContain('$0.35');
@@ -362,9 +365,10 @@ describe('switching sessions', () => {
     await flush();
     await flush();
     const rowOf = (id: string) =>
-      Array.from(r.container.querySelectorAll('#sessions .sess')).find((b) => b.querySelector('.s-from')?.textContent === id);
+      Array.from(r.container.querySelectorAll('#sessions .sess')).find((b) => (b as HTMLElement).dataset.session === id);
+    const turnsOf = (id: string) => rowOf(id)?.querySelector('.s-m')?.getAttribute('title') ?? '';
     expect(rowOf('a')?.classList.contains('on')).toBe(true);
-    expect(rowOf('a')?.querySelector('.s-m')?.textContent).toContain('1 turn');
+    expect(turnsOf('a')).toContain('1 turn');
 
     // Switch to b; its detail is still loading, so a's detail is still held.
     await click(rowOf('b'));
@@ -375,13 +379,13 @@ describe('switching sessions', () => {
       await new Promise((res) => setTimeout(res, 600));
     });
     await flush();
-    expect(rowOf('a')?.querySelector('.s-m')?.textContent).toContain('2 turns');
+    expect(turnsOf('a')).toContain('2 turns');
 
     // b finishes loading; a keeps its fresh count.
     await act(async () => releaseB());
     await flush();
     expect(rowOf('b')?.classList.contains('on')).toBe(true);
-    expect(rowOf('a')?.querySelector('.s-m')?.textContent).toContain('2 turns');
+    expect(turnsOf('a')).toContain('2 turns');
     r.unmount();
   });
 });
@@ -432,19 +436,17 @@ describe('the switch window', () => {
     await flush();
     const q = (sel: string) => r.container.querySelector(sel);
     const rowOf = (id: string) =>
-      Array.from(r.container.querySelectorAll('#sessions .sess')).find((b) => b.querySelector('.s-from')?.textContent === id);
+      Array.from(r.container.querySelectorAll('#sessions .sess')).find((b) => (b as HTMLElement).dataset.session === id);
 
     // The panel follows the selected level. Picking a session selects the
     // session level, so after the click the panel shows a session strip.
     const expectShowing = (who: 'a' | 'b', level: 'turn' | 'session' = 'turn') => {
       const a = who === 'a';
       expect(q('#convo .colhead-title')?.textContent).toBe(a ? 'alpha prompt' : 'beta prompt');
-      const sub = q('#c-meta .subline')?.textContent ?? '';
-      expect(sub).toContain(a ? '/wa' : '/wb');
-      expect(sub).toContain(a ? '$0.20' : '$4.00');
-      expect(sub).toContain(a ? '100 tokens' : '10.0k tokens');
-      expect(sub).not.toContain(a ? '$4.00' : '$0.20');
-      expect(q('#c-meta .c-id code')?.textContent).toBe(who);
+      expect(shownSession(r.container)).toBe(who);
+      const foot = q('#convo .tb-stat')?.textContent ?? '';
+      expect(foot).toContain(a ? '$0.20' : '$2.00');
+      expect(foot).toContain(a ? '100 tokens' : '5.0k tokens');
       expect(r.container.querySelectorAll('#convo .tb')).toHaveLength(a ? 1 : 2);
       expect(q('#convo .m-agent')?.textContent).toContain(`${who} answer`);
       // A takes a next message; B is held open, so its box is closed.
@@ -463,6 +465,8 @@ describe('the switch window', () => {
     };
 
     expect(rowOf('a')?.classList.contains('on')).toBe(true);
+    // Open the panel on A's turn.
+    await click(r.container.querySelector('#convo .tb'));
     expectShowing('a');
 
     await click(rowOf('b'));

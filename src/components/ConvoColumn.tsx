@@ -3,7 +3,6 @@ import { callFailed, callGroups, continuityLabel, turnNotes } from '../data/turn
 import { Level, SessionDetail, ToolCallPair, Turn } from '../types';
 import { formatCost, formatCount, formatDuration, formatTokens, stateClass, toolInputSummary } from '../utils/format';
 import { Cost } from './Cost';
-import { CopyButton } from './Icons';
 
 interface ConvoColumnProps {
   session: SessionDetail;
@@ -11,10 +10,13 @@ interface ConvoColumnProps {
   onSelectTurn: (turn: Turn) => void;
   onSelectEvent?: (eventId: string) => void;
   // The selected level and, at the call level, the model.requested id of the
-  // call. Exactly one thing carries the mark: the session block, a turn or a call.
+  // call. While the panel is open, a turn or a call carries the mark; at the
+  // session level, and while the panel is closed, nothing here does.
   level?: Level;
+  panelOpen?: boolean;
   selectedCallId?: string | null;
-  onSelectSession?: () => void;
+  // The agent's name, for the message box.
+  agentName?: string;
   onSelectCall?: (turn: Turn, callId: string) => void;
   // From the session's row: whether the service takes a next message, and
   // whether a run still holds the session open.
@@ -22,9 +24,6 @@ interface ConvoColumnProps {
   open?: boolean;
   // Given only when the source can continue sessions. Rejects with the API's message.
   onSend?: (prompt: string, readOnly: boolean) => Promise<void>;
-  // The session's cost, from its row (the service's figure plus streamed calls).
-  costUsd?: number | null;
-  costComplete?: boolean;
 }
 
 // The person's message from the moment it is sent until its turn arrives.
@@ -40,14 +39,13 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
   onSelectTurn,
   onSelectEvent,
   level = 'turn',
+  panelOpen = true,
   selectedCallId = null,
-  onSelectSession,
+  agentName,
   onSelectCall,
   resumable,
   open,
   onSend,
-  costUsd,
-  costComplete,
 }) => {
   const [draft, setDraft] = useState('');
   const [readOnly, setReadOnly] = useState(false);
@@ -96,54 +94,26 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
   // Store expanded work details per turn ID
   const [expandedTurns, setExpandedTurns] = useState<Record<string, boolean>>({});
 
-  // Details are open until the user hides them. The render and the toggle
-  // both read through this, so they agree on the default.
-  const detailsOpen = (open: Record<string, boolean>, turnId: string) => open[turnId] ?? true;
+  // Details are closed until the user shows them (mockup v3: "Show details"
+  // opens the model calls). The render and the toggle both read through this,
+  // so they agree on the default.
+  const detailsOpen = (open: Record<string, boolean>, turnId: string) => open[turnId] ?? false;
 
   // The selected thing always stays visible: a turn whose call is selected
   // shows its details, and hiding them moves the selection to the turn.
   const holdsSelectedCall = (turn: Turn) =>
-    level === 'call' && !!turn.detail?.modelCalls.some((p) => p.requested.id === selectedCallId);
+    panelOpen && level === 'call' && !!turn.detail?.modelCalls.some((p) => p.requested.id === selectedCallId);
   const toggleTurnDetails = (turn: Turn, shownOpen: boolean, e: React.MouseEvent) => {
     e.stopPropagation();
     if (shownOpen && holdsSelectedCall(turn)) onSelectTurn(turn);
     setExpandedTurns((prev) => ({ ...prev, [turn.id]: !shownOpen }));
   };
 
-  const totalDurationMs = session.turnsList.reduce((acc, t) => acc + (t.durationMs ?? 0), 0);
-  // The earliest turn that names a model: its first call's model when its events
-  // are loaded, else the model its list row names. Opening a later turn does not
-  // change it.
-  const earliest = session.turnsList.find((t) => (t.detail?.modelCalls.length ?? 0) > 0 || t.model);
-  const firstModel = earliest?.detail?.modelCalls[0]?.requested.model || earliest?.model;
-
   return (
-    <main id="convo">
+    <main id="convo" data-session={session.id}>
       <header id="c-head" className="colhead">
         <div className="colhead-title">{session.title}</div>
       </header>
-
-      <div id="c-meta" className={level === 'session' ? 'lvl-sel' : ''} onClick={onSelectSession}>
-        <div className="subline">
-          Claude Code{firstModel ? ` · ${firstModel}` : ''}
-          {session.folder ? (
-            <>
-              {' '}· <code>{session.folder}</code>
-            </>
-          ) : null}
-          {' '}· {formatTokens(session.usage)} tokens
-          {formatCost(costUsd) ? (
-            <>
-              {' '}· <Cost usd={costUsd} complete={costComplete} />
-            </>
-          ) : null}
-          {' '}· {formatDuration(totalDurationMs)}
-        </div>
-        <div className="c-id">
-          <code>{session.id}</code>
-          <CopyButton text={session.id} />
-        </div>
-      </div>
 
       <div id="c-msgs">
         <div className="c-in">
@@ -151,7 +121,7 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
             const isSelected = selectedTurn?.id === turn.id;
             // The turn carries the mark at the turn level; at the call level it
             // only holds the marked call.
-            const mark = !isSelected || level === 'session' ? '' : level === 'turn' ? 'sel lvl-sel' : 'holds';
+            const mark = !panelOpen || !isSelected || level === 'session' ? '' : level === 'turn' ? 'sel lvl-sel' : 'holds';
             const isDetailsOpen = detailsOpen(expandedTurns, turn.id) || holdsSelectedCall(turn);
             // Calls and the answer come from the turn's events, which are
             // loaded when the turn is opened. Until then the list's row gives
@@ -166,6 +136,13 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
             const answerCut = !detail && turn.replyTruncated;
             const notes = turnNotes(detail);
             const contLabel = continuityLabel(notes, session.turnsList);
+            // The turn header's facts: the model that made the turn, then its
+            // calls. A line breaks between facts, never inside one.
+            const facts = [
+              model ? <i className="tb-model">{model}</i> : null,
+              calls !== undefined ? <i className="tb-calls">{calls} {calls === 1 ? 'model call' : 'model calls'}</i> : null,
+              contLabel ? <i className="tb-cont">{contLabel}</i> : null,
+            ].filter((x): x is React.ReactElement => x !== null);
 
             const toolRow = (tc: ToolCallPair) => {
               const evt = tc.requested;
@@ -197,19 +174,19 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
                 <div className={`tb ${mark}`} onClick={() => onSelectTurn(turn)}>
                   <div className="tb-h">
                     <b>Turn {turn.turnNumber}</b>
-                    {calls !== undefined && (
-                      <span className="tb-calls">
-                        {' · '}
-                        {calls} {calls === 1 ? 'model call' : 'model calls'}
-                      </span>
+                    {facts.length > 0 && (
+                      <>
+                        {' '}
+                        <span>
+                          {facts.map((x, i) => (
+                            <React.Fragment key={i}>
+                              {i > 0 && <span className="sep"> · </span>}
+                              {x}
+                            </React.Fragment>
+                          ))}
+                        </span>
+                      </>
                     )}
-                    {model && (
-                      <span className="tb-model">
-                        {' · '}
-                        <code>{model}</code>
-                      </span>
-                    )}
-                    {contLabel && <span className="tb-cont">{' · '}{contLabel}</span>}
                   </div>
                   <div className="m-user">
                     <div className="bubble">
@@ -229,7 +206,7 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
                           {groups.map(({ pair, number, tools }) => {
                             const req = pair.requested;
                             const resp = pair.responded;
-                            const on = level === 'call' && selectedCallId === req.id;
+                            const on = panelOpen && level === 'call' && selectedCallId === req.id;
                             return (
                               <React.Fragment key={req.id}>
                                 <button
@@ -325,7 +302,7 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
           <textarea
             id="input"
             rows={1}
-            placeholder={canSend ? 'Message the agent…' : ''}
+            placeholder={`Message ${agentName || 'the agent'}…`}
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => {

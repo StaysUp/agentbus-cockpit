@@ -22,13 +22,14 @@ interface CallPanelProps {
   turns?: { id: string; turnNumber: number; detail?: TurnDetail }[];
   // Reads one turn's events (of this turn's session), for the Context tab.
   loadTurn?: (sessionId: string, turnId: string) => Promise<TurnDetail | null>;
+  onClose?: () => void;
 }
 
 const n = (v: number | undefined) => (v ?? 0).toLocaleString();
 
 // The model call level: one request and its reply, from the call's
 // model.requested and model.responded pair.
-export const CallPanel: React.FC<CallPanelProps> = ({ turn, call, tab, onTab, onLevel, onOpenEvent, loadContext, turns, loadTurn }) => {
+export const CallPanel: React.FC<CallPanelProps> = ({ turn, call, tab, onTab, onLevel, onOpenEvent, loadContext, turns, loadTurn, onClose }) => {
   const req = call.pair.requested;
   const res = call.pair.responded;
   const usage = res?.usage;
@@ -44,6 +45,7 @@ export const CallPanel: React.FC<CallPanelProps> = ({ turn, call, tab, onTab, on
           { level: 'turn', label: `Turn ${turn.turnNumber}` },
         ]}
         onLevel={onLevel}
+        onClose={onClose}
       >
         Call {call.number} of {turn.detail?.modelCalls.length ?? call.number}
         <span className="ch-sub">{prompt}</span>
@@ -60,33 +62,29 @@ export const CallPanel: React.FC<CallPanelProps> = ({ turn, call, tab, onTab, on
             <b>{usage ? `${n(usage.input_tokens)} in / ${n(usage.output_tokens)} out` : '—'}</b>
           </div>
           <div>
-            <span>Cache read</span>
-            <b>{usage ? n(usage.cache_read_tokens) : '—'}</b>
-          </div>
-          <div>
-            <span>Cache write</span>
-            <b>{usage ? n(usage.cache_write_tokens) : '—'}</b>
+            <span>Cache</span>
+            <b>{usage ? `${n(usage.cache_read_tokens)} read / ${n(usage.cache_write_tokens)} write` : '—'}</b>
           </div>
           <div>
             <span>Latency</span>
             <b>{res?.latency_ms ? formatDuration(res.latency_ms) : '—'}</b>
           </div>
           <div>
-            <span>Stop reason</span>
+            <span>Stop</span>
             <b>
               {failed && <span className="bad">failed</span>}
-              {res?.stop_reason ? <code>{res.stop_reason}</code> : failed ? null : '—'}
+              {res?.stop_reason ? res.stop_reason : failed ? null : '—'}
             </b>
           </div>
         </div>
       </div>
 
       <div id="d-tabs">
-        <button className={`tab ${tab === 'reply' ? 'on' : ''}`} onClick={() => onTab('reply')}>
-          Reply
-        </button>
         <button className={`tab ${tab === 'sent' ? 'on' : ''}`} onClick={() => onTab('sent')}>
           Sent
+        </button>
+        <button className={`tab ${tab === 'reply' ? 'on' : ''}`} onClick={() => onTab('reply')}>
+          Reply
         </button>
         <button className={`tab ${tab === 'context' ? 'on' : ''}`} onClick={() => onTab('context')}>
           Context

@@ -12,14 +12,15 @@ interface SessionPanelProps {
   costComplete?: boolean;
   agentName: string;
   onSelectTurn: (turn: Turn) => void;
+  onClose?: () => void;
 }
 
 // The session level: what the whole session cost and used, and its turns.
-export const SessionPanel: React.FC<SessionPanelProps> = ({ session, costUsd, costComplete, agentName, onSelectTurn }) => {
+export const SessionPanel: React.FC<SessionPanelProps> = ({ session, costUsd, costComplete, agentName, onSelectTurn, onClose }) => {
   const turns = session.turnsList;
   return (
     <section id="right">
-      <PanelHead up={[]}>
+      <PanelHead up={[]} onClose={onClose}>
         Session
         <span className="ch-sub">
           {turns.length} {turns.length === 1 ? 'turn' : 'turns'}
@@ -43,7 +44,7 @@ export const SessionPanel: React.FC<SessionPanelProps> = ({ session, costUsd, co
           <div>
             <span>Session</span>
             <b>
-              <code>{session.id}</code>
+              {session.id}
               <CopyButton text={session.id} />
             </b>
           </div>

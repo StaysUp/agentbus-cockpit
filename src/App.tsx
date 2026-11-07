@@ -110,6 +110,14 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
   // it (selectedCallId, its model.requested id). It opens on the first turn.
   const [level, setLevel] = useState<Level>('turn');
   const [selectedCallId, setSelectedCallId] = useState<string | null>(null);
+  // The right panel starts closed, so the chat has the full width. Only a
+  // click on a turn or a call opens it (mockup v3, round 15). Picking an agent
+  // or a session leaves it as it is. Its × and Esc close it.
+  const [panelOpen, setPanelOpen] = useState(false);
+  const panelOpenRef = useRef(false);
+  panelOpenRef.current = panelOpen;
+  // Set by the turn panel: collapses its open row, if any, and says so.
+  const panelEscRef = useRef<(() => boolean) | null>(null);
   // Leaving the turn level drops the event selection, so coming back opens
   // the turn as it was rather than jumping to an old event.
   const selectSessionLevel = () => {
@@ -138,6 +146,19 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
   const openEvent = (turn: Turn, eventId: string) => {
     selectTurnLevel(turn);
     selectEvent(eventId);
+  };
+  // The clicks that open the panel: a turn, a call, or a tool line of a turn.
+  const clickTurn = (turn: Turn) => {
+    selectTurnLevel(turn);
+    setPanelOpen(true);
+  };
+  const clickCall = (turn: Turn, callId: string) => {
+    selectCall(turn, callId);
+    setPanelOpen(true);
+  };
+  const clickEvent = (id: string) => {
+    selectEvent(id);
+    setPanelOpen(true);
   };
 
   const agents = useMemo(() => buildAgents(allSessions ?? []), [allSessions]);
@@ -475,13 +496,12 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
   // shows the turn.
   const callShown = !!selectedTurn?.detail?.modelCalls.some((p) => p.requested.id === selectedCallId);
   const shownLevel: Level = !selectedTurn ? 'session' : level === 'call' && !callShown ? 'turn' : level;
-  const shownLevelRef = useRef(shownLevel);
-  shownLevelRef.current = shownLevel;
   const dialogOpenRef = useRef(false);
   dialogOpenRef.current = newSession !== null;
 
-  // Esc first leaves a focused text box, then steps up one level: from a
-  // call to its turn, then from the turn to the session.
+  // Esc first leaves a focused text box, then collapses an open row in the
+  // turn panel, then closes the panel. The panel's Session and Turn links
+  // step up a level.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape' || e.defaultPrevented || dialogOpenRef.current) return;
@@ -490,9 +510,9 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
         t.blur();
         return;
       }
-      const cur = shownLevelRef.current;
-      if (cur === 'call') setLevel('turn');
-      else if (cur === 'turn') selectSessionLevel();
+      if (!panelOpenRef.current) return;
+      if (panelEscRef.current?.()) return;
+      setPanelOpen(false);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -507,7 +527,7 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
   }
 
   return (
-    <div id="app">
+    <div id="app" className={panelOpen ? 'panel' : 'nopanel'}>
       <AgentsColumn
         agents={agents}
         selectedAgentId={selectedAgentId}
@@ -544,18 +564,17 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
         <ConvoColumn
           key={sessionView.id}
           session={sessionView}
-          costUsd={sessionView.cost_usd}
-          costComplete={sessionView.cost_complete}
           resumable={sessionView.resumable}
           open={sessionView.open}
           onSend={sendMessage}
           selectedTurn={selectedTurn}
-          onSelectTurn={selectTurnLevel}
-          onSelectEvent={selectEvent}
+          onSelectTurn={clickTurn}
+          onSelectEvent={clickEvent}
           level={shownLevel}
+          panelOpen={panelOpen}
+          agentName={agents.find((x) => x.id === sessionView.agent)?.name}
           selectedCallId={selectedCallId}
-          onSelectSession={selectSessionLevel}
-          onSelectCall={selectCall}
+          onSelectCall={clickCall}
         />
       ) : (
         <main id="convo">
@@ -574,6 +593,7 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
         </main>
       )}
 
+      <div className="panel-slot" hidden={!panelOpen}>
       <RightPanel
         turn={selectedTurn}
         totalTurns={turns.length}
@@ -591,7 +611,10 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
         onOpenEvent={openEvent}
         loadContext={loadContext}
         loadTurn={loadTurn}
+        onClose={() => setPanelOpen(false)}
+        escRef={panelEscRef}
       />
+      </div>
 
       {newSession && canStart && (
         <NewSessionDialog

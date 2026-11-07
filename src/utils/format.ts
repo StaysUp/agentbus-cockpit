@@ -81,3 +81,19 @@ export function toolInputSummary(input: unknown): string {
   }
   return String(input);
 }
+
+// How long ago an ISO time was, in the session list's words: "just now",
+// "3 min ago", "2 hours ago", "4 days ago". Empty when the time is not known.
+export function formatAgo(isoString: string | undefined, now: number = Date.now()): string {
+  if (!isoString) return '';
+  const t = Date.parse(isoString);
+  if (isNaN(t)) return '';
+  const s = Math.max(0, Math.round((now - t) / 1000));
+  if (s < 60) return 'just now';
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m} min ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h} ${h === 1 ? 'hour' : 'hours'} ago`;
+  const d = Math.floor(h / 24);
+  return `${d} ${d === 1 ? 'day' : 'days'} ago`;
+}

@@ -5,7 +5,7 @@ import { ContextTab, LONG_CHARS } from '../components/ContextTab';
 import { ReplayDataSource } from '../data/ReplayDataSource';
 import { layoutContext, splitReplayed, turnInfo, TurnInfo } from '../data/context';
 import { CallContext, ContextPiece, DataSource } from '../types';
-import { click, ev, flush, jsonl, render } from './helpers';
+import { click, ev, flush, jsonl, render, showDetails } from './helpers';
 
 // A piece as the API sends it. size is the json's length here; the API's
 // is the stored bytes, which the tab shows as given.
@@ -126,6 +126,7 @@ describe('Context tab', () => {
 
     await click(qa('#convo .tb')[1]);
     await flush();
+    await showDetails(r.container);
     await click(qa('#convo .tb')[1].querySelector('.wl.model'));
     await click(qa('#d-tabs .tab').find((t) => t.textContent === 'Context'));
     await flush();
@@ -342,6 +343,7 @@ describe('Context tab, a three-turn chain', () => {
     const qa = (s: string) => Array.from(r.container.querySelectorAll(s));
     await click(qa('#convo .tb')[2]);
     await flush();
+    await showDetails(r.container);
     await click(qa('#convo .tb')[2].querySelector('.wl.model'));
     await click(qa('#d-tabs .tab').find((t) => t.textContent === 'Context'));
     for (let i = 0; i < 5; i++) await flush();

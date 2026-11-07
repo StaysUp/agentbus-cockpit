@@ -8,7 +8,7 @@ import { checkConnection } from '../data/connection';
 import { LiveDataSource } from '../data/LiveDataSource';
 import { buildTurns } from '../data/turns';
 import { CockpitEvent } from '../types';
-import { click, ev, flush, render } from './helpers';
+import { click, ev, flush, panelOpen, render, rowSession, showDetails, shownSession } from './helpers';
 
 const BASE = 'http://cockpit.test';
 
@@ -274,6 +274,8 @@ describe('The started turn', () => {
   it('starting a session selects its turn when it arrives', async () => {
     const svc = fakeService({ sessions: [row('s1')], events: { s1: oneTurn('s1', 'hi') }, agents: AGENTS });
     const r = await mount(svc);
+    // The panel is open, so the selection shows.
+    await click(r.container.querySelector('#convo .tb'));
     await click(r.container.querySelector('#sessions button.new-session'));
     await settle();
     const dialog = r.container.querySelector('.new-dialog')!;
@@ -288,7 +290,28 @@ describe('The started turn', () => {
     expect(r.container.querySelector('#sessions .sess.on code')?.textContent).toBe('new1');
     const marked = r.container.querySelector('#convo .tb.lvl-sel');
     expect(marked?.querySelector('.bubble')?.textContent).toBe('read the README');
-    expect(r.container.querySelector('#c-meta')?.classList.contains('lvl-sel')).toBe(false);
+    expect(r.container.querySelectorAll('#convo .lvl-sel')).toHaveLength(1);
+    r.unmount();
+  });
+
+  // Only a click on a turn or a call opens the panel; a turn that arrives does not.
+  it('a started turn arriving leaves a closed panel closed', async () => {
+    const svc = fakeService({ sessions: [row('s1')], events: { s1: oneTurn('s1', 'hi') }, agents: AGENTS });
+    const r = await mount(svc);
+    expect(panelOpen(r.container)).toBe(false);
+    await click(r.container.querySelector('#sessions button.new-session'));
+    await settle();
+    const dialog = r.container.querySelector('.new-dialog')!;
+    await setValue(dialog.querySelector('input[name="folder"]'), '/Users/ana/x');
+    await setValue(dialog.querySelector('textarea[name="prompt"]'), 'read the README');
+    await submitForm(dialog);
+    svc.state.sessions = [row('new1', { open: true, last: '2026-11-05T10:00:00Z' }), row('s1')];
+    await svc.push(ev({ session: 'new1', kind: 'session.opened', hold: 'h1', turn: 'Tn', agent: 'claude', folder: '/Users/ana/x' }));
+    await svc.push(ev({ session: 'new1', kind: 'turn.started', turn: 'Tn', text: 'read the README' }));
+    await settle();
+    expect(shownSession(r.container)).toBe('new1');
+    expect(panelOpen(r.container)).toBe(false);
+    expect(r.container.querySelectorAll('#convo .lvl-sel')).toHaveLength(0);
     r.unmount();
   });
 
@@ -296,7 +319,8 @@ describe('The started turn', () => {
     const svc = fakeService({ sessions: [row('s1', { resumable: true })], events: { s1: oneTurn('s1', 'first') } });
     const r = await mount(svc);
     // Opened on the session panel, so selecting the turn is a change.
-    await click(r.container.querySelector('#c-meta'));
+    await click(r.container.querySelector('#convo .tb'));
+    await click(r.container.querySelector('#p-head .crumb'));
     expect(r.container.querySelector('#convo .tb.lvl-sel')).toBeNull();
     await setValue(r.container.querySelector('#c-reply textarea'), 'and now the tests');
     await submitForm(r.container.querySelector('#c-reply form'));
@@ -321,11 +345,12 @@ describe('The started turn', () => {
       messages: (id) => new Promise<Response>((resolve) => (replies[id] = resolve)),
     });
     const r = await mount(svc);
+    // Open the panel so the selected turn is marked.
+    await click(r.container.querySelector('#convo .tb'));
     const pick = async (id: string) => {
-      const rowEl = Array.from(r.container.querySelectorAll('#sessions .sess')).find(
-        (b) => b.querySelector('code')?.textContent === id
-      );
-      await click(rowEl ?? null);
+      const rowEl = Array.from(r.container.querySelectorAll('#sessions .sess')).find((b) => rowSession(b) === id);
+      // The selected card is not a button; picking it again changes nothing.
+      if (rowEl && !rowEl.classList.contains('on')) await click(rowEl);
       await settle();
     };
     const send = async (text: string) => {
@@ -335,7 +360,7 @@ describe('The started turn', () => {
     await pick('A');
     await send('second in A');
     await pick('B');
-    expect(r.container.querySelector('#c-meta .c-id code')?.textContent).toBe('B');
+    expect(shownSession(r.container)).toBe('B');
     await send('second in B');
     await act(async () => replies.B(json({ id: 'B', turn: 'TB2', base_url: `${BASE}/s/B/t/TB2` }, 202)));
     await settle();
@@ -370,9 +395,7 @@ describe('The started turn', () => {
       // Before the reply, the person picks something else.
       let want: string;
       if (how === 'session') {
-        const other = Array.from(r.container.querySelectorAll('#sessions .sess')).find(
-          (b) => b.querySelector('code')?.textContent === 's3'
-        );
+        const other = Array.from(r.container.querySelectorAll('#sessions .sess')).find((b) => rowSession(b) === 's3');
         await click(other ?? null);
         want = 's3';
       } else {
@@ -393,7 +416,7 @@ describe('The started turn', () => {
       await svc.push(ev({ session: 'new1', kind: 'turn.started', turn: 'Tn', text: 'go' }));
       await settle();
       expect(r.container.querySelector('#sessions .sess.on code')?.textContent).toBe(want);
-      expect(r.container.querySelector('#c-meta .c-id code')?.textContent).toBe(want);
+      expect(shownSession(r.container)).toBe(want);
       r.unmount();
     });
   }
@@ -634,6 +657,7 @@ describe('The turn list from the API', () => {
     await settle();
     expect(eventReads(svc, 'T1-s1')).toBe(1);
     expect(turnReads(svc)).toBe(reads);
+    await showDetails(r.container);
     expect(Array.from(r.container.querySelectorAll('#convo .wl.tool .wk')).map((w) => w.textContent)).toEqual(['Zed']);
 
     // The new turn ends: the list is read again and its state follows.
@@ -685,13 +709,13 @@ describe('How a turn continued', () => {
       ...oneTurn('s1', 'first'),
       ...nextTurn('s1', { continuity: 'replay', replay_from: 'T1-s1' }),
     ]);
-    expect(headers(r)).toEqual([null, ' · continued from turn 1']);
+    expect(headers(r)).toEqual([null, 'continued from turn 1']);
     r.unmount();
   });
 
   it('shows "resumed" for the vendor resume, and nothing without continuity', async () => {
     const a = await openTurn2([...oneTurn('s1', 'first'), ...nextTurn('s1', { continuity: 'resume' })]);
-    expect(headers(a.r)).toEqual([null, ' · resumed']);
+    expect(headers(a.r)).toEqual([null, 'resumed']);
     a.r.unmount();
     const b = await openTurn2([...oneTurn('s1', 'first'), ...nextTurn('s1', {})]);
     expect(headers(b.r)).toEqual([null, null]);
@@ -703,10 +727,10 @@ describe('How a turn continued', () => {
       ...oneTurn('s1', 'first'),
       ...nextTurn('s1', { continuity: 'replay', replay_from: 'T1-s1', recovered_from: ' T1-s1 ', recovered_reason: 'the agent stopped' }),
     ]);
-    expect(headers(a.r)[1]).toBe(' · continued after turn 1 was interrupted (the agent stopped)');
+    expect(headers(a.r)[1]).toBe('continued after turn 1 was interrupted (the agent stopped)');
     a.r.unmount();
     const b = await openTurn2([...oneTurn('s1', 'first'), ...nextTurn('s1', { recovered_from: 'T1-s1' })]);
-    expect(headers(b.r)[1]).toBe(' · continued after turn 1 was interrupted');
+    expect(headers(b.r)[1]).toBe('continued after turn 1 was interrupted');
     b.r.unmount();
   });
 
@@ -717,7 +741,7 @@ describe('How a turn continued', () => {
         ...oneTurn('s1', 'first'),
         ...nextTurn('s1', { continuity: 'replay', replay_from: 'T1-s1', recovered_from: value }),
       ]);
-      expect(headers(r)).toEqual([null, ' · continued from turn 1']);
+      expect(headers(r)).toEqual([null, 'continued from turn 1']);
       r.unmount();
     }
   );

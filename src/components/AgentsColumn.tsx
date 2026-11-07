@@ -100,17 +100,23 @@ export const AgentsColumn: React.FC<AgentsColumnProps> = ({
           );
         })}
 
+        {/* The AgentBus this cockpit reads, as one card at the foot: its name, a
+            live dot and where the data comes from. */}
         <div className="brand-foot">
-          <div className="brand">AgentBus</div>
-          <div className="gw">
-            <i className="live" />
-            <span>{sourceLabel}</span>
+          <div className="bus-card">
+            <span className="bc-t">
+              <b className="brand">AgentBus</b>
+              <span className="bc-a gw">
+                <i className="live" />
+                <span>{sourceLabel}</span>
+              </span>
+            </span>
+            {onDisconnect && (
+              <button className="disconnect" onClick={onDisconnect}>
+                {disconnectLabel}
+              </button>
+            )}
           </div>
-          {onDisconnect && (
-            <button className="disconnect" onClick={onDisconnect}>
-              {disconnectLabel}
-            </button>
-          )}
         </div>
       </div>
     </aside>

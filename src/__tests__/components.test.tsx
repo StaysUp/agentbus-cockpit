@@ -1,12 +1,14 @@
 // @vitest-environment jsdom
 import { act, useState } from 'react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { ConvoColumn } from '../components/ConvoColumn';
 import { RightPanel } from '../components/RightPanel';
+import { SessionsColumn } from '../components/SessionsColumn';
+import { formatAgo } from '../utils/format';
 import { ReplayDataSource } from '../data/ReplayDataSource';
 import { replyPreview, turnDetail } from '../data/turns';
 import { SessionDetail, Turn } from '../types';
-import { click, ev, jsonl, render, useSelection, openSession } from './helpers';
+import { click, ev, jsonl, render, useSelection, openSession, showDetails } from './helpers';
 
 async function sessionFrom(events: ReturnType<typeof ev>[], id: string) {
   const src = new ReplayDataSource(jsonl(events));
@@ -28,7 +30,7 @@ function toolSession() {
 }
 
 describe('RightPanel', () => {
-  it('#1 opening a row in Model calls or Tool calls keeps the current tab', async () => {
+  it('#1 opening a row in Model calls or Tools keeps the current tab', async () => {
     const session = await sessionFrom(toolSession(), 'c1');
     const turn = session.turnsList[0];
 
@@ -45,15 +47,15 @@ describe('RightPanel', () => {
     await click(r.container.querySelector('#d-body tr.ev'));
     expect(tab('Model calls').className).toContain('on');
 
-    await click(tab('Tool calls'));
+    await click(tab('Tools'));
     await click(r.container.querySelector('#d-body tr.ev'));
-    expect(tab('Tool calls').className).toContain('on');
+    expect(tab('Tools').className).toContain('on');
     r.unmount();
   });
 });
 
 describe('RightPanel collapse', () => {
-  it('R2#4 a collapsed default row stays collapsed until something new is selected', async () => {
+  it('R2#4 a collapsed row stays collapsed until something new is selected', async () => {
     const session = await sessionFrom(toolSession(), 'c1');
     const turn = session.turnsList[0];
     let rerender: (() => void) | null = null;
@@ -65,6 +67,10 @@ describe('RightPanel collapse', () => {
     };
     const r = await render(<Harness />);
     const open = () => r.container.querySelectorAll('#d-body tr.ev-open').length;
+    await click(Array.from(r.container.querySelectorAll('#d-tabs .tab')).find((b) => b.textContent === 'Events'));
+    // Rows start collapsed; open one, then collapse it.
+    expect(open()).toBe(0);
+    await click(r.container.querySelector('#d-body tr.ev'));
     expect(open()).toBe(1);
     await click(r.container.querySelector('#d-body tr.ev.sel'));
     expect(open()).toBe(0);
@@ -97,7 +103,7 @@ describe('RightPanel ledger rows', () => {
   });
 
   it('R3#3 a tool row opened through its result collapses on one click', async () => {
-    const r = await openedThrough('Tool calls', (t) => t.detail!.toolCalls[0].completed!.id);
+    const r = await openedThrough('Tools', (t) => t.detail!.toolCalls[0].completed!.id);
     expect(r.container.querySelectorAll('#d-body tr.ev-open')).toHaveLength(1);
     await click(r.container.querySelector('#d-body tr.ev.sel'));
     expect(r.container.querySelectorAll('#d-body tr.ev-open')).toHaveLength(0);
@@ -109,6 +115,10 @@ describe('ConvoColumn', () => {
   it('R3#2 the first Hide details click hides the details', async () => {
     const session = await sessionFrom(toolSession(), 'c1');
     const r = await render(<ConvoColumn session={session} selectedTurn={null} onSelectTurn={() => {}} />);
+    // Details start hidden; Show details shows them.
+    expect(r.container.querySelectorAll('.wlines')).toHaveLength(0);
+    expect(r.container.querySelector('.work-h')!.textContent).toContain('Show details');
+    await click(r.container.querySelector('.work-h'));
     expect(r.container.querySelectorAll('.wlines')).toHaveLength(1);
     await click(r.container.querySelector('.work-h'));
     expect(r.container.querySelectorAll('.wlines')).toHaveLength(0);
@@ -123,6 +133,7 @@ describe('ConvoColumn', () => {
     const r = await render(
       <ConvoColumn session={session} selectedTurn={session.turnsList[0]} onSelectTurn={() => {}} />
     );
+    await showDetails(r.container);
     const status = (name: string) => {
       const row = Array.from(r.container.querySelectorAll('.wl.tool')).find(
         (b) => b.querySelector('.wk')!.textContent === name
@@ -208,14 +219,14 @@ describe('ConvoColumn turns not yet opened', () => {
     const head = (i: number) => blocks[i].querySelector('.tb-h')!.textContent;
     const answer = (i: number) => blocks[i].querySelector('.m-agent');
 
-    expect(head(0)).toBe('Turn 1 · 7 model calls · claude-opus-5-5');
+    expect(head(0)).toBe('Turn 1 claude-opus-5-5 · 7 model calls');
     expect(answer(0)!.className).toContain('preview');
     expect(Array.from(answer(0)!.querySelectorAll('p')).map((p) => p.textContent)).toEqual(['First part.', 'Second part…']);
 
-    expect(head(1)).toBe('Turn 2 · 0 model calls');
+    expect(head(1)).toBe('Turn 2 0 model calls');
     expect(answer(1)).toBeNull();
 
-    expect(head(2)).toBe('Turn 3 · 1 model call · m-detail');
+    expect(head(2)).toBe('Turn 3 m-detail · 1 model call');
     expect(answer(2)!.textContent).toBe('The whole answer.');
     expect(answer(2)!.className).not.toContain('preview');
 
@@ -281,12 +292,65 @@ describe('RightPanel model calls', () => {
     r.unmount();
   });
 
-  it('the Model calls header names the distinct models the calls used', async () => {
+  it('the Model calls summary line names the distinct models the calls used', async () => {
     const r = await panel((t) => t.detail!.modelCalls[0].requested.id);
     await click(tab(r, 'Model calls'));
-    const head = r.container.querySelector('#d-body .ledger-head')!.textContent;
-    expect(head).toBe('claude-sonnet-5, claude-haiku-5-5 · 3 calls in this turn');
+    const head = r.container.querySelector('#d-body .tab-sum')!.textContent;
+    expect(head).toBe('3 calls · claude-sonnet-5, claude-haiku-5-5 · click a call to open it');
     expect(head).not.toContain('Haiku 5.5');
+    r.unmount();
+  });
+});
+
+describe('the session card', () => {
+  it('says how long ago a session was active', () => {
+    const now = Date.parse('2026-11-07T12:00:00Z');
+    expect(formatAgo('2026-11-07T11:59:30Z', now)).toBe('just now');
+    expect(formatAgo('2026-11-07T11:57:00Z', now)).toBe('3 min ago');
+    expect(formatAgo('2026-11-07T11:00:00Z', now)).toBe('1 hour ago');
+    expect(formatAgo('2026-11-05T12:00:00Z', now)).toBe('2 days ago');
+    expect(formatAgo('', now)).toBe('');
+    expect(formatAgo('not a time', now)).toBe('');
+  });
+
+  it('the last-active time moves on with the clock, with no new event', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
+    try {
+      vi.setSystemTime(Date.parse('2026-11-07T12:00:00Z'));
+      const rows = [{
+        id: 'a', agent: 'claude', client: 'c', title: 't', started: '2026-11-07T11:59:50Z', last: '2026-11-07T11:59:50Z',
+        open: true, turns: 1, usage: { input_tokens: 1, output_tokens: 0 },
+      }];
+      const r = await render(<SessionsColumn sessions={rows} selectedSessionId={null} onSelectSession={() => {}} />);
+      const meta = () => r.container.querySelector('.sess .s-m')!.textContent;
+      expect(meta()).toContain('just now');
+      await act(async () => {
+        vi.advanceTimersByTime(3 * 60_000);
+      });
+      expect(meta()).toContain('3 min ago');
+      r.unmount();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('the selected card holds the session id with a copy button; the others are buttons without it', async () => {
+    const rows = ['a', 'b'].map((id) => ({
+      id, agent: 'claude', client: 'c', title: `title ${id}`, started: '2026-11-05T09:00:00Z', last: '2026-11-05T09:10:00Z',
+      open: false, turns: 2, usage: { input_tokens: 1200, output_tokens: 0 },
+    }));
+    const picked: string[] = [];
+    const r = await render(<SessionsColumn sessions={rows} selectedSessionId="a" onSelectSession={(id) => picked.push(id)} />);
+    const on = r.container.querySelector('.sess.on')!;
+    expect(on.tagName).toBe('DIV');
+    expect(on.querySelector('.s-id code')!.textContent).toBe('a');
+    expect(on.querySelector('.s-id button.copy')).not.toBeNull();
+    const other = r.container.querySelector('button.sess')!;
+    expect(other.querySelector('.s-id')).toBeNull();
+    expect(other.querySelector('.s-m')!.textContent).toMatch(/^1\.2k tokens · \d+ days? ago$/);
+    expect(other.querySelector('.s-m')!.getAttribute('title')).toMatch(/^2 turns · last active /);
+    await click(other);
+    expect(picked).toEqual(['b']);
     r.unmount();
   });
 });
