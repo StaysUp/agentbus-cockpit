@@ -93,7 +93,8 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
 
   // Only the selected turn shows its working: "Show details", its calls and
   // how it continued. Every other turn shows its prompt and its reply, so the
-  // chat reads like a plain chat. A turn is selected while the panel is open
+  // chat reads like a plain chat. An error line on a turn is the exception:
+  // it shows on every turn, selected or not. A turn is selected while the panel is open
   // on it or on one of its calls; at the session level, or with the panel
   // closed, no turn is.
   const activeTurnId = panelOpen && level !== 'session' ? (selectedTurn?.id ?? null) : null;
@@ -262,7 +263,8 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
                     </div>
                   )}
 
-                  {isActive && notes.replayErrors.map((msg, i) => (
+                  {/* An error shows whichever turn is selected. */}
+                  {notes.replayErrors.map((msg, i) => (
                     <div key={i} className="form-error turn-error">
                       The earlier turns could not be replayed: {msg}
                     </div>

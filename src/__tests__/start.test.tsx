@@ -783,6 +783,26 @@ describe('Failures in a turn', () => {
     r.unmount();
   });
 
+  it('an error line stays on its turn when another turn is picked or the panel closes', async () => {
+    const failed = ev({ session: 's1', kind: 'replay.failed', error: 'history unreadable' });
+    const { r } = await openTurn2([
+      ...oneTurn('s1', 'first'),
+      ...nextTurn('s1', { continuity: 'replay', replay_from: 'T1-s1' }, [failed]),
+    ]);
+    const errs = () => Array.from(r.container.querySelectorAll('.tb')).map((t) => t.querySelector('.turn-error')?.textContent ?? null);
+    const want = [null, 'The earlier turns could not be replayed: history unreadable'];
+    expect(errs()).toEqual(want);
+    // Turn 1 picked: turn 2's continuity note goes, its error stays.
+    await click(r.container.querySelectorAll('.tb')[0]);
+    await settle();
+    expect(headers(r)).toEqual([null, null]);
+    expect(errs()).toEqual(want);
+    // The panel closed: still there.
+    await click(r.container.querySelector('#p-head .p-close'));
+    expect(errs()).toEqual(want);
+    r.unmount();
+  });
+
   it('shows a replay.failed streamed into an open turn', async () => {
     const { svc, r } = await openTurn2([...oneTurn('s1', 'first'), ...nextTurn('s1', { continuity: 'replay', replay_from: 'T1-s1' })]);
     expect(r.container.querySelector('.turn-error')).toBeNull();
