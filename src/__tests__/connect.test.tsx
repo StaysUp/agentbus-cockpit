@@ -142,7 +142,7 @@ describe('Connect screen', () => {
     await submit(r.container);
 
     expect(r.container.querySelector('.connect-error')?.textContent).toBe(
-      `cannot reach agentbus at ${ADDR}; start it with \`agentbus up -origin ${window.location.origin}\``
+      `cannot reach agentbus at ${ADDR}; start it with \`agentbus up\` (if it runs with -origin, that must be ${window.location.origin})`
     );
     r.unmount();
   });

@@ -20,10 +20,10 @@ npm run build   # type-check, then write dist/
 npm test
 ```
 
-For live data, start the service with the cockpit's origin allowed:
+For live data, start the service. It allows any browser origin, and the token guards every call:
 
 ```sh
-agentbus up -origin http://localhost:5173
+agentbus up
 ```
 
 ## The gate

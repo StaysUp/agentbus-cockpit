@@ -31,14 +31,15 @@ anything it shows, your own program can read too.
 
 ## Run
 
-1. Start AgentBus and allow the cockpit's origin:
+1. Start AgentBus:
 
    ```sh
-   agentbus up -origin http://localhost:5173
+   agentbus up
    ```
 
-   The service refuses browser requests from any other origin. The origin must match exactly:
-   open the cockpit at `localhost`, not `127.0.0.1`, or pass that origin instead.
+   Any browser origin may call it, because every call needs the token. To allow only the cockpit,
+   start it with `agentbus up -origin http://localhost:5173` instead. That origin must then match
+   exactly: open the cockpit at `localhost`, not `127.0.0.1`, or pass that origin.
 
 2. In this folder, install and start the cockpit:
 
@@ -76,8 +77,8 @@ anything it shows, your own program can read too.
 npm run build
 ```
 
-This writes `dist/`. Serve it from any static host, and pass that host's origin to
-`agentbus up -origin`.
+This writes `dist/`. Serve it from any static host. Plain `agentbus up` accepts it; to lock the
+service to that host, pass its origin to `agentbus up -origin`.
 
 ## Test
 

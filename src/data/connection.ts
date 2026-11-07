@@ -95,7 +95,8 @@ async function check(c: Connection, pageOrigin: string, signal: AbortSignal): Pr
     });
   } catch {
     // A refused connection and a missing CORS header look the same from here.
-    return `cannot reach agentbus at ${c.address}; start it with \`agentbus up -origin ${pageOrigin}\``;
+    // Plain `agentbus up` allows every origin; -origin locks it to one.
+    return `cannot reach agentbus at ${c.address}; start it with \`agentbus up\` (if it runs with -origin, that must be ${pageOrigin})`;
   }
   if (res.status === 401) return 'the token was refused';
   if (!res.ok) return `agentbus at ${c.address} answered ${res.status}`;
