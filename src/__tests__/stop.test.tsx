@@ -134,6 +134,8 @@ async function mount(svc: ReturnType<typeof fakeService>) {
 
 const goBtn = (r: { container: HTMLElement }) => r.container.querySelector('#c-reply button.go') as HTMLButtonElement;
 const footState = (r: { container: HTMLElement }) => r.container.querySelector('#convo .tb .tb-state');
+// A running turn shows its live line where the reply will be, in place of the foot's "running".
+const liveLine = (r: { container: HTMLElement }) => r.container.querySelector('#convo .tb .m-live');
 const stops = (svc: ReturnType<typeof fakeService>) => svc.reqs.filter((q) => q.method === 'POST' && q.path.endsWith('/stop'));
 
 afterEach(() => {
@@ -164,7 +166,7 @@ describe('The Stop button', () => {
     ];
     const svc = fakeService({ sessions: [row('s1', { resumable: false })], events: { s1: handPointed } });
     const r = await mount(svc);
-    expect(footState(r)?.textContent).toBe('running');
+    expect(liveLine(r)?.textContent).toMatch(/^Waiting on the model · call 1 · \d+s$/);
     expect(goBtn(r).textContent).toBe('Send');
     r.unmount();
   });
@@ -248,7 +250,7 @@ describe('The Stop button', () => {
     expect(r.container.querySelector('#c-reply .form-error')?.textContent).toBe('the main token only');
     expect(goBtn(r).textContent).toBe('Stop');
     expect(goBtn(r).disabled).toBe(false);
-    expect(footState(r)?.textContent).toBe('running');
+    expect(liveLine(r)).not.toBeNull();
     r.unmount();
   });
 

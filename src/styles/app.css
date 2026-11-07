@@ -581,3 +581,50 @@ label.nd-check > span { font-size: max(11px, 0.75rem); color: var(--ink); }
 
 /* How the turn continued, under the turn strip: the chat leaves it out. */
 .turn-cont { margin-top: 0.6rem; font-size: 0.775rem; color: var(--ink2); }
+
+/* Live status of a running turn (agentbus-notes/plans/LIVE_STATUS.md). The
+   running blue and its spinner are the mockup's. One line, fixed height: it
+   never grows, and long text ends in an ellipsis. */
+:root { --run: #2F6FDB; }
+.run { color: var(--run); }
+.spin.run-spin { display: inline-block; width: 0.75rem; height: 0.75rem; border: 2px solid rgba(47,111,219,.25); border-top-color: var(--run); flex: none; }
+.live-line { display: flex; align-items: center; gap: 0.4375rem; min-width: 0; white-space: nowrap; }
+.live-line .live-text { overflow: hidden; text-overflow: ellipsis; min-width: 0; font-variant-numeric: tabular-nums; }
+.live-line .mark { font-weight: 600; flex: none; }
+.live-line.run { color: var(--run); }
+.live-line.bad { color: var(--bad); }
+.m-live { height: 1.5rem; display: flex; align-items: center; font-size: 0.9375rem; margin: 0.125rem 0 0.25rem; overflow: hidden; }
+#sessions .s-live { display: block; overflow: hidden; }
+#sessions .s-live .live-line { font-size: max(11px, 0.75rem); }
+#sessions .s-tt { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+#sessions .s-cost { margin-left: auto; font-family: var(--mono); font-size: max(11px, 0.75rem); color: var(--ink2); font-weight: 500; flex: none; }
+
+/* The strip's cost: the last call's "+$0.04" fades in 1.5 s. */
+.cost-live .plus { font-family: var(--mono); font-size: max(11px, 0.6875rem); color: var(--run); margin-left: 0.25rem; font-weight: 500; animation: plusfade 1.5s ease-out forwards; }
+@keyframes plusfade { from { opacity: 1; } to { opacity: 0; } }
+
+/* The Tools tab: a thin line per model call, a card per tool. */
+.tcards { display: flex; flex-direction: column; gap: 0.25rem; }
+.tgroup { display: flex; flex-direction: column; gap: 0.25rem; }
+.tcall { font-family: var(--mono); font-size: max(11px, 0.7188rem); color: var(--ink3); padding: 0.375rem 0.25rem 0; }
+.tsaid { font-size: 0.8125rem; font-style: italic; color: var(--ink3); padding: 0 0.25rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tcard { border: 1px solid var(--line); border-radius: 0.625rem; background: #fff; padding: 0.375rem 0.625rem; }
+.tcard.running { box-shadow: inset 3px 0 0 var(--run); }
+.tcard.failed { box-shadow: inset 3px 0 0 var(--bad); }
+.tcard.sel { border-color: var(--line2); }
+.tcard-h { display: grid; grid-template-columns: 3.25rem 1fr auto; gap: 0.625rem; align-items: baseline; cursor: pointer; }
+.tcard .k { font-family: var(--mono); font-size: max(11px, 0.75rem); color: var(--ink2); }
+.tcard .t { min-width: 0; overflow-wrap: anywhere; font-size: 0.8125rem; }
+.tcard .t code { color: var(--ink); font-size: max(11px, 0.75rem); }
+.tcard .d { font-family: var(--mono); font-size: max(11px, 0.7188rem); color: var(--ink3); white-space: nowrap; display: inline-flex; gap: 0.375rem; align-items: center; }
+.tcard .d.run { color: var(--run); }
+.tcard .d.bad { color: var(--bad); }
+.tcard .tdiff { margin: 0.25rem 0 0.125rem 3.875rem; font-family: var(--mono); font-size: max(11px, 0.7188rem); border-radius: 0.5rem; overflow: hidden; border: 1px solid var(--line); }
+.tcard .tdiff div { padding: 1px 0.625rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+.tcard .tdiff .del { background: #FBEAE6; color: #7A2414; }
+.tcard .tdiff .add { background: #E1F4E9; color: #0B5A36; }
+.tcard .tdiff .more { color: var(--ink3); background: #FAFAF8; }
+.tcard .tscript { margin: 0.25rem 0 0.125rem 3.875rem; font-size: max(11px, 0.7188rem); background: #FAFAF8; border: 1px solid var(--line); border-radius: 0.5rem; padding: 0.375rem 0.625rem; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--ink2); }
+.tcard .why { margin: 0.125rem 0 0 3.875rem; font-family: var(--mono); font-size: max(11px, 0.7188rem); color: var(--bad); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tcard-open { margin-top: 0.5rem; }
+.tgroup-t { font-family: var(--mono); font-size: max(11px, 0.6875rem); color: var(--ink3); padding: 0 0.25rem; }

@@ -15,6 +15,9 @@ import { CallPanel, CallTab } from './CallPanel';
 import { LoadContext } from './ContextTab';
 import { ChevIcon, CopyButton, DownIcon } from './Icons';
 import { PanelHead } from './PanelHead';
+import { ToolsTab } from './ToolsTab';
+import { formatElapsed, liveStatus } from '../data/liveStatus';
+import { useNow } from '../utils/useNow';
 import { SessionPanel } from './SessionPanel';
 
 interface RightPanelProps {
@@ -40,6 +43,9 @@ interface RightPanelProps {
   loadContext?: LoadContext;
   // Reads one turn's events, to split a call's replayed history by turn.
   loadTurn?: (sessionId: string, turnId: string) => Promise<TurnDetail | null>;
+  // True for a source that streams: a running turn's strip and Tools tab
+  // follow its events as they arrive. Recorded data shows turns as they are.
+  live?: boolean;
   // Closes the panel (its ×).
   onClose?: () => void;
   // Esc collapses an open row first, and only the next Esc closes the
@@ -134,7 +140,12 @@ const TurnPanel: React.FC<TurnPanelProps> = ({
   setActiveTab,
   openRow,
   setOpenRow,
+  live,
 }) => {
+  // A running turn's status from its events, read each second while it runs.
+  const running = !!live && turn?.state === 'running' && !!turn.detail;
+  const now = useNow(running);
+  const status = running ? liveStatus(turn!.detail!.events, now, turn!.agent) : undefined;
   // The open row: what was opened or collapsed in this turn. Rows start
   // collapsed; a click opens one.
   const expandedEventId = turn && openRow?.turnId === turn.id ? openRow.id : null;
@@ -213,8 +224,20 @@ const TurnPanel: React.FC<TurnPanelProps> = ({
         <div className="strip first">
           <div>
             <span>Cost</span>
-            <b>
-              <Cost usd={turn.costUsd} complete={turn.costComplete} />
+            <b className="cost-live">
+              {status ? (
+                <>
+                  <Cost usd={status.costUsd} complete={status.costComplete} />
+                  {/* The last call's cost, once per call; it fades in 1.5 s. */}
+                  {status.lastDeltaId && formatCost(status.lastDeltaUsd) ? (
+                    <span key={status.lastDeltaId} className="plus">
+                      +{formatCost(status.lastDeltaUsd)}
+                    </span>
+                  ) : null}
+                </>
+              ) : (
+                <Cost usd={turn.costUsd} complete={turn.costComplete} />
+              )}
             </b>
           </div>
           <div>
@@ -225,7 +248,7 @@ const TurnPanel: React.FC<TurnPanelProps> = ({
           </div>
           <div>
             <span>Time</span>
-            <b>{turn.durationMs === undefined ? '—' : formatDuration(turn.durationMs)}</b>
+            <b>{status ? formatElapsed(status.elapsedMs) : turn.durationMs === undefined ? '—' : formatDuration(turn.durationMs)}</b>
           </div>
           {(turn.state !== 'finished' || turn.stopped) && (
             <div>
@@ -631,71 +654,16 @@ const TurnPanel: React.FC<TurnPanelProps> = ({
         )}
 
         {activeTab === 'tools' && (
-          <div>
-            <table className="grid events">
-              <thead>
-                <tr>
-                  <th style={{ width: '1.25rem' }}></th>
-                  <th>Time</th>
-                  <th>Tool</th>
-                  <th>Input</th>
-                  <th>Outcome</th>
-                </tr>
-              </thead>
-              <tbody>
-                {detail.toolCalls.map((pair) => {
-                  const req = pair.requested;
-                  const comp = pair.completed;
-                  const isOpen = expandedEventId === req.id || expandedEventId === comp?.id;
-                  return (
-                    <React.Fragment key={req.id}>
-                      <tr
-                        className={`ev ${isOpen ? 'sel' : ''}`}
-                        onClick={() => toggleEventDetail(req.id, isOpen)}
-                      >
-                        <td className="c">{isOpen ? <DownIcon /> : <ChevIcon />}</td>
-                        <td className="t">{formatTime(req.time)}</td>
-                        <td>
-                          <code>{req.tool_name}</code>
-                        </td>
-                        <td className="sm">
-                          <code>{toolInputSummary(req.tool_input).slice(0, 60)}</code>
-                        </td>
-                        <td>
-                          {comp?.tool_error ? (
-                            <span className="bad">error</span>
-                          ) : comp ? (
-                            <span className="ok">ok</span>
-                          ) : (
-                            <span className="dim">pending</span>
-                          )}
-                        </td>
-                      </tr>
-                      {isOpen && (
-                        <tr className="ev-open">
-                          <td></td>
-                          <td colSpan={4}>
-                            <div className="sub-h">Tool Request</div>
-                            {renderEventExpandedDetail(req, false)}
-                            {comp && (
-                              <>
-                                <div className="sub-h" style={{ marginTop: '0.75rem' }}>
-                                  Tool Result
-                                </div>
-                                {renderEventExpandedDetail(comp, false)}
-                              </>
-                            )}
-                          </td>
-                        </tr>
-                      )}
-                    </React.Fragment>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+          <ToolsTab
+            detail={detail}
+            folder={folder}
+            now={now}
+            running={!!live && turn.state === 'running'}
+            openId={expandedEventId}
+            onToggle={(id, isOpen) => toggleEventDetail(id, isOpen)}
+            renderDetail={(e) => renderEventExpandedDetail(e, false)}
+          />
         )}
-
 
         {activeTab === 'prompt' && (
           <div>
@@ -792,7 +760,7 @@ export const TabSum: React.FC<{ tab: TabKey; turn: Turn; detail: TurnDetail }> =
       head = plural(detail.toolCalls.length, 'tool call');
       const failed = detail.toolCalls.filter((p) => p.completed?.tool_error).length;
       if (failed) facts.push(<span className="bad">{failed} failed</span>);
-      facts.push('click a row to open it');
+      facts.push('click a card to open it');
       break;
     }
     case 'skills':

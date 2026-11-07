@@ -8,6 +8,8 @@ import { SessionsColumn } from './components/SessionsColumn';
 import { rememberFolder } from './data/folders';
 import { ReplayDataSource } from './data/ReplayDataSource';
 import { applyList, countedIn, isNewerList, ListCursor, StreamedCost, streamedCost } from './data/sessionList';
+import { addLiveEvent, LiveTurns, mergeLive, noteEventTime } from './data/liveStatus';
+import { refreshNow } from './utils/useNow';
 import { addStreamedCost, addTurnEvents, buildAgents, createEmptyUsage, turnDetail } from './data/turns';
 import {
   CockpitEvent,
@@ -228,6 +230,43 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
       });
   };
 
+  // The latest turn of each session with its events, from the stream, for the
+  // live status on the session cards and in the chat. Only a source that
+  // streams fills it; recorded data has no live status.
+  const [liveTurns, setLiveTurns] = useState<LiveTurns>({});
+  const liveTurnsRef = useRef<LiveTurns>({});
+  const liveReads = useRef<Set<string>>(new Set());
+  // Read a turn's earlier events once, for a turn the stream joined late.
+  const backfillLive = useRef<(session: string, turn: string) => void>(() => {});
+  backfillLive.current = (session: string, turn: string) => {
+    const key = `${session}/${turn}`;
+    if (liveReads.current.has(key)) return;
+    liveReads.current.add(key);
+    dataSource
+      .getTurn(session, turn)
+      .then((d) => {
+        if (!d) return;
+        liveTurnsRef.current = mergeLive(liveTurnsRef.current, session, turn, d.events);
+        setLiveTurns(liveTurnsRef.current);
+      })
+      .catch((err) => console.warn(`Reading turn ${turn} failed:`, err))
+      .finally(() => liveReads.current.delete(key));
+  };
+  // A session a run holds open has a running turn: read its last running turn.
+  const loadOpenTurns = useRef<(sessions: SessionSummary[]) => void>(() => {});
+  loadOpenTurns.current = (rows: SessionSummary[]) => {
+    for (const row of rows) {
+      if (!row.open || liveTurnsRef.current[row.id]) continue;
+      dataSource
+        .getTurns(row.id)
+        .then((list) => {
+          const running = list.turns.filter((t) => t.state === 'running').pop();
+          if (running && !liveTurnsRef.current[row.id]) backfillLive.current(row.id, running.id);
+        })
+        .catch((err) => console.warn(`Reading session ${row.id} failed:`, err));
+    }
+  };
+
   // Every session id seen, so a new session refreshes the lists once.
   const knownSessionsRef = useRef<Set<string>>(new Set());
   for (const s of sessions) knownSessionsRef.current.add(s.id);
@@ -238,6 +277,14 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
     let refreshTimer: ReturnType<typeof setTimeout> | null = null;
     const unsubscribe = dataSource.subscribe(
       (event) => {
+        noteEventTime(event.time);
+        refreshNow();
+        const live = addLiveEvent(liveTurnsRef.current, event);
+        if (live.next !== liveTurnsRef.current) {
+          liveTurnsRef.current = live.next;
+          setLiveTurns(live.next);
+        }
+        if (live.backfill) backfillLive.current(event.session, event.turn!);
         // The shown session: an event of a loaded turn joins that turn, and
         // an event that changes the turn list (not yet counted in it) reads
         // the list again. While a session's turns load, its events wait.
@@ -285,6 +332,10 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
       (snapshot, cursor) => {
         snapshotGen.current++;
         takeList({ sessions: snapshot, store: cursor?.store, seq: cursor?.seq }, true);
+        // The stream starts over: the live turns are read again from it.
+        liveTurnsRef.current = {};
+        setLiveTurns({});
+        loadOpenTurns.current(snapshot);
         setReloadKey((k) => k + 1);
       }
     );
@@ -585,6 +636,7 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
 
       <SessionsColumn
         sessions={sessions}
+        live={dataSource.subscribe ? liveTurns : undefined}
         selectedSessionId={selectedSessionId}
         onSelectSession={(sessId) => {
           nextSend();
@@ -605,6 +657,7 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
           onSend={sendMessage}
           onStop={stopTurn}
           stopping={stopping}
+          live={dataSource.subscribe ? liveTurns[sessionView.id] : undefined}
           selectedTurn={selectedTurn}
           onSelectTurn={clickTurn}
           level={shownLevel}
@@ -646,6 +699,7 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
         onOpenEvent={openEvent}
         loadContext={loadContext}
         loadTurn={loadTurn}
+        live={!!dataSource.subscribe}
         onClose={() => setPanelOpen(false)}
         escRef={panelEscRef}
       />

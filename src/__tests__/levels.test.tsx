@@ -309,7 +309,7 @@ describe('the turn panel', () => {
       '4 words',
       '10 events · click a row to open it',
       '2 calls · claude-sonnet-5 · click a call to open it',
-      '2 tool calls · click a row to open it',
+      '2 tool calls · click a card to open it',
     ]);
     expect(sums[5]).toMatch(/^Coming next · /);
     expect(sums[6]).toMatch(/^Coming next · /);

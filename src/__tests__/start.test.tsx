@@ -648,7 +648,8 @@ describe('The turn list from the API', () => {
     await settle();
     expect(turnReads(svc)).toBe(before + 1);
     expect(bubbles()).toEqual(['first', 'from elsewhere']);
-    expect(r.container.querySelectorAll('#convo .tb')[1].querySelector('.tb-state')?.textContent).toBe('running');
+    // While it runs, one live line stands where its reply will be.
+    expect(r.container.querySelectorAll('#convo .tb')[1].querySelector('.m-live')?.textContent).toMatch(/^Starting the agent · \d+s$/);
 
     // A tool call of the open turn (turn 1) joins its events from the stream:
     // no read of its events, and no read of the list (a tool call changes no row).
@@ -659,12 +660,13 @@ describe('The turn list from the API', () => {
     expect(turnReads(svc)).toBe(reads);
     await click(r.container.querySelectorAll('#convo .tb')[0]);
     await click(Array.from(r.container.querySelectorAll('#d-tabs .tab')).find((t) => t.textContent === 'Tools'));
-    expect(Array.from(r.container.querySelectorAll('#d-body tr.ev')).map((tr) => tr.querySelectorAll('td')[2].textContent)).toEqual(['Zed']);
+    expect(Array.from(r.container.querySelectorAll('#d-body .tcard .k')).map((k) => k.textContent)).toEqual(['Zed']);
 
     // The new turn ends: the list is read again and its state follows.
     await svc.push(ev({ session: 's1', kind: 'turn.completed', turn: 'T9', exchange: 'x9', outcome: 'finished' }));
     await settle();
     expect(r.container.querySelectorAll('#convo .tb')[1].querySelector('.tb-state')).toBeNull();
+    expect(r.container.querySelectorAll('#convo .tb')[1].querySelector('.m-live')).toBeNull();
     r.unmount();
   });
 

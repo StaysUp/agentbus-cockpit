@@ -1,8 +1,11 @@
 import React, { useEffect, useState } from 'react';
+import { liveStatus, LiveTurns } from '../data/liveStatus';
 import { SessionSummary } from '../types';
+import { useNow } from '../utils/useNow';
 import { formatAgo, formatCost, formatTokens } from '../utils/format';
 import { Cost } from './Cost';
 import { CopyButton, PlusIcon } from './Icons';
+import { LiveLine } from './LiveLine';
 
 interface SessionsColumnProps {
   sessions: SessionSummary[];
@@ -12,6 +15,9 @@ interface SessionsColumnProps {
   onNewSession?: () => void;
   // True when the service has no sessions at all.
   empty?: boolean;
+  // The latest turn of each session with its events, from the stream. A
+  // card whose turn runs shows its live status in place of cost and time.
+  live?: LiveTurns;
 }
 
 export const SessionsColumn: React.FC<SessionsColumnProps> = ({
@@ -20,6 +26,7 @@ export const SessionsColumn: React.FC<SessionsColumnProps> = ({
   onSelectSession,
   onNewSession,
   empty,
+  live,
 }) => {
   // "3 min ago" moves on with the clock, not only when an event arrives.
   const [now, setNow] = useState(() => Date.now());
@@ -27,6 +34,19 @@ export const SessionsColumn: React.FC<SessionsColumnProps> = ({
     const id = setInterval(() => setNow(Date.now()), AGO_TICK_MS);
     return () => clearInterval(id);
   }, []);
+  // The status of each session whose latest turn runs. The elapsed times tick
+  // each second only while one does.
+  const anyRunning = !!live && sessions.some((s) => live[s.id] && liveStatus(live[s.id].events, Date.now()).running);
+  const liveNow = useNow(anyRunning);
+  const statuses = new Map<string, ReturnType<typeof liveStatus>>();
+  if (live) {
+    for (const s of sessions) {
+      const t = live[s.id];
+      if (!t) continue;
+      const st = liveStatus(t.events, liveNow, s.agent);
+      if (st.running) statuses.set(s.id, st);
+    }
+  }
   return (
     <section id="sessions">
       <header className="colhead">
@@ -53,18 +73,29 @@ export const SessionsColumn: React.FC<SessionsColumnProps> = ({
         {sessions.map((s) => {
           const isSelected = selectedSessionId === s.id;
           const ago = formatAgo(s.last, now);
+          const status = statuses.get(s.id);
           // One quiet line: the cost (tokens when no cost is known) and when it
           // was last active.
-          const meta = (
-            <span className="s-m" title={`${s.turns} ${s.turns === 1 ? 'turn' : 'turns'}${s.last ? ` · last active ${new Date(s.last).toLocaleString()}` : ''}`}>
+          const metaTitle = `${s.turns} ${s.turns === 1 ? 'turn' : 'turns'}${s.last ? ` · last active ${new Date(s.last).toLocaleString()}` : ''}`;
+          const meta = status ? (
+            <span className="s-m s-live" title={metaTitle}>
+              <LiveLine status={status} />
+            </span>
+          ) : (
+            <span className="s-m" title={metaTitle}>
               {formatCost(s.cost_usd) ? <Cost usd={s.cost_usd} complete={s.cost_complete} /> : `${formatTokens(s.usage)} tokens`}
               {ago ? ` · ${ago}` : ''}
             </span>
           );
+          // While its turn runs, the cost moves to the title line (as in the sketch).
           const title = (
             <span className="s-t">
               {s.open ? <i className="live" /> : null}
-              {s.title}
+              <span className="s-tt">{s.title}</span>
+              {/* A new session's row says $0 before its first reply is priced; show nothing until one is. */}
+              {status && formatCost(s.cost_usd) && !(s.cost_usd === 0 && status.costUsd === null) ? (
+                <Cost className="s-cost" usd={s.cost_usd} complete={s.cost_complete} />
+              ) : null}
             </span>
           );
           // The selected card is the session's header: it adds the session id

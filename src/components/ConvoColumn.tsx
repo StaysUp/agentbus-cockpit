@@ -1,8 +1,11 @@
 import React, { useEffect, useState } from 'react';
+import { liveStatus, LiveTurn } from '../data/liveStatus';
 import { turnNotes } from '../data/turns';
 import { Level, SessionDetail, Turn } from '../types';
+import { useNow } from '../utils/useNow';
 import { formatCost, formatTokens, stateLabel, turnStateClass } from '../utils/format';
 import { Cost } from './Cost';
+import { LiveLine } from './LiveLine';
 
 interface ConvoColumnProps {
   session: SessionDetail;
@@ -25,6 +28,10 @@ interface ConvoColumnProps {
   onStop?: (turn: Turn) => Promise<void>;
   // The turns the person asked to stop that have not ended yet.
   stopping?: ReadonlySet<string>;
+  // Given only by a source that streams: the session's latest turn with its
+  // events. A running turn then shows one live status line where its reply
+  // will be. Recorded data has none, and its turns show as they are.
+  live?: LiveTurn;
 }
 
 // The person's message from the moment it is sent until its turn arrives.
@@ -46,6 +53,7 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
   onSend,
   onStop,
   stopping,
+  live,
 }) => {
   const [draft, setDraft] = useState('');
   const [readOnly, setReadOnly] = useState(false);
@@ -58,12 +66,25 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
     setPending((p) => (p && turnCount > p.turnsAtSend ? null : p));
   }, [turnCount]);
 
+  // The events a running turn's status is read from: its loaded events, or
+  // the stream's copy of the session's latest turn.
+  const liveEventsOf = (turn: Turn) =>
+    live === undefined || turn.state !== 'running' ? undefined : turn.detail?.events ?? (live?.turn === turn.id ? live.events : undefined);
+  const anyRunning = live !== undefined && session.turnsList.some((t) => t.state === 'running');
+  const now = useNow(anyRunning);
+
   const lastTurn = session.turnsList[turnCount - 1];
   const lastState = lastTurn?.state;
-  // The reply is on screen but the service has not stored session.closed yet
-  // (it holds the turn open for its last writes). Send waits for that close.
+  // The reply is in but the service has not stored session.closed yet (it
+  // holds the turn open for its last writes). Send waits for that close. With
+  // the turn's events, its status says so (a reply beside a tool call is not
+  // the last one); without them, any reply counts.
+  const lastEvents = lastTurn ? liveEventsOf(lastTurn) : undefined;
+  const lastStatus = lastEvents && lastEvents.length > 0 ? liveStatus(lastEvents, now, lastTurn.agent) : undefined;
   const finishing =
-    pending === null && lastState === 'running' && !!(lastTurn?.detail?.agentResponse || lastTurn?.reply);
+    pending === null &&
+    lastState === 'running' &&
+    (lastStatus ? lastStatus.state !== 'starting' && lastStatus.state !== 'model' && lastStatus.state !== 'tools' && lastStatus.state !== 'agent' : !!(lastTurn?.detail?.agentResponse || lastTurn?.reply));
   const turnRunning = pending !== null || lastState === 'running' || (!!open && !!resumable);
   const why = turnRunning
     ? finishing
@@ -133,6 +154,13 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
             const answer = detail ? detail.agentResponse : turn.reply;
             const answerCut = !detail && turn.replyTruncated;
             const notes = turnNotes(detail);
+            // While the turn runs, one line stands where its reply will be:
+            // it never grows. The reply replaces it once the last reply is in.
+            const liveEvents = liveEventsOf(turn);
+            const status = liveEvents && liveEvents.length > 0 ? liveStatus(liveEvents, now, turn.agent) : undefined;
+            const showLive =
+              live !== undefined && turn.state === 'running' && !(status && !status.running && answer) && !(status?.state === 'finishing' && answer);
+            const replyIn = live !== undefined && turn.state === 'running' && !showLive;
             // The turn header's facts: the model that made the turn, then its
             // calls. A line breaks between facts, never inside one.
             const facts = [
@@ -167,7 +195,20 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
                     </div>
                   </div>
 
-                  {answer && (
+                  {showLive && (
+                    <div className="m-live">
+                      {status ? (
+                        <LiveLine status={status} />
+                      ) : (
+                        <span className="live-line run">
+                          <i className="spin run-spin" aria-hidden />
+                          <span className="live-text">Running</span>
+                        </span>
+                      )}
+                    </div>
+                  )}
+
+                  {answer && !showLive && (
                     <div className={`m-agent${detail ? '' : ' preview'}`}>
                       {answer.split('\n\n').map((para, i, all) => (
                         <p key={i}>
@@ -186,9 +227,9 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
                   ))}
 
                   <div className="tb-foot">
-                    {(turn.state !== 'finished' || turn.stopped) && (
+                    {(turn.state !== 'finished' || turn.stopped) && !(showLive && !stopping?.has(turn.id)) && (
                       <span className={`tb-state ${turnStateClass(turn)}`}>
-                        {turn.state === 'running' && stopping?.has(turn.id) ? 'stopping…' : stateLabel(turn)}
+                        {turn.state === 'running' && stopping?.has(turn.id) ? 'stopping…' : replyIn ? 'finishing' : stateLabel(turn)}
                       </span>
                     )}
                     <span className="tb-stat">

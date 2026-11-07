@@ -39,7 +39,7 @@ describe('App', () => {
     // It shows in the panel's Tools tab.
     await click(r.container.querySelector('#convo .tb'));
     await click(Array.from(r.container.querySelectorAll('#d-tabs .tab')).find((t) => t.textContent === 'Tools'));
-    expect(Array.from(r.container.querySelectorAll('#d-body tr.ev')).map((tr) => tr.querySelectorAll('td')[2].textContent)).toEqual(['Late']);
+    expect(Array.from(r.container.querySelectorAll('#d-body .tcard .k')).map((k) => k.textContent)).toEqual(['Late']);
 
     r.unmount();
     expect(unsubscribed()).toBe(1);
@@ -108,6 +108,8 @@ describe('App', () => {
       push(ev({ seq: 7, session: 'up', kind: 'model.requested', turn: 'T2', exchange: 'x2' }));
       push(ev({ seq: 8, session: 'up', kind: 'model.responded', turn: 'T2', exchange: 'x2', status: 200, text: 's',
         usage: { input_tokens: 2000, output_tokens: 0 } }));
+      // The turn ends, so the card shows its tokens again rather than its live status.
+      push(ev({ seq: 9, session: 'up', kind: 'turn.completed', turn: 'T2', exchange: 'x2', outcome: 'finished' }));
     });
     // The shown session's row follows the session list, read again within 500 ms.
     await vi.waitFor(async () => {
@@ -186,6 +188,8 @@ describe('App', () => {
     rows = [rows[0], row('other', '2026-11-05T09:21:00Z', 2, 5000)];
     await act(async () => {
       push!(ev({ seq: 50, session: 'other', kind: 'turn.started', turn: 'T2', text: 'more' }));
+      // The turn ends, so the card shows its tokens again rather than its live status.
+      push!(ev({ seq: 51, session: 'other', kind: 'turn.completed', turn: 'T2', outcome: 'finished' }));
     });
     await vi.waitFor(async () => {
       await flush();

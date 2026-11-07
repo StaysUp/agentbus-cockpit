@@ -48,7 +48,7 @@ describe('RightPanel', () => {
     expect(tab('Model calls').className).toContain('on');
 
     await click(tab('Tools'));
-    await click(r.container.querySelector('#d-body tr.ev'));
+    await click(r.container.querySelector('#d-body .tcard-h'));
     expect(tab('Tools').className).toContain('on');
     r.unmount();
   });
@@ -104,27 +104,29 @@ describe('RightPanel ledger rows', () => {
 
   it('R3#3 a tool row opened through its result collapses on one click', async () => {
     const r = await openedThrough('Tools', (t) => t.detail!.toolCalls[0].completed!.id);
-    expect(r.container.querySelectorAll('#d-body tr.ev-open')).toHaveLength(1);
-    await click(r.container.querySelector('#d-body tr.ev.sel'));
-    expect(r.container.querySelectorAll('#d-body tr.ev-open')).toHaveLength(0);
+    expect(r.container.querySelectorAll('#d-body .tcard-open')).toHaveLength(1);
+    await click(r.container.querySelector('#d-body .tcard.sel .tcard-h'));
+    expect(r.container.querySelectorAll('#d-body .tcard-open')).toHaveLength(0);
     r.unmount();
   });
 });
 
 describe('ConvoColumn', () => {
-  it('#2 matches tool results by tool_id and shows error, ok or pending in the Tools tab', async () => {
+  it('#2 matches tool results by tool_id and shows error, done or no result in the Tools tab', async () => {
     const session = await sessionFrom(toolSession(), 'c1');
     const r = await render(<RightPanel turn={session.turnsList[0]} totalTurns={1} />);
     await click(Array.from(r.container.querySelectorAll('#d-tabs .tab')).find((b) => b.textContent === 'Tools'));
     const status = (name: string) => {
-      const row = Array.from(r.container.querySelectorAll('#d-body tr.ev')).find(
-        (tr) => tr.querySelectorAll('td')[2].textContent === name
-      );
-      return row!.querySelectorAll('td')[4].textContent;
+      const card = Array.from(r.container.querySelectorAll('#d-body .tcard')).find((c) => c.querySelector('.k')!.textContent === name);
+      return card!.querySelector('.d')!.textContent;
     };
+    // Alpha has tool_error; Beta has no error flag, so it is only "done";
+    // Gamma never returned, and the turn is not live.
     expect(status('Alpha')).toBe('error');
-    expect(status('Beta')).toBe('ok');
-    expect(status('Gamma')).toBe('pending');
+    expect(status('Beta')).toBe('done');
+    expect(status('Gamma')).toBe('no result');
+    // The three came from one reply: one line for the group.
+    expect(r.container.querySelector('#d-body .tgroup-t')!.textContent).toBe('3 tools from call 1 · they finish together');
     r.unmount();
   });
 
