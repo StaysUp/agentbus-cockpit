@@ -23,6 +23,8 @@ your agents' turns, every model call, its cost, and the full conversation.
 The cockpit is a client of the AgentBus API. It uses only the public client API, so
 anything it shows, your own program can read too.
 
+![AgentBus cockpit](docs/assets/cockpit-design.png)
+
 ## Prerequisites
 
 - Node.js 20.19 or later in the 20 line, or 22.12 or later. Vite needs one of these.
