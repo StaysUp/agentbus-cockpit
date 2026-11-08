@@ -628,3 +628,60 @@ label.nd-check > span { font-size: max(11px, 0.75rem); color: var(--ink); }
 .tcard .why { margin: 0.125rem 0 0 3.875rem; font-family: var(--mono); font-size: max(11px, 0.7188rem); color: var(--bad); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tcard-open { margin-top: 0.5rem; }
 .tgroup-t { font-family: var(--mono); font-size: max(11px, 0.6875rem); color: var(--ink3); padding: 0 0.25rem; }
+
+/* ---------- control plane: Review and CI/CD (mockup v5) ---------- */
+.run { color: var(--blue); }
+.connect-sec { margin-top: 0.5rem; padding-top: 0.75rem; border-top: 1px solid var(--line); font-size: max(11px, 0.75rem); font-weight: 600; color: var(--ink2); }
+.connect-sec span { display: block; font-weight: 400; color: var(--ink3); margin-top: 2px; }
+.nd-seg { display: inline-flex; align-self: flex-start; background: var(--gray-bg); border-radius: 0.4375rem; padding: 2px; gap: 2px; }
+.nd-seg button { font-size: max(11px, 0.75rem); padding: 0.25rem 0.625rem; border-radius: 0.3125rem; color: var(--ink2); }
+.nd-seg button.on { background: var(--panel); color: var(--ink); box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+.new-dialog input[name="base"], .new-dialog input[name="model"] { font-family: var(--mono); font-size: max(11px, 0.6875rem); }
+
+.review-bar { margin-top: 0.75rem; display: flex; flex-direction: column; gap: 0.3125rem; }
+.rb-row { display: flex; gap: 0.5rem; align-items: stretch; }
+.rb-pick { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; padding: 0.375rem 0.625rem; border: 1px solid var(--line2); border-radius: 0.5rem; background: var(--panel); }
+.rb-pick > span:first-child { font-size: max(11px, 0.6875rem); color: var(--ink3); }
+.rb-fields { display: flex; gap: 0.375rem; align-items: center; }
+.rb-fields select, .rb-fields input { font: inherit; font-size: 0.8125rem; font-weight: 600; border: 0; background: transparent; color: var(--ink); padding: 0; min-width: 0; }
+.rb-fields select { flex: none; }
+.rb-fields input { flex: 1; font-family: var(--mono); font-weight: 500; font-size: max(11px, 0.75rem); border-left: 1px solid var(--line); padding-left: 0.5rem; }
+.rb-fields select:focus, .rb-fields input:focus { outline: none; }
+.rb-go { flex: none; padding: 0 1rem; border-radius: 0.5rem; background: var(--ink); color: #fff; font-size: 0.8125rem; font-weight: 600; }
+.rb-go:disabled { opacity: .45; cursor: default; }
+.rb-note { font-size: max(11px, 0.7188rem); }
+.rb-verdict { display: flex; align-items: baseline; gap: 0.75rem; font-size: 0.8125rem; }
+.rb-line { flex: 1; min-width: 0; display: inline-flex; align-items: center; gap: 0.25rem; flex-wrap: wrap; }
+.rb-verdict .lnk { font-size: max(11px, 0.75rem); }
+.rb-earlier { display: flex; flex-direction: column; gap: 2px; font-size: max(11px, 0.75rem); }
+.rb-toggle { align-self: flex-start; color: var(--ink3); font-size: max(11px, 0.75rem); }
+.rb-toggle:hover { color: var(--ink); }
+.spin { width: 0.6875rem; height: 0.6875rem; border-radius: 50%; border: 1.5px solid var(--blue-bg); border-top-color: var(--blue); display: inline-block; flex: none; animation: spin 0.9s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.jobs .tab-sum { margin-bottom: 0.625rem; }
+.job-row { border: 1px solid var(--line); border-left: 3px solid var(--line2); border-radius: 0.5rem; padding: 0.625rem 0.75rem; margin-bottom: 0.5rem; background: var(--panel); }
+.job-row.s-ok { border-left-color: var(--green); }
+.job-row.s-bad { border-left-color: var(--bad); }
+.job-row.s-warn { border-left-color: var(--amber); }
+.job-row.s-run { border-left-color: var(--blue); }
+.job-row.turn-job { background: #FBFBFA; }
+.job-h { display: flex; align-items: baseline; gap: 0.5rem; font-size: 0.8438rem; }
+.job-h .spin { align-self: center; }
+.job-h code { font-size: max(11px, 0.6875rem); color: var(--ink3); }
+.job-st { margin-left: auto; font-weight: 600; white-space: nowrap; }
+.job-sub { font-size: 0.8125rem; color: var(--ink2); margin-top: 2px; }
+.job-facts { font-size: max(11px, 0.75rem); color: var(--ink3); margin-top: 2px; }
+.job-facts .sep { margin: 0 0.3125rem; }
+.findings { list-style: none; margin: 0.5rem 0 0; padding: 0; display: flex; flex-direction: column; gap: 0.3125rem; }
+.findings li { display: grid; grid-template-columns: 1.75rem auto 1fr; gap: 0.5rem; align-items: baseline; font-size: 0.8125rem; }
+.findings li code { font-size: max(11px, 0.6875rem); color: var(--ink); white-space: nowrap; }
+.sev { font-size: max(11px, 0.6875rem); font-family: var(--mono); }
+.sev-p1 { color: var(--bad); }
+.sev-p2 { color: var(--amber); }
+.sev-p3 { color: var(--ink3); }
+.job-acts { display: flex; gap: 0.875rem; margin-top: 0.375rem; font-size: max(11px, 0.75rem); }
+.job-acts:empty { display: none; }
+.job-reply { max-height: 22rem; overflow-y: auto; white-space: pre-wrap; }
+.job-foot { font-size: max(11px, 0.75rem); margin-top: 0.75rem; }
+.jobs-table td .note code { color: var(--ink3); }

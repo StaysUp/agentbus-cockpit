@@ -19,6 +19,9 @@ import { ToolsTab } from './ToolsTab';
 import { formatElapsed, liveStatus } from '../data/liveStatus';
 import { useNow } from '../utils/useNow';
 import { SessionPanel } from './SessionPanel';
+import { Job } from '../data/jobs';
+import { JobsView } from '../data/useJobs';
+import { JobsTab, ReviewBar } from './Jobs';
 
 interface RightPanelProps {
   turn: Turn | null;
@@ -46,6 +49,13 @@ interface RightPanelProps {
   // True for a source that streams: a running turn's strip and Tools tab
   // follow its events as they arrive. Recorded data shows turns as they are.
   live?: boolean;
+  // A control plane's jobs, when one is connected: the Review button and
+  // the CI/CD tab read them.
+  jobs?: JobsView;
+  onReview?: (job: Job, agent: string, model: string) => Promise<void>;
+  onCancelJob?: (job: Job) => Promise<void>;
+  // The agents the service can run, to pick a reviewer from.
+  loadAgents?: () => Promise<{ name: string; found: boolean }[]>;
   // Closes the panel (its ×).
   onClose?: () => void;
   // Esc collapses an open row first, and only the next Esc closes the
@@ -54,7 +64,7 @@ interface RightPanelProps {
   escRef?: React.MutableRefObject<(() => boolean) | null>;
 }
 
-type TabKey = 'result' | 'events' | 'model' | 'tools' | 'prompt' | 'skills' | 'mcp';
+type TabKey = 'result' | 'events' | 'model' | 'tools' | 'prompt' | 'skills' | 'mcp' | 'cicd';
 
 // Follows the selected level: the session, one turn, or one model call. The
 // turn and call tabs are kept here, so stepping down and back keeps them.
@@ -77,6 +87,9 @@ export const RightPanel: React.FC<RightPanelProps> = (props) => {
         agentName={props.agentName ?? session.agent}
         onSelectTurn={(t) => props.onSelectTurn?.(t)}
         onClose={props.onClose}
+        jobs={props.jobs ? props.jobs.ofSession(session.id) : undefined}
+        refOf={props.jobs?.refOf}
+        jobsError={props.jobs?.error}
       />
     );
   }
@@ -141,6 +154,10 @@ const TurnPanel: React.FC<TurnPanelProps> = ({
   openRow,
   setOpenRow,
   live,
+  jobs,
+  onReview,
+  onCancelJob,
+  loadAgents,
 }) => {
   // A running turn's status from its events, read each second while it runs.
   const running = !!live && turn?.state === 'running' && !!turn.detail;
@@ -210,6 +227,12 @@ const TurnPanel: React.FC<TurnPanelProps> = ({
   // How the turn continued, from its turn.started: the chat no longer shows it.
   const continued = continuedLine(turn.detail, session?.turnsList ?? []);
 
+  // The job that ran this turn, and its reviews, with a control plane.
+  const turnJob = jobs?.turnJob(turn.sessionId, turn.id);
+  const reviews = turnJob ? jobs!.reviewsOf(turnJob.id) : [];
+  const tabs = jobs ? [...TURN_TABS, ['cicd', 'CI/CD'] as [TabKey, string]] : TURN_TABS;
+  const tab: TabKey = activeTab === 'cicd' && !jobs ? 'result' : activeTab;
+
   // The head reads the turn list's row, so it shows while the events load.
   const head = (
     <>
@@ -274,6 +297,17 @@ const TurnPanel: React.FC<TurnPanelProps> = ({
           )}
         </div>
         {continued && <div className="turn-cont">{continued}</div>}
+        {turnJob && onReview && (
+          <ReviewBar
+            key={turn.id}
+            turn={turn}
+            job={turnJob}
+            reviews={reviews}
+            loadAgents={loadAgents}
+            onReview={(agent, model) => onReview(turnJob, agent, model)}
+            onShowJobs={() => setActiveTab('cicd')}
+          />
+        )}
       </div>
 
     </>
@@ -517,17 +551,19 @@ const TurnPanel: React.FC<TurnPanelProps> = ({
       {head}
 
       <div id="d-tabs">
-        {TURN_TABS.map(([key, label]) => (
-          <button key={key} className={`tab ${activeTab === key ? 'on' : ''}`} onClick={() => setActiveTab(key)}>
+        {tabs.map(([key, label]) => (
+          <button key={key} className={`tab ${tab === key ? 'on' : ''}`} onClick={() => setActiveTab(key)}>
             {label}
           </button>
         ))}
       </div>
 
       <div id="d-body">
-        <TabSum tab={activeTab} turn={turn} detail={detail} />
+        {tab !== 'cicd' && <TabSum tab={tab} turn={turn} detail={detail} />}
 
-        {activeTab === 'result' && (
+        {tab === 'cicd' && <JobsTab job={turnJob} reviews={reviews} onCancel={onCancelJob} />}
+
+        {tab === 'result' && (
           <div>
             {detail.agentResponse ? (
               <div className="reply">
@@ -541,7 +577,7 @@ const TurnPanel: React.FC<TurnPanelProps> = ({
           </div>
         )}
 
-        {activeTab === 'events' && (
+        {tab === 'events' && (
           <table className="grid events">
             <thead>
               <tr>
@@ -583,7 +619,7 @@ const TurnPanel: React.FC<TurnPanelProps> = ({
           </table>
         )}
 
-        {activeTab === 'model' && (
+        {tab === 'model' && (
           <div>
             <table className="grid events">
               <thead>
@@ -653,7 +689,7 @@ const TurnPanel: React.FC<TurnPanelProps> = ({
           </div>
         )}
 
-        {activeTab === 'tools' && (
+        {tab === 'tools' && (
           <ToolsTab
             detail={detail}
             folder={folder}
@@ -665,7 +701,7 @@ const TurnPanel: React.FC<TurnPanelProps> = ({
           />
         )}
 
-        {activeTab === 'prompt' && (
+        {tab === 'prompt' && (
           <div>
             <textarea
               className="prompt"
@@ -771,6 +807,8 @@ export const TabSum: React.FC<{ tab: TabKey; turn: Turn; detail: TurnDetail }> =
       head = 'Coming next';
       facts.push('the MCP servers this agent connects to, and the calls this turn made to each');
       break;
+    case 'cicd':
+      return null;
   }
   return (
     <div className="tab-sum">

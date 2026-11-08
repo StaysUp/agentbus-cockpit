@@ -1,11 +1,13 @@
 import React, { useState } from 'react';
+import { DEFAULT_JOBS_ADDRESS } from '../data/connection';
 
 interface ConnectScreenProps {
   address: string;
   onAddressChange: (address: string) => void;
   checking: boolean;
   error: string | null;
-  onConnect: (address: string, token: string) => void;
+  // jobs: a control plane to use too, when its token was given.
+  onConnect: (address: string, token: string, jobs?: { address: string; token: string }) => void;
   onUseRecorded: () => void;
 }
 
@@ -19,13 +21,18 @@ export const ConnectScreen: React.FC<ConnectScreenProps> = ({
 }) => {
   // The token lives only in this field until a check passes.
   const [token, setToken] = useState('');
+  // The control plane is optional: it is used only when a token is given.
+  const [jobsAddress, setJobsAddress] = useState(DEFAULT_JOBS_ADDRESS);
+  const [jobsToken, setJobsToken] = useState('');
   return (
     <div id="connect-wrap">
       <form
         className="connect"
         onSubmit={(e) => {
           e.preventDefault();
-          if (!checking) onConnect(address, token);
+          if (checking) return;
+          const jobs = jobsToken.trim() ? { address: jobsAddress, token: jobsToken.trim() } : undefined;
+          onConnect(address, token, jobs);
         }}
       >
         <div className="brand">AgentBus</div>
@@ -47,6 +54,31 @@ export const ConnectScreen: React.FC<ConnectScreenProps> = ({
             type="password"
             value={token}
             onChange={(e) => setToken(e.target.value)}
+            autoComplete="off"
+          />
+        </label>
+        <div className="connect-sec">
+          Control plane <span>optional: runs each turn as a job on a runner, and adds Review</span>
+        </div>
+        <label>
+          <span>Address</span>
+          <input
+            name="jobs-address"
+            type="text"
+            value={jobsAddress}
+            onChange={(e) => setJobsAddress(e.target.value)}
+            spellCheck={false}
+            autoComplete="off"
+          />
+        </label>
+        <label>
+          <span>Token</span>
+          <input
+            name="jobs-token"
+            type="password"
+            value={jobsToken}
+            onChange={(e) => setJobsToken(e.target.value)}
+            placeholder="leave empty to skip"
             autoComplete="off"
           />
         </label>

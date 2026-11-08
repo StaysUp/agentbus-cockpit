@@ -4,6 +4,8 @@ import { formatDuration, formatTokens, stateLabel, turnStateClass } from '../uti
 import { Cost } from './Cost';
 import { CopyButton } from './Icons';
 import { PanelHead } from './PanelHead';
+import { Job, TurnRef } from '../data/jobs';
+import { SessionJobs } from './Jobs';
 
 interface SessionPanelProps {
   session: SessionDetail;
@@ -13,10 +15,24 @@ interface SessionPanelProps {
   agentName: string;
   onSelectTurn: (turn: Turn) => void;
   onClose?: () => void;
+  // With a control plane: the session's jobs, live.
+  jobs?: Job[];
+  refOf?: (job: Job) => TurnRef | undefined;
+  jobsError?: string | null;
 }
 
 // The session level: what the whole session cost and used, and its turns.
-export const SessionPanel: React.FC<SessionPanelProps> = ({ session, costUsd, costComplete, agentName, onSelectTurn, onClose }) => {
+export const SessionPanel: React.FC<SessionPanelProps> = ({
+  session,
+  costUsd,
+  costComplete,
+  agentName,
+  onSelectTurn,
+  onClose,
+  jobs,
+  refOf,
+  jobsError,
+}) => {
   const turns = session.turnsList;
   return (
     <section id="right">
@@ -83,6 +99,9 @@ export const SessionPanel: React.FC<SessionPanelProps> = ({ session, costUsd, co
             ))}
           </tbody>
         </table>
+        {jobs && refOf && (
+          <SessionJobs jobs={jobs} turns={turns} refOf={refOf} onSelectTurn={onSelectTurn} error={jobsError} />
+        )}
       </div>
     </section>
   );

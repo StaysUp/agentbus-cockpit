@@ -13,6 +13,7 @@ import {
   saveReplay,
 } from './data/connection';
 import { LiveDataSource } from './data/LiveDataSource';
+import { checkControlPlane, ControlPlane } from './data/jobs';
 import { ReplayDataSource } from './data/ReplayDataSource';
 import rawSessionsJsonl from '../testdata/sessions-v0.jsonl?raw';
 
@@ -33,6 +34,7 @@ export const Cockpit: React.FC = () => {
     if (live) return new LiveDataSource({ baseUrl: live.address, token: live.token });
     return null;
   }, [saved, live]);
+  const jobs = useMemo(() => (live?.jobs ? new ControlPlane(live.jobs.address, live.jobs.token) : undefined), [live]);
 
   // Each check gets an id. Any mode change (recorded data, disconnect, a new
   // connect) takes a new id, so the result of an older check is ignored.
@@ -46,7 +48,7 @@ export const Cockpit: React.FC = () => {
   useEffect(() => {
     if (saved?.mode !== 'live' || !checking) return;
     const id = startCheck();
-    checkConnection(saved.connection, window.location.origin).then((problem) => {
+    checkAll(saved.connection).then((problem) => {
       if (id !== checkId.current) return;
       setChecking(false);
       if (problem) {
@@ -61,12 +63,13 @@ export const Cockpit: React.FC = () => {
     // Only the first check on load runs here; connect() does its own.
   }, []);
 
-  const connect = async (rawAddress: string, token: string) => {
+  const connect = async (rawAddress: string, token: string, jobs?: { address: string; token: string }) => {
     const c: Connection = { address: normalizeAddress(rawAddress), token };
+    if (jobs) c.jobs = { address: normalizeAddress(jobs.address), token: jobs.token };
     const id = startCheck();
     setChecking(true);
     setError(null);
-    const problem = await checkConnection(c, window.location.origin);
+    const problem = await checkAll(c);
     if (id !== checkId.current) return;
     setChecking(false);
     if (problem) {
@@ -91,6 +94,12 @@ export const Cockpit: React.FC = () => {
     setError(null);
   };
 
+  // A label for the foot of the Agents column.
+  const label = live
+    ? `agentbus at ${live.address.replace(/^https?:\/\//, '')}` +
+      (live.jobs ? ` · jobs at ${live.jobs.address.replace(/^https?:\/\//, '')}` : '')
+    : 'Recorded data';
+
   if (!dataSource) {
     return (
       <ConnectScreen
@@ -106,13 +115,22 @@ export const Cockpit: React.FC = () => {
 
   return (
     <App
-      key={live ? `${live.address}\n${live.token}` : 'replay'}
+      key={live ? `${live.address}\n${live.token}\n${live.jobs?.address ?? ''}` : 'replay'}
       dataSource={dataSource}
-      sourceLabel={live ? `agentbus at ${live.address.replace(/^https?:\/\//, '')}` : 'Recorded data'}
+      jobs={jobs}
+      sourceLabel={label}
       onDisconnect={disconnect}
       disconnectLabel={live ? 'Disconnect' : 'Connect'}
     />
   );
 };
+
+// The service first, then the control plane if one was given. The first
+// problem found, or null.
+async function checkAll(c: Connection): Promise<string | null> {
+  const problem = await checkConnection(c, window.location.origin);
+  if (problem || !c.jobs) return problem;
+  return checkControlPlane(c.jobs.address, c.jobs.token);
+}
 
 export default Cockpit;

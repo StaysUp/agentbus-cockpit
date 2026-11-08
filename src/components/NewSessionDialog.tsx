@@ -8,10 +8,13 @@ interface NewSessionDialogProps {
   onStart: (req: RunRequest) => Promise<void>;
   onClose: () => void;
   initialAgent?: string;
+  // A control plane is connected: the turn runs as a job, and can run in a
+  // new git worktree of the folder.
+  jobs?: boolean;
 }
 
 // Start an agent in a folder with a first message (POST /api/v0/turns).
-export const NewSessionDialog: React.FC<NewSessionDialogProps> = ({ loadAgents, onStart, onClose, initialAgent }) => {
+export const NewSessionDialog: React.FC<NewSessionDialogProps> = ({ loadAgents, onStart, onClose, initialAgent, jobs }) => {
   const [agents, setAgents] = useState<InstalledAgent[] | null>(null);
   const [agentsError, setAgentsError] = useState<string | null>(null);
   const [agent, setAgent] = useState(initialAgent ?? '');
@@ -19,6 +22,10 @@ export const NewSessionDialog: React.FC<NewSessionDialogProps> = ({ loadAgents, 
   const [folder, setFolder] = useState(() => recent[0] ?? '');
   const [prompt, setPrompt] = useState('');
   const [readOnly, setReadOnly] = useState(false);
+  const [model, setModel] = useState('');
+  // With a control plane: a new worktree at base (the default), or the folder as it is.
+  const [worktree, setWorktree] = useState(true);
+  const [base, setBase] = useState('HEAD');
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -43,7 +50,9 @@ export const NewSessionDialog: React.FC<NewSessionDialogProps> = ({ loadAgents, 
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
 
-  const ready = agent !== '' && folder.trim() !== '' && prompt.trim() !== '' && !starting;
+  const useWorktree = !!jobs && worktree;
+  const ready =
+    agent !== '' && folder.trim() !== '' && prompt.trim() !== '' && (!useWorktree || base.trim() !== '') && !starting;
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -51,7 +60,10 @@ export const NewSessionDialog: React.FC<NewSessionDialogProps> = ({ loadAgents, 
     setStarting(true);
     setError(null);
     try {
-      await onStart({ agent, folder: folder.trim(), prompt, read_only: readOnly });
+      const req: RunRequest = { agent, folder: folder.trim(), prompt, read_only: readOnly };
+      if (model.trim()) req.model = model.trim();
+      if (useWorktree) req.base = base.trim();
+      await onStart(req);
     } catch (err) {
       setError((err as Error).message);
       setStarting(false);
@@ -96,6 +108,33 @@ export const NewSessionDialog: React.FC<NewSessionDialogProps> = ({ loadAgents, 
             ))}
           </div>
         )}
+        {jobs && (
+          <>
+            <div className="nd-seg" role="radiogroup" aria-label="Workspace">
+              <button type="button" role="radio" aria-checked={worktree} className={worktree ? 'on' : ''} onClick={() => setWorktree(true)}>
+                New worktree
+              </button>
+              <button type="button" role="radio" aria-checked={!worktree} className={!worktree ? 'on' : ''} onClick={() => setWorktree(false)}>
+                This folder, as it is
+              </button>
+            </div>
+            {worktree && (
+              <label>
+                <span>From</span>
+                <input name="base" type="text" value={base} onChange={(e) => setBase(e.target.value)} spellCheck={false} autoComplete="off" />
+              </label>
+            )}
+            <div className="nd-note">
+              {worktree
+                ? 'The folder must be a git repository. A runner makes a worktree of it at this branch, tag or commit, and the session runs there.'
+                : 'A runner runs the session in this folder, with whatever is in it now.'}
+            </div>
+          </>
+        )}
+        <label>
+          <span>Model</span>
+          <input name="model" type="text" value={model} onChange={(e) => setModel(e.target.value)} placeholder="the agent's default" spellCheck={false} autoComplete="off" />
+        </label>
         <label>
           <span>First message</span>
           <textarea name="prompt" rows={4} value={prompt} onChange={(e) => setPrompt(e.target.value)} />
@@ -112,7 +151,7 @@ export const NewSessionDialog: React.FC<NewSessionDialogProps> = ({ loadAgents, 
         {error && <div className="form-error">{error}</div>}
         <div className="nd-actions">
           <button type="submit" className="connect-go" disabled={!ready}>
-            {starting ? 'Starting…' : 'Start'}
+            {starting ? (jobs ? 'Waiting for a runner…' : 'Starting…') : 'Start'}
           </button>
           <button type="button" className="use-recorded" onClick={onClose}>
             Cancel

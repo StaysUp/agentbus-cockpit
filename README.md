@@ -73,6 +73,23 @@ anything it shows, your own program can read too.
 
 **Use recorded data** opens the cockpit on a recorded sample, with no service needed.
 
+## Review and CI/CD (optional)
+
+The cockpit can also connect to a control plane: the job queue and runners in `agentbus-runners`.
+On the connect screen, fill in its address and the contents of its `token` file. Leave the token
+empty to skip it. Without it, the cockpit works as above.
+
+With a control plane connected:
+
+- **Each prompt runs as a job.** A runner takes it and runs it as an AgentBus turn. New session can
+  make a git worktree of the folder at a branch, tag or commit, so the session runs there.
+- **A finished turn has Review.** Pick the reviewer agent and model under Checked by, and press
+  Review. Another vendor is offered first. The review runs read-only in the turn's workspace, in a
+  session of its own. The turn then shows the verdict (passed, failed or no verdict) and each
+  finding with its severity, file and line. A turn can be reviewed more than once.
+- **The CI/CD tab** of a turn lists the turn's job and its reviews, live: state, runner, attempt,
+  time and cost. The session panel lists every job of the session.
+
 ## Build a static copy
 
 ```sh

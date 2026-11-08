@@ -10,6 +10,8 @@ import { ReplayDataSource } from './data/ReplayDataSource';
 import { applyList, countedIn, isNewerList, ListCursor, StreamedCost, streamedCost } from './data/sessionList';
 import { addLiveEvent, LiveTurns, mergeLive, noteEventTime } from './data/liveStatus';
 import { refreshNow } from './utils/useNow';
+import { Job, JobsSource, JobSpec, startTurnJob } from './data/jobs';
+import { useJobs } from './data/useJobs';
 import { addStreamedCost, addTurnEvents, buildAgents, createEmptyUsage, turnDetail } from './data/turns';
 import {
   CockpitEvent,
@@ -83,12 +85,18 @@ interface AppProps {
   sourceLabel?: string;
   onDisconnect?: () => void;
   disconnectLabel?: string;
+  // A control plane, when one is connected: each prompt then runs as a turn
+  // job on a runner, and a turn that ran as a job can be reviewed.
+  jobs?: JobsSource;
 }
 
-export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabel, onDisconnect, disconnectLabel }) => {
+export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabel, onDisconnect, disconnectLabel, jobs }) => {
   const [dataSource] = useState<DataSource>(
     () => propDataSource || new ReplayDataSource(rawSessionsJsonl)
   );
+  // The jobs, read again every few seconds while a control plane is connected.
+  const jobsView = useJobs(jobs);
+  const refreshJobs = jobsView?.refresh;
 
   // Every session from one snapshot; agents and the Sessions column derive
   // from it. null until the first list arrives.
@@ -417,9 +425,23 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
   const loadTurn = useCallback((sessionId: string, turnId: string) => dataSource.getTurn(sessionId, turnId), [dataSource]);
   const canStart = !!(dataSource.startRun && dataSource.getInstalledAgents);
   const loadAgents = useCallback(() => dataSource.getInstalledAgents!(), [dataSource]);
+  // With a control plane, a prompt is a turn job: a runner runs it, and the
+  // turn shows here once the runner has started it. Without one, the service
+  // runs it directly.
+  const runAsJob = async (spec: JobSpec): Promise<Started> => {
+    const { ref } = await startTurnJob(jobs!, spec);
+    refreshJobs?.();
+    return { id: ref.session, turn: ref.turn };
+  };
   const startRun = async (req: RunRequest) => {
     const gen = nextSend();
-    const started = await dataSource.startRun!(req);
+    const started = jobs
+      ? await runAsJob(
+          req.base
+            ? { agent: req.agent, repo: req.folder, base: req.base, prompt: req.prompt, model: req.model, read_only: req.read_only }
+            : { agent: req.agent, folder: req.folder, prompt: req.prompt, model: req.model, read_only: req.read_only }
+        )
+      : await dataSource.startRun!(req);
     rememberFolder(req.folder);
     setNewSession(null);
     awaitTurn(gen, started);
@@ -434,7 +456,25 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
         if (shownId === null) return;
         const gen = nextSend();
         const from = shownId;
-        awaitTurn(gen, await dataSource.sendMessage!(from, { prompt, read_only: readOnly }), from);
+        const started = jobs
+          ? await runAsJob({ session: from, prompt, read_only: readOnly || undefined })
+          : await dataSource.sendMessage!(from, { prompt, read_only: readOnly });
+        awaitTurn(gen, started, from);
+      }
+    : undefined;
+
+  // A review of a turn job, and a cancel of any job. Each rejects with the
+  // control plane's words.
+  const reviewJob = jobs
+    ? async (job: Job, agent: string, model: string) => {
+        await jobs.review(job.id, { agent, model: model || undefined });
+        refreshJobs?.();
+      }
+    : undefined;
+  const cancelJob = jobs
+    ? async (job: Job) => {
+        await jobs.cancel(job.id);
+        refreshJobs?.();
       }
     : undefined;
 
@@ -699,6 +739,10 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
         onOpenEvent={openEvent}
         loadContext={loadContext}
         loadTurn={loadTurn}
+        jobs={jobsView}
+        onReview={reviewJob}
+        onCancelJob={cancelJob}
+        loadAgents={dataSource.getInstalledAgents ? loadAgents : undefined}
         live={!!dataSource.subscribe}
         onClose={() => setPanelOpen(false)}
         escRef={panelEscRef}
@@ -711,6 +755,7 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
           onStart={startRun}
           onClose={() => setNewSession(null)}
           initialAgent={newSession.agent}
+          jobs={!!jobs}
         />
       )}
     </div>
