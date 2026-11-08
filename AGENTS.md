@@ -48,7 +48,7 @@ with no console errors. Open it in a browser and look before saying it works.
 - **The token stays in the browser session.** It is sent only to the service address the user
   entered.
 - **The control plane is optional** (`src/data/jobs.ts`). With it, prompts run as jobs and turns can
-  be reviewed. Its contract is the README of `agentbus-runners`. Without it, nothing changes. Its
+  be reviewed. Its contract is the README of `agentbus-ci`. Without it, nothing changes. Its
   token is kept the same way, and sent only to its own address.
 
 ## Conventions

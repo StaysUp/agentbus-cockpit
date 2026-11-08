@@ -75,7 +75,7 @@ anything it shows, your own program can read too.
 
 ## Review and CI/CD (optional)
 
-The cockpit can also connect to a control plane: the job queue and runners in `agentbus-runners`.
+The cockpit can also connect to a control plane: the job queue and runners in `agentbus-ci`.
 On the connect screen, fill in its address and the contents of its `token` file. Leave the token
 empty to skip it. Without it, the cockpit works as above.
 
@@ -87,6 +87,9 @@ With a control plane connected:
   Review. Another vendor is offered first. The review runs read-only in the turn's workspace, in a
   session of its own. The turn then shows the verdict (passed, failed or no verdict) and each
   finding with its severity, file and line. A turn can be reviewed more than once.
+- **A failed review has Fix.** It puts the findings in the message box as a prompt: severity, file
+  and line, and what is wrong. Edit it if you like, then press Send. Nothing is sent by itself. It
+  runs as the session's next turn, in the same workspace. Then press Review again.
 - **The CI/CD tab** of a turn lists the turn's job and its reviews, live: state, runner, attempt,
   time and cost. The session panel lists every job of the session.
 

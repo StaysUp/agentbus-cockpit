@@ -6,6 +6,7 @@ import {
   ended,
   Finding,
   findingPlace,
+  fixPrompt,
   Job,
   jobTimes,
   modelHints,
@@ -71,11 +72,15 @@ interface ReviewBarProps {
   loadAgents?: () => Promise<{ name: string; found: boolean }[]>;
   onReview: (agent: string, model: string) => Promise<void>;
   onShowJobs: () => void;
+  // Puts a prompt in the message box, for the person to edit and send. Given
+  // only where the source can send a next message; the box stays disabled
+  // while a turn runs.
+  onFix?: (prompt: string) => void;
 }
 
 // Checked by, the Review button, and the newest review under them (mockup
 // v5). Each press makes a review job; several may run at once.
-export const ReviewBar: React.FC<ReviewBarProps> = ({ turn, job, reviews, loadAgents, onReview, onShowJobs }) => {
+export const ReviewBar: React.FC<ReviewBarProps> = ({ turn, job, reviews, loadAgents, onReview, onShowJobs, onFix }) => {
   const [agents, setAgents] = useState<string[]>(['claude', 'codex']);
   const [agent, setAgent] = useState(() => defaultReviewer(turn.agent, ['claude', 'codex']));
   const [model, setModel] = useState(() => defaultModel(defaultReviewer(turn.agent, ['claude', 'codex'])));
@@ -123,6 +128,9 @@ export const ReviewBar: React.FC<ReviewBarProps> = ({ turn, job, reviews, loadAg
 
   const newest = reviews[reviews.length - 1];
   const earlier = reviews.slice(0, -1);
+  // Fix is offered on the newest review when it failed: it fills the message
+  // box with the findings, and the person sends it as the session's next turn.
+  const canFix = !!onFix && !!newest && newest.state === 'finished' && newest.verdict === 'fail';
   return (
     <div className="review-bar">
       <div className="rb-row">
@@ -176,6 +184,16 @@ export const ReviewBar: React.FC<ReviewBarProps> = ({ turn, job, reviews, loadAg
       {newest && (
         <div className="rb-verdict">
           <span className="rb-line">{reviewLine(newest, reviews.length, now)}</span>
+          {canFix && (
+            <button
+              type="button"
+              className="rb-fix"
+              onClick={() => onFix!(fixPrompt(newest.findings ?? [], turn.turnNumber))}
+              title="Put the findings in the message box, to edit and send"
+            >
+              Fix
+            </button>
+          )}
           <button type="button" className="lnk" onClick={onShowJobs}>
             CI/CD
           </button>

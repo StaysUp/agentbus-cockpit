@@ -1,4 +1,4 @@
-// The control plane: a job queue and runners (agentbus-runners). It is
+// The control plane: a job queue and runners (agentbus-ci). It is
 // optional. With it, a prompt becomes a turn job that a runner runs as an
 // AgentBus turn, and a finished turn can be reviewed by another agent as a
 // review job. Its README is the contract.
@@ -323,6 +323,22 @@ export function reviewerLabel(job: Job): string {
 export function findingPlace(f: Finding): string {
   if (!f.file) return '';
   return f.line ? `${f.file}:${f.line}` : f.file;
+}
+
+// The message Fix puts in the message box after a failed review: each
+// finding with its severity and place, as a prompt the person can edit before
+// they send it. Nothing is sent by itself. It names the reviewed turn, which
+// need not be the session's newest: a review can end after the next turn was
+// sent.
+export function fixPrompt(findings: Finding[], turnNumber: number): string {
+  if (findings.length === 0) {
+    return `A review of turn ${turnNumber} failed without naming a problem. Read that change again and fix what is wrong.`;
+  }
+  const lines = findings.map((f) => {
+    const place = findingPlace(f);
+    return `- ${f.severity}${place ? ` ${place}` : ''}: ${f.summary.trim()}`;
+  });
+  return `A review of turn ${turnNumber} found these problems. Fix them:\n\n${lines.join('\n')}`;
 }
 
 // m:ss from milliseconds.

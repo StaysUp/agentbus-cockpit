@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { liveStatus, LiveTurn } from '../data/liveStatus';
 import { turnNotes } from '../data/turns';
 import { Level, SessionDetail, Turn } from '../types';
@@ -32,6 +32,11 @@ interface ConvoColumnProps {
   // events. A running turn then shows one live status line where its reply
   // will be. Recorded data has none, and its turns show as they are.
   live?: LiveTurn;
+  // A prompt to put in the message box, such as Fix's after a failed review.
+  // It replaces the draft once, and is then handed back with onPrefillTaken.
+  // The person edits it and presses Send; nothing is sent by itself.
+  prefill?: { session: string; text: string } | null;
+  onPrefillTaken?: () => void;
 }
 
 // The person's message from the moment it is sent until its turn arrives.
@@ -54,8 +59,17 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
   onStop,
   stopping,
   live,
+  prefill,
+  onPrefillTaken,
 }) => {
   const [draft, setDraft] = useState('');
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    if (!prefill || prefill.session !== session.id) return;
+    setDraft(prefill.text);
+    onPrefillTaken?.();
+    inputRef.current?.focus();
+  }, [prefill, session.id]);
   const [readOnly, setReadOnly] = useState(false);
   const [pending, setPending] = useState<Pending | null>(null);
   const [sendError, setSendError] = useState<string | null>(null);
@@ -268,7 +282,8 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
         <form className="box" onSubmit={send}>
           <textarea
             id="input"
-            rows={1}
+            ref={inputRef}
+            rows={Math.min(8, draft.split('\n').length)}
             placeholder={`Message ${agentName || 'the agent'}…`}
             value={draft}
             onChange={(e) => setDraft(e.target.value)}

@@ -1,12 +1,13 @@
 // @vitest-environment jsdom
 // The control plane: turns that run as jobs, the Review button, and the CI/CD
-// views. A fake JobsSource stands in for agentbus-runners.
+// views. A fake JobsSource stands in for agentbus-ci.
 import { act } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../App';
 import {
   checkControlPlane,
   defaultReviewer,
+  fixPrompt,
   Job,
   JobEvent,
   JobSpec,
@@ -249,6 +250,73 @@ describe('Review', () => {
     await click(Array.from(r.container.querySelectorAll('#d-tabs .tab')).find((t) => t.textContent === 'CI/CD'));
     expect(r.container.querySelector('#d-body')!.textContent).toContain('did not run as a job');
     r.unmount();
+  });
+});
+
+describe('Fix', () => {
+  const failed = (verdict: 'fail' | 'pass') =>
+    fakeJobs([
+      job({ id: 'job_1', result: { session: 's1', turn: 'T1', changes: { count: 1 } } }),
+      job({
+        id: 'job_rev1',
+        kind: 'review',
+        spec: { agent: 'claude', model: 'sonnet', prompt: 'review', read_only: true },
+        links: { reviews_job: 'job_1' },
+        session: 's1',
+        verdict,
+        findings:
+          verdict === 'fail'
+            ? [
+                { severity: 'P1', file: 'calc.go', line: 7, summary: 'adds instead of subtracting' },
+                { severity: 'P3', summary: 'no test' },
+              ]
+            : [],
+        created: '2026-11-08T10:11:00Z',
+      }),
+    ]);
+
+  it('after a failed review, fills the message box with the findings and sends nothing', async () => {
+    const fake = failed('fail');
+    const { src, sendMessage } = source(turnEvents());
+    const r = await render(<App dataSource={src} jobs={fake.src} />);
+    await waitFor(() => r.container.querySelector('#convo .tb') !== null, 'the turn');
+    await openTurn(r.container);
+    await waitFor(() => bar(r.container)?.querySelector('.rb-fix') != null, 'Fix');
+    await click(bar(r.container)!.querySelector('.rb-fix'));
+    const box = r.container.querySelector('#c-reply textarea') as HTMLTextAreaElement;
+    expect(box.value).toBe(
+      'A review of turn 1 found these problems. Fix them:\n\n- P1 calc.go:7: adds instead of subtracting\n- P3: no test'
+    );
+    expect(document.activeElement).toBe(box);
+    expect(fake.calls.created).toHaveLength(0);
+
+    // The person edits it and presses Send: the next turn job of the session.
+    await setValue(box, box.value + '\nKeep the API the same.');
+    await act(async () => {
+      r.container.querySelector('#c-reply form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    });
+    await waitFor(() => fake.calls.created.length === 1, 'the job');
+    expect(fake.calls.created[0].session).toBe('s1');
+    expect(fake.calls.created[0].read_only).toBeUndefined();
+    expect(sendMessage).not.toHaveBeenCalled();
+    expect(fake.calls.created[0].prompt).toContain('- P1 calc.go:7: adds instead of subtracting');
+    expect(fake.calls.created[0].prompt).toContain('Keep the API the same.');
+    r.unmount();
+  });
+
+  it('is not offered after a passing review', async () => {
+    const fake = failed('pass');
+    const { src } = source(turnEvents());
+    const r = await render(<App dataSource={src} jobs={fake.src} />);
+    await waitFor(() => r.container.querySelector('#convo .tb') !== null, 'the turn');
+    await openTurn(r.container);
+    await waitFor(() => /passed/.test(bar(r.container)?.textContent ?? ''), 'the verdict');
+    expect(bar(r.container)!.querySelector('.rb-fix')).toBeNull();
+    r.unmount();
+  });
+
+  it('fixPrompt says something useful with no findings', () => {
+    expect(fixPrompt([], 3)).toBe('A review of turn 3 failed without naming a problem. Read that change again and fix what is wrong.');
   });
 });
 

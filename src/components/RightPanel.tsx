@@ -54,6 +54,9 @@ interface RightPanelProps {
   jobs?: JobsView;
   onReview?: (job: Job, agent: string, model: string) => Promise<void>;
   onCancelJob?: (job: Job) => Promise<void>;
+  // Fix on a failed review: puts a prompt in the message box. Given only
+  // where the source can send a next message.
+  onFix?: (prompt: string) => void;
   // The agents the service can run, to pick a reviewer from.
   loadAgents?: () => Promise<{ name: string; found: boolean }[]>;
   // Closes the panel (its ×).
@@ -157,6 +160,7 @@ const TurnPanel: React.FC<TurnPanelProps> = ({
   jobs,
   onReview,
   onCancelJob,
+  onFix,
   loadAgents,
 }) => {
   // A running turn's status from its events, read each second while it runs.
@@ -306,6 +310,7 @@ const TurnPanel: React.FC<TurnPanelProps> = ({
             loadAgents={loadAgents}
             onReview={(agent, model) => onReview(turnJob, agent, model)}
             onShowJobs={() => setActiveTab('cicd')}
+            onFix={onFix}
           />
         )}
       </div>

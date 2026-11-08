@@ -471,6 +471,11 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
         refreshJobs?.();
       }
     : undefined;
+  // Fix on a failed review fills the message box of the session on screen.
+  // The person edits it and sends it, so it runs as the session's next turn
+  // job in the same workspace.
+  const [prefill, setPrefill] = useState<{ session: string; text: string } | null>(null);
+  const fixFindings = jobs && sendMessage ? (text: string) => shownId !== null && setPrefill({ session: shownId, text }) : undefined;
   const cancelJob = jobs
     ? async (job: Job) => {
         await jobs.cancel(job.id);
@@ -698,6 +703,8 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
           onStop={stopTurn}
           stopping={stopping}
           live={dataSource.subscribe ? liveTurns[sessionView.id] : undefined}
+          prefill={prefill}
+          onPrefillTaken={() => setPrefill(null)}
           selectedTurn={selectedTurn}
           onSelectTurn={clickTurn}
           level={shownLevel}
@@ -742,6 +749,7 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
         jobs={jobsView}
         onReview={reviewJob}
         onCancelJob={cancelJob}
+        onFix={fixFindings}
         loadAgents={dataSource.getInstalledAgents ? loadAgents : undefined}
         live={!!dataSource.subscribe}
         onClose={() => setPanelOpen(false)}

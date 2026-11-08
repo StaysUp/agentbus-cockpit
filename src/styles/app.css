@@ -683,5 +683,7 @@ label.nd-check > span { font-size: max(11px, 0.75rem); color: var(--ink); }
 .job-acts { display: flex; gap: 0.875rem; margin-top: 0.375rem; font-size: max(11px, 0.75rem); }
 .job-acts:empty { display: none; }
 .job-reply { max-height: 22rem; overflow-y: auto; white-space: pre-wrap; }
+.rb-fix { margin-left: auto; padding: 0.1875rem 0.75rem; border-radius: 0.375rem; border: 1px solid var(--line2); background: #fff; font: inherit; font-size: 0.8125rem; font-weight: 600; cursor: pointer; }
+.rb-fix:hover { background: #F4F4F2; }
 .job-foot { font-size: max(11px, 0.75rem); margin-top: 0.75rem; }
 .jobs-table td .note code { color: var(--ink3); }
