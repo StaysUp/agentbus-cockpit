@@ -6,6 +6,7 @@ import { CopyButton } from './Icons';
 import { PanelHead } from './PanelHead';
 import { Job, TurnRef } from '../data/jobs';
 import { SessionJobs } from './Jobs';
+import { reviewUI } from '../features';
 
 interface SessionPanelProps {
   session: SessionDetail;
@@ -99,7 +100,7 @@ export const SessionPanel: React.FC<SessionPanelProps> = ({
             ))}
           </tbody>
         </table>
-        {jobs && refOf && (
+        {jobs && refOf && reviewUI() && (
           <SessionJobs jobs={jobs} turns={turns} refOf={refOf} onSelectTurn={onSelectTurn} error={jobsError} />
         )}
       </div>

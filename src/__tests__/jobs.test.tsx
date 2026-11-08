@@ -2,7 +2,7 @@
 // The job queue: turns that run as jobs, the Review button, and the CI/CD
 // views. A fake JobsSource stands in for the jobs API.
 import { act } from 'react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../App';
 import {
   defaultReviewer,
@@ -151,7 +151,14 @@ async function openTurn(c: HTMLElement) {
   await flush();
 }
 
+// The review screens are off by default (src/features.ts); these tests turn
+// them on, except the one that checks the default.
+beforeEach(() => {
+  vi.stubEnv('VITE_REVIEW_UI', '1');
+});
+
 afterEach(() => {
+  vi.unstubAllEnvs();
   vi.unstubAllGlobals();
   document.body.innerHTML = '';
 });
@@ -163,6 +170,25 @@ describe('without a job queue', () => {
     await openTurn(r.container);
     expect(bar(r.container)).toBeNull();
     expect(tabNames(r.container)).not.toContain('CI/CD');
+    r.unmount();
+  });
+});
+
+describe('by default, with a job queue', () => {
+  it('hides Review, Fix, the CI/CD tab and the session job list', async () => {
+    vi.stubEnv('VITE_REVIEW_UI', '');
+    const fake = fakeJobs([
+      job({ id: 'job_1', result: { session: 's1', turn: 'T1', changes: { count: 1 } }, attempts: [{ id: 'att_1', number: 1, runner: 'run_mac', state: 'finished', taken: T0, started: T0, ended: '2026-11-08T10:00:12Z' }] }),
+    ]);
+    const { src } = source(turnEvents());
+    const r = await render(<App dataSource={src} jobs={fake.src} />);
+    await waitFor(() => r.container.querySelector('#convo .tb') !== null, 'the turn');
+    await openTurn(r.container);
+    expect(bar(r.container)).toBeNull();
+    expect(tabNames(r.container)).not.toContain('CI/CD');
+    await click(r.container.querySelector('#p-head .crumb[data-level="session"]'));
+    await flush();
+    expect(r.container.querySelector('.jobs-table')).toBeNull();
     r.unmount();
   });
 });

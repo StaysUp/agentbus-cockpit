@@ -22,6 +22,7 @@ import { SessionPanel } from './SessionPanel';
 import { Job } from '../data/jobs';
 import { JobsView } from '../data/useJobs';
 import { JobsTab, ReviewBar } from './Jobs';
+import { reviewUI } from '../features';
 
 interface RightPanelProps {
   turn: Turn | null;
@@ -234,8 +235,9 @@ const TurnPanel: React.FC<TurnPanelProps> = ({
   // The job that ran this turn, and its reviews, with the job queue.
   const turnJob = jobs?.turnJob(turn.sessionId, turn.id);
   const reviews = turnJob ? jobs!.reviewsOf(turnJob.id) : [];
-  const tabs = jobs ? [...TURN_TABS, ['cicd', 'CI/CD'] as [TabKey, string]] : TURN_TABS;
-  const tab: TabKey = activeTab === 'cicd' && !jobs ? 'result' : activeTab;
+  const showJobs = !!jobs && reviewUI();
+  const tabs = showJobs ? [...TURN_TABS, ['cicd', 'CI/CD'] as [TabKey, string]] : TURN_TABS;
+  const tab: TabKey = activeTab === 'cicd' && !showJobs ? 'result' : activeTab;
 
   // The head reads the turn list's row, so it shows while the events load.
   const head = (
@@ -301,7 +303,7 @@ const TurnPanel: React.FC<TurnPanelProps> = ({
           )}
         </div>
         {continued && <div className="turn-cont">{continued}</div>}
-        {turnJob && onReview && (
+        {showJobs && turnJob && onReview && (
           <ReviewBar
             key={turn.id}
             turn={turn}

@@ -73,24 +73,22 @@ anything it shows, your own program can read too.
 
 **Use recorded data** opens the cockpit on a recorded sample, with no service needed.
 
-## Review and CI/CD
+## Jobs
 
 `agentbus up` keeps a job queue and runs a runner in the same process. The cockpit reads the jobs
-from the same address with the same token, so there is nothing more to connect. A service with no
-job queue still works: the cockpit then shows no Review and no CI/CD.
+from the same address with the same token, so there is nothing more to connect.
 
 - **Each prompt runs as a job.** The runner takes it and runs it as a turn. New session can make a
   git worktree of the folder at a branch, tag or commit, so the session runs there. A session's
   next message keeps the model of its first one.
-- **A finished turn has Review.** Pick the reviewer agent and model under Checked by, and press
-  Review. Another vendor is offered first. The review runs read-only in the turn's workspace, in a
-  session of its own. The turn then shows the verdict (passed, failed or no verdict) and each
-  finding with its severity, file and line. A turn can be reviewed more than once.
-- **A failed review has Fix.** It puts the findings in the message box as a prompt: severity, file
-  and line, and what is wrong. Edit it if you like, then press Send. Nothing is sent by itself. It
-  runs as the session's next turn, in the same workspace. Then press Review again.
-- **The CI/CD tab** of a turn lists the turn's job and its reviews, live: state, runner, attempt,
-  time and cost. The session panel lists every job of the session.
+- **Reviews are asked for in the chat**, for example "have codex check it", not with buttons.
+
+The review screens (Review and Fix on a turn, the CI/CD tab, the session's job list) are still in
+the code, off by default. To turn them on, start the cockpit with `VITE_REVIEW_UI=1`:
+
+```sh
+VITE_REVIEW_UI=1 npm run dev
+```
 
 ## Build a static copy
 
