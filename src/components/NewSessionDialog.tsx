@@ -1,48 +1,55 @@
 import React, { useEffect, useState } from 'react';
 import { recentFolders } from '../data/folders';
-import { InstalledAgent, RunRequest } from '../types';
+import { Harness, RunRequest, SavedAgent } from '../types';
+import { agentLine } from './AgentsDialog';
 
 interface NewSessionDialogProps {
-  loadAgents: () => Promise<InstalledAgent[]>;
+  // The saved agents (GET /api/v0/agents).
+  loadAgents: () => Promise<SavedAgent[]>;
+  // The harnesses, to say which agents cannot start here. Optional.
+  loadHarnesses?: () => Promise<Harness[]>;
   // Rejects with the API's message when the run is refused.
   onStart: (req: RunRequest) => Promise<void>;
   onClose: () => void;
   initialAgent?: string;
-  // The service keeps a job queue: the turn runs as a job, and can run in a
-  // new git worktree of the folder.
-  jobs?: boolean;
+  // Opens the agents dialog, to add one.
+  onAddAgent?: () => void;
 }
 
-// Start an agent in a folder with a first message (POST /api/v0/turns).
-export const NewSessionDialog: React.FC<NewSessionDialogProps> = ({ loadAgents, onStart, onClose, initialAgent, jobs }) => {
-  const [agents, setAgents] = useState<InstalledAgent[] | null>(null);
+// A new session is a saved agent and a folder, with a first message. The
+// service isolates it: a folder in a git repo gets its own worktree at the
+// folder's HEAD, any other folder is used as it is.
+export const NewSessionDialog: React.FC<NewSessionDialogProps> = ({ loadAgents, loadHarnesses, onStart, onClose, initialAgent, onAddAgent }) => {
+  const [agents, setAgents] = useState<SavedAgent[] | null>(null);
+  const [harnesses, setHarnesses] = useState<Harness[] | undefined>(undefined);
   const [agentsError, setAgentsError] = useState<string | null>(null);
   const [agent, setAgent] = useState(initialAgent ?? '');
   const [recent] = useState(() => recentFolders());
   const [folder, setFolder] = useState(() => recent[0] ?? '');
   const [prompt, setPrompt] = useState('');
-  const [readOnly, setReadOnly] = useState(false);
-  const [model, setModel] = useState('');
-  // With the job queue: a new worktree at base (the default), or the folder as it is.
-  const [worktree, setWorktree] = useState(true);
-  const [base, setBase] = useState('HEAD');
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // An agent whose harness the service does not find cannot start here. With
+  // no harness list, every agent can be picked; the service says why not.
+  const found = (a: SavedAgent) => !harnesses || harnesses.some((h) => h.name === a.harness && h.found);
+
   useEffect(() => {
     let active = true;
-    loadAgents().then(
-      (list) => {
+    Promise.all([loadAgents(), loadHarnesses ? loadHarnesses().catch(() => undefined) : Promise.resolve(undefined)]).then(
+      ([list, hs]) => {
         if (!active) return;
         setAgents(list);
-        setAgent((cur) => (list.some((a) => a.found && a.name === cur) ? cur : (list.find((a) => a.found)?.name ?? '')));
+        setHarnesses(hs);
+        const ok = (a: SavedAgent) => !hs || hs.some((h) => h.name === a.harness && h.found);
+        setAgent((cur) => (list.some((a) => a.id === cur && ok(a)) ? cur : (list.find(ok)?.id ?? '')));
       },
       (err: Error) => active && setAgentsError(err.message)
     );
     return () => {
       active = false;
     };
-  }, [loadAgents]);
+  }, [loadAgents, loadHarnesses]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
@@ -50,9 +57,8 @@ export const NewSessionDialog: React.FC<NewSessionDialogProps> = ({ loadAgents, 
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
 
-  const useWorktree = !!jobs && worktree;
-  const ready =
-    agent !== '' && folder.trim() !== '' && prompt.trim() !== '' && (!useWorktree || base.trim() !== '') && !starting;
+  const chosen = agents?.find((a) => a.id === agent);
+  const ready = agent !== '' && folder.trim() !== '' && prompt.trim() !== '' && !starting;
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -60,10 +66,7 @@ export const NewSessionDialog: React.FC<NewSessionDialogProps> = ({ loadAgents, 
     setStarting(true);
     setError(null);
     try {
-      const req: RunRequest = { agent, folder: folder.trim(), prompt, read_only: readOnly };
-      if (model.trim()) req.model = model.trim();
-      if (useWorktree) req.base = base.trim();
-      await onStart(req);
+      await onStart({ agent, folder: folder.trim(), prompt });
     } catch (err) {
       setError((err as Error).message);
       setStarting(false);
@@ -79,14 +82,24 @@ export const NewSessionDialog: React.FC<NewSessionDialogProps> = ({ loadAgents, 
           <select name="agent" value={agent} onChange={(e) => setAgent(e.target.value)} disabled={!agents}>
             {!agents && <option value="">{agentsError ? '' : 'Looking…'}</option>}
             {agents?.map((a) => (
-              <option key={a.name} value={a.name} disabled={!a.found}>
-                {a.found ? `${a.name}${a.version ? ` ${a.version}` : ''}` : `${a.name} (not installed)`}
+              <option key={a.id} value={a.id} disabled={!found(a)}>
+                {found(a) ? a.name : `${a.name} (not installed)`}
               </option>
             ))}
           </select>
         </label>
+        {chosen && <div className="nd-note">{agentLine(chosen, harnesses)}</div>}
         {agentsError && <div className="form-error">{agentsError}</div>}
-        {agents && agents.length === 0 && <div className="nd-note">The service found no agents.</div>}
+        {agents && agents.length === 0 && (
+          <div className="nd-note">
+            No agents yet.{' '}
+            {onAddAgent && (
+              <button type="button" className="nd-link" onClick={onAddAgent}>
+                Add one
+              </button>
+            )}
+          </div>
+        )}
         <label>
           <span>Folder</span>
           <input
@@ -108,50 +121,15 @@ export const NewSessionDialog: React.FC<NewSessionDialogProps> = ({ loadAgents, 
             ))}
           </div>
         )}
-        {jobs && (
-          <>
-            <div className="nd-seg" role="radiogroup" aria-label="Workspace">
-              <button type="button" role="radio" aria-checked={worktree} className={worktree ? 'on' : ''} onClick={() => setWorktree(true)}>
-                New worktree
-              </button>
-              <button type="button" role="radio" aria-checked={!worktree} className={!worktree ? 'on' : ''} onClick={() => setWorktree(false)}>
-                This folder, as it is
-              </button>
-            </div>
-            {worktree && (
-              <label>
-                <span>From</span>
-                <input name="base" type="text" value={base} onChange={(e) => setBase(e.target.value)} spellCheck={false} autoComplete="off" />
-              </label>
-            )}
-            <div className="nd-note">
-              {worktree
-                ? 'The folder must be a git repository. A runner makes a worktree of it at this branch, tag or commit, and the session runs there.'
-                : 'A runner runs the session in this folder, with whatever is in it now.'}
-            </div>
-          </>
-        )}
-        <label>
-          <span>Model</span>
-          <input name="model" type="text" value={model} onChange={(e) => setModel(e.target.value)} placeholder="the agent's default" spellCheck={false} autoComplete="off" />
-        </label>
+        <div className="nd-note">A folder on the machine where AgentBus runs. In a git repo the session gets its own worktree, so your folder is not changed.</div>
         <label>
           <span>First message</span>
           <textarea name="prompt" rows={4} value={prompt} onChange={(e) => setPrompt(e.target.value)} />
         </label>
-        <label className="nd-check">
-          <input name="read_only" type="checkbox" checked={readOnly} onChange={(e) => setReadOnly(e.target.checked)} />
-          <span>Read only</span>
-        </label>
-        <div className="nd-note">
-          {readOnly
-            ? 'The agent can read files but not change them.'
-            : 'The agent follows its own permission settings.'}
-        </div>
         {error && <div className="form-error">{error}</div>}
         <div className="nd-actions">
           <button type="submit" className="connect-go" disabled={!ready}>
-            {starting ? (jobs ? 'Waiting for a runner…' : 'Starting…') : 'Start'}
+            {starting ? 'Starting…' : 'Start'}
           </button>
           <button type="button" className="use-recorded" onClick={onClose}>
             Cancel

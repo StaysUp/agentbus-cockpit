@@ -75,7 +75,10 @@ interface Req {
 function fakeService(opts: {
   sessions: ReturnType<typeof row>[];
   events?: Record<string, CockpitEvent[]>;
+  // GET /harnesses. GET /agents lists `saved`, and POST, PUT and DELETE
+  // under /agents change it.
   agents?: unknown[];
+  saved?: Record<string, unknown>[];
   runs?: (body: unknown) => Response | Promise<Response>;
   // POST /turns with session: a session's next turn.
   messages?: (id: string, body: unknown) => Response | Promise<Response>;
@@ -86,7 +89,11 @@ function fakeService(opts: {
   const enc = new TextEncoder();
   const streams: ReadableStreamDefaultController<Uint8Array>[] = [];
   let seq = 100;
-  const state = { sessions: opts.sessions, events: opts.events ?? {} };
+  const state: { sessions: typeof opts.sessions; events: Record<string, CockpitEvent[]>; saved: Record<string, unknown>[] } = {
+    sessions: opts.sessions,
+    events: opts.events ?? {},
+    saved: opts.saved ?? SAVED.map((a) => ({ ...a })),
+  };
   // Stored events have a seq: number the ones the test gave in order.
   let stored = 0;
   for (const list of Object.values(state.events)) for (const e of list) e.seq ??= ++stored;
@@ -97,7 +104,26 @@ function fakeService(opts: {
     reqs.push({ method, path: url.pathname, body });
     const p = url.pathname;
     if (p === '/api/v0/sessions') return json({ store: 'st_1', seq, sessions: state.sessions });
-    if (p === '/api/v0/agents') return json({ agents: opts.agents ?? [] });
+    if (p === '/api/v0/harnesses') return json({ harnesses: opts.agents ?? [] });
+    if (p === '/api/v0/agents' && method === 'GET') return json({ agents: state.saved });
+    if (p === '/api/v0/agents' && method === 'POST') {
+      const f = body as Record<string, unknown>;
+      if (state.saved.some((a) => String(a.name).toLowerCase() === String(f.name).toLowerCase()))
+        return json({ error: `an agent named "${f.name}" already exists` }, 400);
+      const made = { id: `a_${state.saved.length + 1}`, ...f };
+      state.saved.push(made);
+      return json(made, 201);
+    }
+    const am = p.match(/^\/api\/v0\/agents\/([^/]+)$/);
+    if (am && method === 'PUT') {
+      const i = state.saved.findIndex((a) => a.id === am[1]);
+      state.saved[i] = { id: am[1], ...(body as object) };
+      return json(state.saved[i]);
+    }
+    if (am && method === 'DELETE') {
+      state.saved = state.saved.filter((a) => a.id !== am[1]);
+      return new Response(null, { status: 204 });
+    }
     const session = (body as { session?: string } | undefined)?.session;
     if (p === '/api/v0/runs') return json({ error: 'no such API path' }, 404);
     if (p === '/api/v0/turns' && method === 'POST' && session) {
@@ -179,9 +205,19 @@ async function mount(svc: ReturnType<typeof fakeService>) {
   return r;
 }
 
+const ACCESS = (subModels: string[]) => [
+  { kind: 'subscription', label: 'Subscription', models: subModels },
+  { kind: 'openrouter', label: 'OpenRouter key', models: ['deepseek/deepseek-v4.1-flash'], any_model: true, key_env: 'OPENROUTER_API_KEY', key_set: true },
+  { kind: 'api', label: 'API key', disabled: true, models: [] },
+];
 const AGENTS = [
-  { name: 'claude', found: true, version: '2.1.318', signed_in: true },
-  { name: 'codex', found: false },
+  { name: 'claude', label: 'Claude Code', found: true, version: '2.1.318', signed_in: true, access: ACCESS(['sonnet', 'opus', 'haiku']) },
+  { name: 'codex', label: 'Codex', found: false, access: ACCESS(['gpt-5.5']) },
+  { name: 'opencode', label: 'opencode', disabled: true, found: false, access: [] },
+];
+const SAVED = [
+  { id: 'claude', name: 'Claude Code', harness: 'claude', access: 'subscription' },
+  { id: 'codex', name: 'Codex', harness: 'codex', access: 'subscription' },
 ];
 
 beforeEach(() => localStorage.clear());
@@ -191,7 +227,7 @@ afterEach(() => {
 });
 
 describe('New session', () => {
-  it('the dialog lists agents from /agents and disables the ones not installed', async () => {
+  it('the dialog lists the saved agents and disables the ones whose harness is not installed', async () => {
     const svc = fakeService({ sessions: [row('s1')], events: { s1: oneTurn('s1', 'hi') }, agents: AGENTS });
     const r = await mount(svc);
     await click(r.container.querySelector('#sessions button.new-session'));
@@ -203,10 +239,9 @@ describe('New session', () => {
     expect(options[0].disabled).toBe(false);
     expect(options[1].disabled).toBe(true);
     expect(options[1].textContent).toContain('not installed');
-    // Read only is off by default, with a line saying what that means.
-    const ro = dialog.querySelector('input[name="read_only"]') as HTMLInputElement;
-    expect(ro.checked).toBe(false);
-    expect(dialog.textContent).toMatch(/follows its own permission settings/);
+    // An agent and a folder, and the first message; nothing else to choose.
+    expect(Array.from(dialog.querySelectorAll('input, select, textarea')).map((e) => e.getAttribute('name'))).toEqual(['agent', 'folder', 'prompt']);
+    expect(dialog.textContent).toContain('Claude Code · default model · subscription');
     r.unmount();
   });
 
@@ -222,7 +257,7 @@ describe('New session', () => {
 
     const run = svc.reqs.find((q) => q.path === '/api/v0/turns' && q.method === 'POST');
     expect(run?.method).toBe('POST');
-    expect(run?.body).toEqual({ agent: 'claude', folder: '/Users/ana/x', prompt: 'read the README', read_only: false });
+    expect(run?.body).toEqual({ agent: 'claude', folder: '/Users/ana/x', prompt: 'read the README' });
     expect(r.container.querySelector('.new-dialog')).toBeNull();
     expect(JSON.parse(localStorage.getItem('agentbus.folders') ?? '[]')).toEqual(['/Users/ana/x']);
     // Folders only: nothing else is kept in localStorage.
@@ -555,19 +590,163 @@ describe('The prompt box', () => {
   });
 });
 
-describe('Add agent', () => {
-  it('lists agents from /agents: version and signed-in state, or not installed', async () => {
+describe('Agents', () => {
+  const formLabels = (r: { container: HTMLElement }) =>
+    Array.from(r.container.querySelectorAll('.agent-form .ad-set > label > span:first-child')).map((x) => x.textContent);
+
+  it('+ Agent opens the form: Harness, Access, Model, Name, then the extras, disabled', async () => {
     const svc = fakeService({ sessions: [row('s1')], events: { s1: oneTurn('s1', 'hi') }, agents: AGENTS });
     const r = await mount(svc);
     await click(r.container.querySelector('#agents button.add-agent'));
     await settle();
-    const items = Array.from(r.container.querySelectorAll('.agent-list li')).map((li) => li.textContent);
-    expect(items).toHaveLength(2);
-    expect(items[0]).toContain('claude');
-    expect(items[0]).toContain('2.1.318');
-    expect(items[0]).toContain('signed in');
-    expect(items[1]).toContain('codex');
-    expect(items[1]).toContain('not installed');
+    expect(formLabels(r)).toEqual([
+      'Harness',
+      'Access',
+      'Model',
+      'Name',
+      'Models this agent can use',
+      'MCP servers',
+      'Skills',
+      'Instruction files',
+      'Programs that run on it',
+    ]);
+    const form = r.container.querySelector('.agent-form')!;
+    // opencode is listed and cannot be picked; the API key is shown and disabled.
+    expect((form.querySelector('[data-harness="opencode"]') as HTMLButtonElement).disabled).toBe(true);
+    expect((form.querySelector('[data-access="api"]') as HTMLButtonElement).disabled).toBe(true);
+    expect(Array.from(form.querySelectorAll('.f-off select')).every((x) => (x as HTMLSelectElement).disabled)).toBe(true);
+    // The name follows harness and model.
+    expect((form.querySelector('input[name="name"]') as HTMLInputElement).value).toBe('Claude Code · sonnet');
+    const models = Array.from(form.querySelectorAll('select[name="model"] option')).map((o) => (o as HTMLOptionElement).value);
+    expect(models).toEqual(['sonnet', 'opus', 'haiku', '']);
+    r.unmount();
+  });
+
+  it('an OpenRouter agent takes any model id and the key variable, never a key, and is saved', async () => {
+    const svc = fakeService({ sessions: [row('s1')], events: { s1: oneTurn('s1', 'hi') }, agents: AGENTS });
+    const r = await mount(svc);
+    await click(r.container.querySelector('#agents button.add-agent'));
+    await settle();
+    const form = () => r.container.querySelector('.agent-form')!;
+    await click(form().querySelector('[data-access="openrouter"]'));
+    expect(form().querySelector('select[name="model"]')).toBeNull();
+    const model = form().querySelector('input[name="model"]') as HTMLInputElement;
+    expect(model.value).toBe('deepseek/deepseek-v4.1-flash');
+    await setValue(model, 'qwen/qwen3-coder:free');
+    expect((form().querySelector('input[name="name"]') as HTMLInputElement).value).toBe('Claude Code · qwen/qwen3-coder:free');
+    expect((form().querySelector('input[name="key_env"]') as HTMLInputElement).value).toBe('OPENROUTER_API_KEY');
+    expect(form().textContent).toContain('Set where the service runs.');
+    await submitForm(form());
+    const post = svc.reqs.find((q) => q.path === '/api/v0/agents' && q.method === 'POST');
+    expect(post?.body).toEqual({
+      name: 'Claude Code · qwen/qwen3-coder:free',
+      harness: 'claude',
+      access: 'openrouter',
+      model: 'qwen/qwen3-coder:free',
+      key_env: 'OPENROUTER_API_KEY',
+    });
+    // Back on the list, with the new agent.
+    expect(r.container.querySelector('.agent-form')).toBeNull();
+    const rows = Array.from(r.container.querySelectorAll('.ad-list li')).map((li) => li.textContent);
+    expect(rows).toHaveLength(3);
+    expect(rows[2]).toContain('Claude Code · qwen/qwen3-coder:free · OpenRouter · OPENROUTER_API_KEY');
+    r.unmount();
+  });
+
+  it('a name the person typed stays when the model changes; a refused save shows the API words', async () => {
+    const svc = fakeService({ sessions: [row('s1')], events: { s1: oneTurn('s1', 'hi') }, agents: AGENTS });
+    const r = await mount(svc);
+    await click(r.container.querySelector('#agents button.add-agent'));
+    await settle();
+    const form = () => r.container.querySelector('.agent-form')!;
+    await setValue(form().querySelector('input[name="name"]'), 'Codex');
+    const sel = form().querySelector('select[name="model"]') as HTMLSelectElement;
+    await act(async () => {
+      sel.value = 'haiku';
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    expect((form().querySelector('input[name="name"]') as HTMLInputElement).value).toBe('Codex');
+    await submitForm(form());
+    expect(r.container.querySelector('.agent-form .form-error')?.textContent).toBe('an agent named "Codex" already exists');
+    r.unmount();
+  });
+
+  // A save in flight cannot be left: its answer would close whatever form
+  // came next and lose its edits.
+  it('while a save is in flight, Cancel and Escape do nothing', async () => {
+    let finish: (r: Response) => void = () => {};
+    const svc = fakeService({ sessions: [row('s1')], events: { s1: oneTurn('s1', 'hi') }, agents: AGENTS });
+    const inner = svc.fn.getMockImplementation()!;
+    svc.fn.mockImplementation(async (input: string, init?: RequestInit) => {
+      if (new URL(input).pathname === '/api/v0/agents' && init?.method === 'POST') return new Promise<Response>((res) => (finish = res));
+      return inner(input, init);
+    });
+    const r = await mount(svc);
+    await click(r.container.querySelector('#agents button.add-agent'));
+    await settle();
+    await submitForm(r.container.querySelector('.agent-form'));
+    // Every field, choice and button, Cancel too, sits in one disabled
+    // fieldset (a browser disables all of them; jsdom does not say so per
+    // control).
+    const set = r.container.querySelector('.agent-form > fieldset') as HTMLFieldSetElement;
+    expect(set.disabled).toBe(true);
+    expect(set.querySelectorAll('input, select, button').length).toBe(r.container.querySelectorAll('.agent-form input, .agent-form select, .agent-form button').length);
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    });
+    expect(r.container.querySelector('.agent-form')).not.toBeNull();
+    await act(async () => finish(json({ id: 'a_9', name: 'Claude Code · sonnet', harness: 'claude', access: 'subscription', model: 'sonnet' }, 201)));
+    await settle();
+    expect(r.container.querySelector('.agent-form')).toBeNull();
+    r.unmount();
+  });
+
+  it('while a remove is in flight, Keep, Edit and + Agent wait', async () => {
+    let finish: (r: Response) => void = () => {};
+    const svc = fakeService({ sessions: [row('s1')], events: { s1: oneTurn('s1', 'hi') }, agents: AGENTS });
+    const inner = svc.fn.getMockImplementation()!;
+    svc.fn.mockImplementation(async (input: string, init?: RequestInit) => {
+      if (init?.method === 'DELETE') return new Promise<Response>((res) => (finish = res));
+      return inner(input, init);
+    });
+    const r = await mount(svc);
+    await click(r.container.querySelector('#agents button.manage-agents'));
+    await settle();
+    await click(r.container.querySelector('.ad-list li[data-agent="codex"] .ad-remove'));
+    await click(r.container.querySelector('.ad-list li[data-agent="codex"] .ad-yes'));
+    const set = r.container.querySelector('.agents-dialog > fieldset') as HTMLFieldSetElement;
+    expect(set.disabled).toBe(true);
+    expect(set.querySelector('li[data-agent="codex"] .ad-act button:not(.ad-yes)')?.textContent).toBe('Keep');
+    await act(async () => finish(new Response(null, { status: 204 })));
+    await settle();
+    expect((r.container.querySelector('.agents-dialog > fieldset') as HTMLFieldSetElement).disabled).toBe(false);
+    r.unmount();
+  });
+
+  it('the list edits an agent with PUT and removes one with DELETE after a confirm', async () => {
+    const svc = fakeService({ sessions: [row('s1')], events: { s1: oneTurn('s1', 'hi') }, agents: AGENTS });
+    const r = await mount(svc);
+    await click(r.container.querySelector('#agents button.manage-agents'));
+    await settle();
+    await click(r.container.querySelector('.ad-list li[data-agent="claude"] .ad-edit'));
+    const form = () => r.container.querySelector('.agent-form')!;
+    expect((form().querySelector('input[name="name"]') as HTMLInputElement).value).toBe('Claude Code');
+    const sel = form().querySelector('select[name="model"]') as HTMLSelectElement;
+    await act(async () => {
+      sel.value = 'opus';
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await submitForm(form());
+    const put = svc.reqs.find((q) => q.method === 'PUT');
+    expect(put?.path).toBe('/api/v0/agents/claude');
+    expect(put?.body).toEqual({ name: 'Claude Code', harness: 'claude', access: 'subscription', model: 'opus' });
+
+    await click(r.container.querySelector('.ad-list li[data-agent="codex"] .ad-remove'));
+    expect(svc.reqs.some((q) => q.method === 'DELETE')).toBe(false);
+    await click(r.container.querySelector('.ad-list li[data-agent="codex"] .ad-yes'));
+    await settle();
+    expect(svc.reqs.find((q) => q.method === 'DELETE')?.path).toBe('/api/v0/agents/codex');
+    expect(Array.from(r.container.querySelectorAll('.ad-list li')).map((li) => li.getAttribute('data-agent'))).toEqual(['claude']);
     r.unmount();
   });
 });

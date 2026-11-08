@@ -106,9 +106,13 @@ function source(events: CockpitEvent[], extra: Partial<DataSource> = {}) {
     ...base.source,
     getSessions: async (a) => resumable(await base.source.getSessions(a)),
     subscribe: (cb, snap) => base.source.subscribe!(cb, (list, c) => snap?.(resumable(list), c)),
-    getInstalledAgents: async () => [
+    getHarnesses: async () => [
       { name: 'claude', found: true },
       { name: 'codex', found: true },
+    ],
+    listAgents: async () => [
+      { id: 'claude', name: 'Claude Code', harness: 'claude', access: 'subscription' },
+      { id: 'codex', name: 'Codex', harness: 'codex', access: 'subscription' },
     ],
     startRun: vi.fn(async () => ({ id: 'direct', turn: 'Tdirect' })),
     sendMessage,
@@ -397,7 +401,10 @@ describe('sending with the job queue', () => {
     r.unmount();
   });
 
-  it('New session offers a worktree, and makes a job with repo, base and model', async () => {
+  // New session is a saved agent and a folder: the job names the agent's id
+  // and isolate, and the service picks the worktree. No worktree, base,
+  // model or read-only choice is shown.
+  it('New session makes a job with the agent, the folder and isolate, and shows no workspace choice', async () => {
     const fake = fakeJobs([]);
     const { src } = source(turnEvents());
     const r = await render(<App dataSource={src} jobs={fake.src} />);
@@ -405,23 +412,16 @@ describe('sending with the job queue', () => {
     await click(r.container.querySelector('#sessions button.new-session'));
     await flush();
     const dialog = r.container.querySelector('.new-dialog')!;
-    expect(dialog.textContent).toContain('New worktree');
+    expect(dialog.textContent).not.toContain('New worktree');
+    expect(dialog.querySelector('[role="radiogroup"]')).toBeNull();
+    expect(dialog.querySelector('input[name="base"], input[name="model"], input[name="read_only"]')).toBeNull();
     await setValue(dialog.querySelector('input[name="folder"]'), '/Users/ana/repo');
-    await setValue(dialog.querySelector('input[name="base"]'), 'main');
-    await setValue(dialog.querySelector('input[name="model"]'), 'haiku');
     await setValue(dialog.querySelector('textarea[name="prompt"]'), 'add hello.txt');
     await act(async () => {
       dialog.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
     });
     await waitFor(() => fake.calls.created.length === 1, 'the job');
-    expect(fake.calls.created[0]).toEqual({
-      agent: 'claude',
-      repo: '/Users/ana/repo',
-      base: 'main',
-      prompt: 'add hello.txt',
-      model: 'haiku',
-      read_only: false,
-    });
+    expect(fake.calls.created[0]).toEqual({ agent: 'claude', folder: '/Users/ana/repo', isolate: true, prompt: 'add hello.txt' });
     expect(src.startRun).not.toHaveBeenCalled();
     r.unmount();
   });
@@ -457,11 +457,36 @@ describe('jobs data', () => {
       'the job failed: turn_refused'
     );
 
-    fake.src.createTurnJob = async () => job({ id: 'j_q', state: 'queued' });
-    fake.src.getJob = async () => job({ id: 'j_q', state: 'queued' });
-    await expect(
-      startTurnJob(fake.src, { agent: 'claude', folder: '/w', prompt: 'x' }, { intervalMs: 1, timeoutMs: 5 })
-    ).rejects.toThrow('no runner took job j_q yet; it stays in the queue');
+  });
+
+  // A job no runner takes stays queued, so the wait goes on: giving up would
+  // let the person send again and make a second job, and both would run.
+  // The caller hears once that it is waiting, and gets the turn when it starts.
+  it('startTurnJob keeps waiting on a queued job, makes one job, and says once that it waits', async () => {
+    let made = 0;
+    let polls = 0;
+    const waiting: string[] = [];
+    const src = {
+      ...fakeJobs([]).src,
+      createTurnJob: async () => {
+        made++;
+        return job({ id: 'j_q', state: 'queued', session: 's9' });
+      },
+      getJob: async () => {
+        polls++;
+        return polls < 40
+          ? job({ id: 'j_q', state: 'queued', session: 's9' })
+          : job({ id: 'j_q', state: 'running', session: 's9', attempts: [{ id: 't_9', number: 1, runner: 'r', state: 'running', taken: T0, turn_started: true }] });
+      },
+    };
+    const { ref } = await startTurnJob(src, { agent: 'claude', folder: '/w', prompt: 'x' }, {
+      intervalMs: 1,
+      waitingMs: 5,
+      onWaiting: (j) => waiting.push(j.id),
+    });
+    expect(ref).toEqual({ session: 's9', turn: 't_9' });
+    expect(made).toBe(1);
+    expect(waiting).toEqual(['j_q']);
   });
 
   it('the first reviewer offered is another vendor when there is one', () => {

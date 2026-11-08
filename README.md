@@ -78,9 +78,15 @@ anything it shows, your own program can read too.
 `agentbus up` keeps a job queue and runs a runner in the same process. The cockpit reads the jobs
 from the same address with the same token, so there is nothing more to connect.
 
-- **Each prompt runs as a job.** The runner takes it and runs it as a turn. New session can make a
-  git worktree of the folder at a branch, tag or commit, so the session runs there. A session's
-  next message keeps the model of its first one.
+- **An agent is a saved setup**: a harness (Claude Code or Codex), how it reaches a model (its own
+  subscription or an OpenRouter key, read from an environment variable on the service's machine),
+  the model and a name. "+ Agent" makes one; "Saved" lists them to edit or remove.
+- **New session is an agent and a folder**, with the first message. In a git repo the session gets
+  its own worktree at the folder's current commit, so the folder itself is not changed; any other
+  folder is used as it is.
+- **Each prompt runs as a job.** The runner takes it and runs it as a turn. A job no runner has
+  taken yet stays queued, and the message waits with it. A session's next message keeps the model
+  of its first one.
 - **Reviews are asked for in the chat**, for example "have codex check it", not with buttons.
 
 The review screens (Review and Fix on a turn, the CI/CD tab, the session's job list) are still in

@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import rawSessionsJsonl from '../testdata/sessions-v0.jsonl?raw';
 import { AgentsColumn } from './components/AgentsColumn';
 import { ConvoColumn } from './components/ConvoColumn';
+import { AgentsDialog } from './components/AgentsDialog';
 import { NewSessionDialog } from './components/NewSessionDialog';
 import { RightPanel } from './components/RightPanel';
 import { SessionsColumn } from './components/SessionsColumn';
@@ -423,24 +424,27 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
     [dataSource]
   );
   const loadTurn = useCallback((sessionId: string, turnId: string) => dataSource.getTurn(sessionId, turnId), [dataSource]);
-  const canStart = !!(dataSource.startRun && dataSource.getInstalledAgents);
-  const loadAgents = useCallback(() => dataSource.getInstalledAgents!(), [dataSource]);
+  const canStart = !!(dataSource.startRun && dataSource.listAgents);
+  // The harnesses the service finds: the review picker and the agent form read them.
+  const loadHarnesses = useCallback(() => dataSource.getHarnesses!(), [dataSource]);
+  const loadSaved = useCallback(() => dataSource.listAgents!(), [dataSource]);
+  const canKeepAgents = !!(dataSource.listAgents && dataSource.getHarnesses && dataSource.createAgent);
+  // The agents dialog: closed (null), or open on the list or on a new agent's form.
+  const [agentsDialog, setAgentsDialog] = useState<{ startNew: boolean } | null>(null);
   // With the job queue, a prompt is a turn job: a runner runs it, and the
   // turn shows here once the runner has started it. Without the jobs API,
   // POST /api/v0/turns starts it, which also runs it as a job.
   const runAsJob = async (spec: JobSpec): Promise<Started> => {
-    const { ref } = await startTurnJob(jobs!, spec);
+    // A job no runner has taken stays queued, and the wait goes on: the job
+    // list shows it, and the turn shows here once a runner starts it.
+    const { ref } = await startTurnJob(jobs!, spec, { onWaiting: () => refreshJobs?.() });
     refreshJobs?.();
     return { id: ref.session, turn: ref.turn };
   };
   const startRun = async (req: RunRequest) => {
     const gen = nextSend();
     const started = jobs
-      ? await runAsJob(
-          req.base
-            ? { agent: req.agent, repo: req.folder, base: req.base, prompt: req.prompt, model: req.model, read_only: req.read_only }
-            : { agent: req.agent, folder: req.folder, prompt: req.prompt, model: req.model, read_only: req.read_only }
-        )
+      ? await runAsJob({ agent: req.agent, folder: req.folder, isolate: true, prompt: req.prompt, model: req.model, read_only: req.read_only })
       : await dataSource.startRun!(req);
     rememberFolder(req.folder);
     setNewSession(null);
@@ -629,7 +633,7 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
   const callShown = !!selectedTurn?.detail?.modelCalls.some((p) => p.requested.id === selectedCallId);
   const shownLevel: Level = !selectedTurn ? 'session' : level === 'call' && !callShown ? 'turn' : level;
   const dialogOpenRef = useRef(false);
-  dialogOpenRef.current = newSession !== null;
+  dialogOpenRef.current = newSession !== null || agentsDialog !== null;
 
   // Esc first leaves a focused text box, then collapses an open row in the
   // turn panel, then closes the panel. The panel's Session and Turn links
@@ -675,8 +679,8 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
           setSelectedAgentId(agentId);
           selectSessionLevel();
         }}
-        loadAgents={canStart ? loadAgents : undefined}
-        onStartWith={(agent) => setNewSession({ agent })}
+        onAddAgent={canKeepAgents ? () => setAgentsDialog({ startNew: true }) : undefined}
+        onManageAgents={canKeepAgents ? () => setAgentsDialog({ startNew: false }) : undefined}
       />
 
       <SessionsColumn
@@ -750,7 +754,7 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
         onReview={reviewJob}
         onCancelJob={cancelJob}
         onFix={fixFindings}
-        loadAgents={dataSource.getInstalledAgents ? loadAgents : undefined}
+        loadAgents={dataSource.getHarnesses ? loadHarnesses : undefined}
         live={!!dataSource.subscribe}
         onClose={() => setPanelOpen(false)}
         escRef={panelEscRef}
@@ -759,11 +763,30 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
 
       {newSession && canStart && (
         <NewSessionDialog
-          loadAgents={loadAgents}
+          loadAgents={loadSaved}
+          loadHarnesses={dataSource.getHarnesses ? loadHarnesses : undefined}
           onStart={startRun}
           onClose={() => setNewSession(null)}
           initialAgent={newSession.agent}
-          jobs={!!jobs}
+          onAddAgent={
+            canKeepAgents
+              ? () => {
+                  setNewSession(null);
+                  setAgentsDialog({ startNew: true });
+                }
+              : undefined
+          }
+        />
+      )}
+      {agentsDialog && canKeepAgents && (
+        <AgentsDialog
+          loadAgents={loadSaved}
+          loadHarnesses={loadHarnesses}
+          createAgent={(f) => dataSource.createAgent!(f)}
+          updateAgent={(id, f) => dataSource.updateAgent!(id, f)}
+          removeAgent={(id) => dataSource.removeAgent!(id)}
+          startNew={agentsDialog.startNew}
+          onClose={() => setAgentsDialog(null)}
         />
       )}
     </div>

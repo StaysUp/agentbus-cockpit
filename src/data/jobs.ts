@@ -15,8 +15,12 @@ export interface Finding {
 }
 
 export interface JobSpec {
+  // A saved agent's id. The service fills in its harness, access and model.
   agent?: string;
   folder?: string;
+  // With folder: a new git worktree of the folder's repo at its HEAD when
+  // the folder is in a git repo, else the folder as it is.
+  isolate?: boolean;
   repo?: string;
   base?: string;
   session?: string;
@@ -239,16 +243,21 @@ export function currentAttempt(job: Job): JobAttempt | undefined {
 
 export interface StartWait {
   intervalMs?: number;
-  timeoutMs?: number;
+  // After waitingMs with no turn started, onWaiting is called once with the
+  // job, which stays in the queue. The wait goes on.
+  waitingMs?: number;
+  onWaiting?: (job: Job) => void;
 }
 
 // Makes a turn job and waits until its runner has started the turn: then the
 // framework knows the session and turn, and the screens can show it. Rejects
-// with the API's words, with why the job ended, or after timeoutMs while no
-// runner has taken it (the job stays in the queue).
+// with the API's words, or with why the job ended. A job no runner takes is
+// waited for as long as it is queued: giving up while it stays queued would
+// let a retry make a second job, and both would run.
 export async function startTurnJob(src: JobsSource, spec: JobSpec, wait: StartWait = {}): Promise<{ job: Job; ref: TurnRef }> {
   const intervalMs = wait.intervalMs ?? 500;
-  const deadline = Date.now() + (wait.timeoutMs ?? 180_000);
+  const waitingAt = Date.now() + (wait.waitingMs ?? 30_000);
+  let told = false;
   let job = await src.createTurnJob(spec);
   for (;;) {
     const ref = resultRef(job);
@@ -259,12 +268,9 @@ export async function startTurnJob(src: JobsSource, spec: JobSpec, wait: StartWa
       if (found) return { job, ref: found };
     }
     if (ended(job)) throw new Error(`the job ${job.state}${job.reason ? `: ${job.reason}` : ''}`);
-    if (Date.now() > deadline) {
-      throw new Error(
-        job.state === 'queued'
-          ? `no runner took job ${job.id} yet; it stays in the queue`
-          : `job ${job.id} has not started its turn yet`
-      );
+    if (!told && Date.now() > waitingAt) {
+      told = true;
+      wait.onWaiting?.(job);
     }
     await new Promise((r) => setTimeout(r, intervalMs));
     job = await src.getJob(job.id);

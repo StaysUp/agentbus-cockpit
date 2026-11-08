@@ -3,7 +3,9 @@ import {
   CallContext,
   CockpitEvent,
   DataSource,
-  InstalledAgent,
+  AgentFields,
+  Harness,
+  SavedAgent,
   RunRequest,
   SessionList,
   SessionSummary,
@@ -210,12 +212,40 @@ export class LiveDataSource implements DataSource {
     return { ...data, pieces: Array.isArray(data.pieces) ? data.pieces : [] } as CallContext;
   }
 
-  // GET /api/v0/agents: the agent binaries the service found, or did not.
-  async getInstalledAgents(): Promise<InstalledAgent[]> {
+  // GET /api/v0/harnesses: the harnesses the service can run an agent on,
+  // whether it finds each, and the access and models each offers.
+  async getHarnesses(): Promise<Harness[]> {
+    const res = await fetch(`${this.baseUrl}/api/v0/harnesses`, { headers: this.headers() });
+    if (!res.ok) throw new Error(await apiError(res));
+    const data = await res.json();
+    return Array.isArray(data.harnesses) ? data.harnesses : [];
+  }
+
+  // GET /api/v0/agents: the saved agents, in the order they were made.
+  async listAgents(): Promise<SavedAgent[]> {
     const res = await fetch(`${this.baseUrl}/api/v0/agents`, { headers: this.headers() });
     if (!res.ok) throw new Error(await apiError(res));
     const data = await res.json();
     return Array.isArray(data.agents) ? data.agents : [];
+  }
+
+  // POST /api/v0/agents: 201 with the new agent; 400 with why a field is refused.
+  async createAgent(f: AgentFields): Promise<SavedAgent> {
+    return this.send('POST', '/api/v0/agents', f);
+  }
+
+  // PUT /api/v0/agents/<id>: the agent's fields replaced, its id kept.
+  async updateAgent(id: string, f: AgentFields): Promise<SavedAgent> {
+    return this.send('PUT', `/api/v0/agents/${encodeURIComponent(id)}`, f);
+  }
+
+  // DELETE /api/v0/agents/<id>: 204. Its sessions stay.
+  async removeAgent(id: string): Promise<void> {
+    const res = await fetch(`${this.baseUrl}/api/v0/agents/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+      headers: this.headers(),
+    });
+    if (!res.ok) throw new Error(await apiError(res));
   }
 
   // POST /api/v0/turns: start an agent with a first prompt, in a new session.
@@ -246,8 +276,12 @@ export class LiveDataSource implements DataSource {
   }
 
   private async post(path: string, body: unknown): Promise<Started> {
+    return this.send('POST', path, body);
+  }
+
+  private async send<T>(method: string, path: string, body: unknown): Promise<T> {
     const res = await fetch(`${this.baseUrl}${path}`, {
-      method: 'POST',
+      method,
       headers: { ...this.headers(), 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });

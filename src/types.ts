@@ -157,24 +157,57 @@ export interface AgentSummary {
   usage: Usage;
 }
 
-// One agent binary the service looked for, from GET /api/v0/agents.
-export interface InstalledAgent {
+// One way a harness reaches a model, from GET /api/v0/harnesses.
+export interface AccessOption {
+  kind: string; // subscription, openrouter or api
+  label: string;
+  disabled?: boolean;
+  // Models to offer, first the one to start from.
+  models: string[];
+  // Any model name is accepted, as an OpenRouter model id.
+  any_model?: boolean;
+  key_env?: string;
+  // Whether key_env is set where the service runs. Never its value.
+  key_set?: boolean;
+}
+
+// One harness the service can run an agent on, from GET /api/v0/harnesses.
+export interface Harness {
   name: string;
+  label?: string;
+  disabled?: boolean;
   found: boolean;
   version?: string;
   signed_in?: boolean;
+  access?: AccessOption[];
 }
 
-// POST /api/v0/turns.
+// What a person sets on a saved agent (POST and PUT /api/v0/agents).
+export interface AgentFields {
+  name: string;
+  harness: string;
+  access: string;
+  model?: string;
+  key_env?: string;
+}
+
+// A saved agent, from GET /api/v0/agents. A turn names it by id.
+export interface SavedAgent extends AgentFields {
+  id: string;
+  key_set?: boolean;
+  created?: string;
+  updated?: string;
+}
+
+// POST /api/v0/turns: a saved agent and a folder, with the first message.
+// The service isolates the session in a git worktree when the folder is in
+// a git repo.
 export interface RunRequest {
   agent: string;
   folder: string;
   prompt: string;
   model?: string;
   read_only?: boolean;
-  // With the job queue only: run in a new git worktree of folder, made at
-  // this branch, tag or commit. Without it, the turn runs in folder as it is.
-  base?: string;
 }
 
 // The reply to POST /api/v0/turns: the session, and the turn it started.
@@ -221,10 +254,17 @@ export interface DataSource {
   getTurns(sessionId: string): Promise<TurnList>;
   // One turn's events, paired. null when the turn has no events.
   getTurn(sessionId: string, turnId: string): Promise<TurnDetail | null>;
-  // A source that can start and continue sessions has these three. Each
+  // A source that keeps saved agents has these: the harnesses they can run
+  // on, and the agents to list, save, edit and remove. Each rejects with the
+  // API's own words.
+  getHarnesses?(): Promise<Harness[]>;
+  listAgents?(): Promise<SavedAgent[]>;
+  createAgent?(f: AgentFields): Promise<SavedAgent>;
+  updateAgent?(id: string, f: AgentFields): Promise<SavedAgent>;
+  removeAgent?(id: string): Promise<void>;
+  // A source that can start and continue sessions has these two. Each
   // rejects with an Error whose message is the API's own words. Starting
   // resolves with the session id and, from the live API, the new turn's id.
-  getInstalledAgents?(): Promise<InstalledAgent[]>;
   startRun?(req: RunRequest): Promise<Started>;
   sendMessage?(sessionId: string, req: { prompt: string; read_only?: boolean; model?: string }): Promise<Started>;
   // A source that runs turns can stop one: 'stopping' when the service took
