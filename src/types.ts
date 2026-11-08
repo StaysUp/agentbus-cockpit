@@ -172,7 +172,7 @@ export interface RunRequest {
   prompt: string;
   model?: string;
   read_only?: boolean;
-  // With a control plane only: run in a new git worktree of folder, made at
+  // With the job queue only: run in a new git worktree of folder, made at
   // this branch, tag or commit. Without it, the turn runs in folder as it is.
   base?: string;
 }

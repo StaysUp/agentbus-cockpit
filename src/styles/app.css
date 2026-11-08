@@ -629,10 +629,8 @@ label.nd-check > span { font-size: max(11px, 0.75rem); color: var(--ink); }
 .tcard-open { margin-top: 0.5rem; }
 .tgroup-t { font-family: var(--mono); font-size: max(11px, 0.6875rem); color: var(--ink3); padding: 0 0.25rem; }
 
-/* ---------- control plane: Review and CI/CD (mockup v5) ---------- */
+/* ---------- jobs: Review and CI/CD (mockup v5) ---------- */
 .run { color: var(--blue); }
-.connect-sec { margin-top: 0.5rem; padding-top: 0.75rem; border-top: 1px solid var(--line); font-size: max(11px, 0.75rem); font-weight: 600; color: var(--ink2); }
-.connect-sec span { display: block; font-weight: 400; color: var(--ink3); margin-top: 2px; }
 .nd-seg { display: inline-flex; align-self: flex-start; background: var(--gray-bg); border-radius: 0.4375rem; padding: 2px; gap: 2px; }
 .nd-seg button { font-size: max(11px, 0.75rem); padding: 0.25rem 0.625rem; border-radius: 0.3125rem; color: var(--ink2); }
 .nd-seg button.on { background: var(--panel); color: var(--ink); box-shadow: 0 1px 2px rgba(0,0,0,.08); }

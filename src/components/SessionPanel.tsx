@@ -15,7 +15,7 @@ interface SessionPanelProps {
   agentName: string;
   onSelectTurn: (turn: Turn) => void;
   onClose?: () => void;
-  // With a control plane: the session's jobs, live.
+  // With the job queue: the session's jobs, live.
   jobs?: Job[];
   refOf?: (job: Job) => TurnRef | undefined;
   jobsError?: string | null;

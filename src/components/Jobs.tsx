@@ -275,8 +275,8 @@ export const JobsTab: React.FC<JobsTabProps> = ({ job, reviews, onCancel }) => {
   if (!job) {
     return (
       <p className="dim">
-        This turn did not run as a job, so it has no CI/CD jobs. Turns sent while a control plane is connected run as
-        jobs, and can be reviewed.
+        This turn has no job, so it has no CI/CD jobs: it ran before the job queue, or outside it. Turns sent from here
+        run as jobs, and can be reviewed.
       </p>
     );
   }

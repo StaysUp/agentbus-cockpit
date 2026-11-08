@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { currentAttempt, ended, Job, JobsSource, resultRef, TurnRef, turnFromEvents } from './jobs';
 
-// How often the jobs are read again. The control plane has no stream, so the
+// How often the jobs are read again. The jobs API has no stream, so the
 // CI/CD view is live by reading the list every POLL_MS.
 export const POLL_MS = 2000;
 

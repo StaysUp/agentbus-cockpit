@@ -290,62 +290,60 @@ describe('AgentsColumn', () => {
   });
 });
 
-describe('Control plane (optional)', () => {
-  const JOBS = 'http://127.0.0.1:8790';
-  const JOBS_TOKEN = 'abm-test-jobs';
-  // The service as above, plus a control plane on JOBS that accepts JOBS_TOKEN.
-  function both() {
+describe('Jobs on the one API', () => {
+  // The service as above, with a job queue on the same address and token.
+  function withJobs() {
     const svc = fakeService();
     const jobsCalls: string[] = [];
     const fn = vi.fn(async (input: string, init?: RequestInit) => {
-      if (!input.startsWith(JOBS)) return svc.fn(input, init);
+      if (new URL(input).pathname !== '/api/v0/jobs') return svc.fn(input, init);
       jobsCalls.push(input);
       const auth = new Headers(init?.headers).get('Authorization');
-      if (auth !== `Bearer ${JOBS_TOKEN}`) return json({ error: 'the main token is required' }, 401);
+      if (auth !== `Bearer ${TOKEN}`) return json({ error: 'unauthorized' }, 401);
       return json({ jobs: [] });
     });
     return { fn, jobsCalls };
   }
 
-  it('is skipped when its token is empty', async () => {
-    const s = both();
+  it('one address and one token: the connect form asks for nothing else', async () => {
+    const s = withJobs();
     vi.stubGlobal('fetch', s.fn);
     const r = await render(<Cockpit />);
-    expect((r.container.querySelector('input[name="jobs-address"]') as HTMLInputElement).value).toBe(JOBS);
+    expect(r.container.querySelectorAll('form.connect input').length).toBe(2);
+    expect(r.container.textContent).not.toMatch(/control plane/i);
     await type(r.container.querySelector('input[name="token"]'), TOKEN);
     await submit(r.container);
     expect(r.container.querySelector('form.connect')).toBeNull();
-    expect(s.jobsCalls).toEqual([]);
-    expect(sessionStorage.getItem('agentbus.jobs.token')).toBeNull();
+    // The jobs are read from the same address, with the same token.
+    expect(s.jobsCalls.length).toBeGreaterThan(0);
+    expect(s.jobsCalls.every((u) => u.startsWith(ADDR))).toBe(true);
+    expect(Object.keys(sessionStorage).sort()).toEqual(['agentbus.address', 'agentbus.token']);
+    expect(localStorage.length).toBe(0);
     expect(r.container.querySelector('.brand-foot')?.textContent).not.toContain('jobs at');
     r.unmount();
   });
 
-  it('is checked and kept for the tab when its token is given', async () => {
-    const s = both();
+  it('a connect drops a control-plane token kept from before there was one API', async () => {
+    sessionStorage.setItem('agentbus.jobs.address', 'http://127.0.0.1:8790');
+    sessionStorage.setItem('agentbus.jobs.token', 'old');
+    const s = withJobs();
     vi.stubGlobal('fetch', s.fn);
     const r = await render(<Cockpit />);
     await type(r.container.querySelector('input[name="token"]'), TOKEN);
-    await type(r.container.querySelector('input[name="jobs-token"]'), JOBS_TOKEN);
     await submit(r.container);
-    expect(r.container.querySelector('form.connect')).toBeNull();
-    expect(sessionStorage.getItem('agentbus.jobs.address')).toBe(JOBS);
-    expect(sessionStorage.getItem('agentbus.jobs.token')).toBe(JOBS_TOKEN);
-    expect(localStorage.length).toBe(0);
-    expect(r.container.querySelector('.brand-foot')?.textContent).toContain('jobs at 127.0.0.1:8790');
+    expect(sessionStorage.getItem('agentbus.jobs.token')).toBeNull();
+    expect(sessionStorage.getItem('agentbus.jobs.address')).toBeNull();
     r.unmount();
   });
 
-  it('a refused control-plane token stops the connect and stores nothing', async () => {
-    const s = both();
-    vi.stubGlobal('fetch', s.fn);
+  it('a service with no job queue still connects, without jobs', async () => {
+    const svc = fakeService();
+    vi.stubGlobal('fetch', svc.fn);
     const r = await render(<Cockpit />);
     await type(r.container.querySelector('input[name="token"]'), TOKEN);
-    await type(r.container.querySelector('input[name="jobs-token"]'), 'wrong');
     await submit(r.container);
-    expect(r.container.querySelector('.connect-error')?.textContent).toBe('the control plane refused the token');
-    expect(sessionStorage.getItem('agentbus.token')).toBeNull();
-    expect(sessionStorage.getItem('agentbus.jobs.token')).toBeNull();
+    expect(r.container.querySelector('form.connect')).toBeNull();
+    expect(svc.calls.filter((c) => c.url.includes('/api/v0/jobs')).length).toBe(1);
     r.unmount();
   });
 });

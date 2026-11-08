@@ -1,17 +1,18 @@
 // @vitest-environment jsdom
-// The control plane: turns that run as jobs, the Review button, and the CI/CD
-// views. A fake JobsSource stands in for agentbus-ci.
+// The job queue: turns that run as jobs, the Review button, and the CI/CD
+// views. A fake JobsSource stands in for the jobs API.
 import { act } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../App';
 import {
-  checkControlPlane,
   defaultReviewer,
   fixPrompt,
   Job,
   JobEvent,
   JobSpec,
   JobsSource,
+  probeJobs,
+  resultRef,
   ReviewRequest,
   startTurnJob,
 } from '../data/jobs';
@@ -155,7 +156,7 @@ afterEach(() => {
   document.body.innerHTML = '';
 });
 
-describe('without a control plane', () => {
+describe('without a job queue', () => {
   it('shows no Review and no CI/CD tab', async () => {
     const { src } = source(turnEvents());
     const r = await render(<App dataSource={src} />);
@@ -248,7 +249,7 @@ describe('Review', () => {
     await openTurn(r.container);
     expect(bar(r.container)).toBeNull();
     await click(Array.from(r.container.querySelectorAll('#d-tabs .tab')).find((t) => t.textContent === 'CI/CD'));
-    expect(r.container.querySelector('#d-body')!.textContent).toContain('did not run as a job');
+    expect(r.container.querySelector('#d-body')!.textContent).toContain('This turn has no job');
     r.unmount();
   });
 });
@@ -354,7 +355,7 @@ describe('the session CI/CD view', () => {
   });
 });
 
-describe('sending with a control plane', () => {
+describe('sending with the job queue', () => {
   it('a next message is a turn job of the session, not a direct turn', async () => {
     const fake = fakeJobs([job({ id: 'job_1', result: { session: 's1', turn: 'T1' } })]);
     const { src, sendMessage } = source(turnEvents());
@@ -444,12 +445,27 @@ describe('jobs data', () => {
     expect(defaultReviewer('claude', ['claude', 'opencode'])).toBe('opencode');
   });
 
-  it('checkControlPlane names a refused token and a wrong service', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => new Response('{"error":"x"}', { status: 401 })));
-    expect(await checkControlPlane('http://jobs.test', 't')).toBe('the control plane refused the token');
-    vi.stubGlobal('fetch', vi.fn(async () => new Response('{"sessions":[]}', { status: 200 })));
-    expect(await checkControlPlane('http://jobs.test', 't')).toBe('http://jobs.test did not answer like a control plane');
-    vi.stubGlobal('fetch', vi.fn(async () => new Response('{"jobs":[]}', { status: 200 })));
-    expect(await checkControlPlane('http://jobs.test', 't')).toBeNull();
+  it('a job’s attempt is its turn: the newest attempt whose turn started, in the session the job names', () => {
+    const at = (id: string, started: boolean) => ({ id, number: 1, runner: 'run_mac', state: 'running', taken: T0, started: T0, turn_started: started || undefined });
+    expect(resultRef(job({ id: 'j', state: 'running', session: 's9', attempts: [at('t_1', true)] }))).toEqual({ session: 's9', turn: 't_1' });
+    // Started, but its turn did not start (yet, or ever): no turn.
+    expect(resultRef(job({ id: 'j', state: 'running', session: 's9', attempts: [at('t_1', false)] }))).toBeNull();
+    expect(resultRef(job({ id: 'j', state: 'failed', reason: 'runner_lost', session: 's9', attempts: [at('t_1', true), at('t_2', false)] }))).toEqual({ session: 's9', turn: 't_1' });
+    expect(resultRef(job({ id: 'r', kind: 'review', session: 's9', attempts: [at('t_2', true)] }))).toBeNull();
+  });
+
+  it('probeJobs says no queue only on a 404', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{"error":"this service keeps no job queue"}', { status: 404 })));
+    expect(await probeJobs('http://agentbus.test', 't')).toBe(false);
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{"error":"x"}', { status: 500 })));
+    expect(await probeJobs('http://agentbus.test', 't')).toBe(true);
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('network'); }));
+    expect(await probeJobs('http://agentbus.test', 't')).toBe(true);
+    const fn = vi.fn(async () => new Response('{"jobs":[]}', { status: 200 }));
+    vi.stubGlobal('fetch', fn);
+    expect(await probeJobs('http://agentbus.test', 't')).toBe(true);
+    const [url, init] = fn.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe('http://agentbus.test/api/v0/jobs?limit=1');
+    expect(new Headers(init.headers).get('Authorization')).toBe('Bearer t');
   });
 });

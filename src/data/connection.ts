@@ -6,16 +6,19 @@ export const DEFAULT_ADDRESS = 'http://127.0.0.1:8787';
 const ADDRESS_KEY = 'agentbus.address';
 const TOKEN_KEY = 'agentbus.token';
 const MODE_KEY = 'agentbus.mode';
-// The control plane (job queue and runners), optional. Kept the same way.
-export const DEFAULT_JOBS_ADDRESS = 'http://127.0.0.1:8790';
-const JOBS_ADDRESS_KEY = 'agentbus.jobs.address';
-const JOBS_TOKEN_KEY = 'agentbus.jobs.token';
+// A separate control plane's address and token, from before there was one
+// API. Never read; removed wherever the connection is saved or cleared.
+const OLD_KEYS = ['agentbus.jobs.address', 'agentbus.jobs.token'];
 
+function dropOld(): void {
+  for (const k of OLD_KEYS) sessionStorage.removeItem(k);
+}
+
+// One address and one token: sessions, turns, model calls, jobs and reviews
+// all come from the one agentbus API.
 export interface Connection {
   address: string;
   token: string;
-  // A control plane to send turns to as jobs, and to ask for reviews.
-  jobs?: { address: string; token: string };
 }
 
 export type Saved = { mode: 'live'; connection: Connection } | { mode: 'replay' } | null;
@@ -34,24 +37,15 @@ export function loadSaved(): Saved {
   const address = get(ADDRESS_KEY);
   const token = get(TOKEN_KEY);
   if (!address || !token) return null;
-  const jobsAddress = get(JOBS_ADDRESS_KEY);
-  const jobsToken = get(JOBS_TOKEN_KEY);
-  const jobs = jobsAddress && jobsToken ? { address: jobsAddress, token: jobsToken } : undefined;
-  return { mode: 'live', connection: jobs ? { address, token, jobs } : { address, token } };
+  return { mode: 'live', connection: { address, token } };
 }
 
 export function saveConnection(c: Connection): void {
   try {
     sessionStorage.removeItem(MODE_KEY);
+    dropOld();
     sessionStorage.setItem(ADDRESS_KEY, c.address);
     sessionStorage.setItem(TOKEN_KEY, c.token);
-    if (c.jobs) {
-      sessionStorage.setItem(JOBS_ADDRESS_KEY, c.jobs.address);
-      sessionStorage.setItem(JOBS_TOKEN_KEY, c.jobs.token);
-    } else {
-      sessionStorage.removeItem(JOBS_ADDRESS_KEY);
-      sessionStorage.removeItem(JOBS_TOKEN_KEY);
-    }
   } catch {
     // Not kept: the next reload asks again.
   }
@@ -61,8 +55,7 @@ export function saveReplay(): void {
   try {
     sessionStorage.removeItem(ADDRESS_KEY);
     sessionStorage.removeItem(TOKEN_KEY);
-    sessionStorage.removeItem(JOBS_ADDRESS_KEY);
-    sessionStorage.removeItem(JOBS_TOKEN_KEY);
+    dropOld();
     sessionStorage.setItem(MODE_KEY, 'replay');
   } catch {
     // Not kept.
@@ -74,8 +67,7 @@ export function clearSaved(): void {
     sessionStorage.removeItem(ADDRESS_KEY);
     sessionStorage.removeItem(TOKEN_KEY);
     sessionStorage.removeItem(MODE_KEY);
-    sessionStorage.removeItem(JOBS_ADDRESS_KEY);
-    sessionStorage.removeItem(JOBS_TOKEN_KEY);
+    dropOld();
   } catch {
     // Nothing to clear.
   }

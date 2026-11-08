@@ -85,8 +85,8 @@ interface AppProps {
   sourceLabel?: string;
   onDisconnect?: () => void;
   disconnectLabel?: string;
-  // A control plane, when one is connected: each prompt then runs as a turn
-  // job on a runner, and a turn that ran as a job can be reviewed.
+  // The service's job queue, when it keeps one: each prompt then runs as a
+  // turn job on a runner, and a turn that ran as a job can be reviewed.
   jobs?: JobsSource;
 }
 
@@ -94,7 +94,7 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
   const [dataSource] = useState<DataSource>(
     () => propDataSource || new ReplayDataSource(rawSessionsJsonl)
   );
-  // The jobs, read again every few seconds while a control plane is connected.
+  // The jobs, read again every few seconds while the service keeps a queue.
   const jobsView = useJobs(jobs);
   const refreshJobs = jobsView?.refresh;
 
@@ -425,9 +425,9 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
   const loadTurn = useCallback((sessionId: string, turnId: string) => dataSource.getTurn(sessionId, turnId), [dataSource]);
   const canStart = !!(dataSource.startRun && dataSource.getInstalledAgents);
   const loadAgents = useCallback(() => dataSource.getInstalledAgents!(), [dataSource]);
-  // With a control plane, a prompt is a turn job: a runner runs it, and the
-  // turn shows here once the runner has started it. Without one, the service
-  // runs it directly.
+  // With the job queue, a prompt is a turn job: a runner runs it, and the
+  // turn shows here once the runner has started it. Without the jobs API,
+  // POST /api/v0/turns starts it, which also runs it as a job.
   const runAsJob = async (spec: JobSpec): Promise<Started> => {
     const { ref } = await startTurnJob(jobs!, spec);
     refreshJobs?.();
@@ -464,7 +464,7 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
     : undefined;
 
   // A review of a turn job, and a cancel of any job. Each rejects with the
-  // control plane's words.
+  // API's words.
   const reviewJob = jobs
     ? async (job: Job, agent: string, model: string) => {
         await jobs.review(job.id, { agent, model: model || undefined });

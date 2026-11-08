@@ -47,9 +47,10 @@ with no console errors. Open it in a browser and look before saying it works.
   `session.registered` event, so the replay source must work without them.
 - **The token stays in the browser session.** It is sent only to the service address the user
   entered.
-- **The control plane is optional** (`src/data/jobs.ts`). With it, prompts run as jobs and turns can
-  be reviewed. Its contract is the README of `agentbus-ci`. Without it, nothing changes. Its
-  token is kept the same way, and sent only to its own address.
+- **One API, one address, one token.** Jobs, reviews and workspaces come from the same agentbus
+  API as sessions and turns (`src/data/jobs.ts`). Its contract is agentbus's `docs/CLIENT_API.md`.
+  A service with no job queue answers `/api/v0/jobs` with 404; the cockpit then shows no Review
+  and no CI/CD, and everything else works.
 
 ## Conventions
 

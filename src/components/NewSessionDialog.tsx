@@ -8,7 +8,7 @@ interface NewSessionDialogProps {
   onStart: (req: RunRequest) => Promise<void>;
   onClose: () => void;
   initialAgent?: string;
-  // A control plane is connected: the turn runs as a job, and can run in a
+  // The service keeps a job queue: the turn runs as a job, and can run in a
   // new git worktree of the folder.
   jobs?: boolean;
 }
@@ -23,7 +23,7 @@ export const NewSessionDialog: React.FC<NewSessionDialogProps> = ({ loadAgents, 
   const [prompt, setPrompt] = useState('');
   const [readOnly, setReadOnly] = useState(false);
   const [model, setModel] = useState('');
-  // With a control plane: a new worktree at base (the default), or the folder as it is.
+  // With the job queue: a new worktree at base (the default), or the folder as it is.
   const [worktree, setWorktree] = useState(true);
   const [base, setBase] = useState('HEAD');
   const [starting, setStarting] = useState(false);

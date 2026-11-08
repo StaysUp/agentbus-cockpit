@@ -49,8 +49,8 @@ interface RightPanelProps {
   // True for a source that streams: a running turn's strip and Tools tab
   // follow its events as they arrive. Recorded data shows turns as they are.
   live?: boolean;
-  // A control plane's jobs, when one is connected: the Review button and
-  // the CI/CD tab read them.
+  // The service's jobs, when it keeps a queue: the Review button and the
+  // CI/CD tab read them.
   jobs?: JobsView;
   onReview?: (job: Job, agent: string, model: string) => Promise<void>;
   onCancelJob?: (job: Job) => Promise<void>;
@@ -231,7 +231,7 @@ const TurnPanel: React.FC<TurnPanelProps> = ({
   // How the turn continued, from its turn.started: the chat no longer shows it.
   const continued = continuedLine(turn.detail, session?.turnsList ?? []);
 
-  // The job that ran this turn, and its reviews, with a control plane.
+  // The job that ran this turn, and its reviews, with the job queue.
   const turnJob = jobs?.turnJob(turn.sessionId, turn.id);
   const reviews = turnJob ? jobs!.reviewsOf(turnJob.id) : [];
   const tabs = jobs ? [...TURN_TABS, ['cicd', 'CI/CD'] as [TabKey, string]] : TURN_TABS;

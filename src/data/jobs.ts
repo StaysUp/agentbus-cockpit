@@ -1,7 +1,8 @@
-// The control plane: a job queue and runners (agentbus-ci). It is
-// optional. With it, a prompt becomes a turn job that a runner runs as an
-// AgentBus turn, and a finished turn can be reviewed by another agent as a
-// review job. Its README is the contract.
+// The job queue, on the same agentbus API as everything else: one address,
+// one token. A prompt becomes a turn job that a runner runs as a turn, and a
+// finished turn can be reviewed by another agent as a review job. A job's
+// attempt is its turn: the attempt id is the turn id. The agentbus README and
+// docs/CLIENT_API.md are the contract.
 
 export type JobState = 'queued' | 'taken' | 'running' | 'finished' | 'failed' | 'cancelled';
 export type Verdict = 'pass' | 'fail' | 'unknown';
@@ -33,6 +34,9 @@ export interface JobAttempt {
   started?: string;
   ended?: string;
   reason?: string;
+  // The runner started this attempt's turn: the attempt id is then a turn in
+  // the record.
+  turn_started?: boolean;
 }
 
 export interface FileChange {
@@ -92,10 +96,10 @@ export interface ReviewRequest {
   model?: string;
 }
 
-// What the screens call. One implementation talks to the control plane; the
+// What the screens call. One implementation talks to the agentbus API; the
 // tests give their own.
 export interface JobsSource {
-  // The control plane's address, for the foot of the Agents column.
+  // The service's address.
   address: string;
   // How often to read the jobs again, in ms. Tests set it low.
   pollMs?: number;
@@ -113,7 +117,7 @@ export function ended(job: Job): boolean {
   return ENDED.has(job.state);
 }
 
-// A key the control plane takes as idempotency_key: a retry of the same click
+// A key the queue takes as idempotency_key: a retry of the same click
 // makes no second job.
 export function newKey(prefix: string): string {
   const rand =
@@ -123,7 +127,7 @@ export function newKey(prefix: string): string {
   return `${prefix}-${rand}`;
 }
 
-export class ControlPlane implements JobsSource {
+export class JobsClient implements JobsSource {
   constructor(
     public address: string,
     private token: string
@@ -180,43 +184,42 @@ async function apiError(res: Response): Promise<string> {
   } catch {
     // Not JSON.
   }
-  return text.trim() || `the control plane answered ${res.status}`;
+  return text.trim() || `agentbus answered ${res.status}`;
 }
 
 export const CHECK_TIMEOUT_MS = 10_000;
 
-// Checks a control plane's address and token with GET /api/v0/jobs?limit=1.
-// null when they work, else a plain sentence.
-export async function checkControlPlane(address: string, token: string): Promise<string | null> {
+// Whether the service keeps a job queue. Only a 404 from GET /api/v0/jobs
+// says it does not: a runner's own service answers that. Any other answer,
+// a failure included, counts as a queue, so a passing error never hides
+// Review; the jobs list then shows the error.
+export async function probeJobs(address: string, token: string): Promise<boolean> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), CHECK_TIMEOUT_MS);
   try {
-    let res: Response;
-    try {
-      res = await fetch(`${address}/api/v0/jobs?limit=1`, {
-        headers: { Accept: 'application/json', Authorization: `Bearer ${token}` },
-        signal: controller.signal,
-      });
-    } catch {
-      return `cannot reach the control plane at ${address}`;
-    }
-    if (res.status === 401) return 'the control plane refused the token';
-    if (!res.ok) return `the control plane at ${address} answered ${res.status}`;
-    const body: unknown = await res.json().catch(() => null);
-    if (typeof body !== 'object' || body === null || !Array.isArray((body as { jobs?: unknown }).jobs)) {
-      return `${address} did not answer like a control plane`;
-    }
-    return null;
+    const res = await fetch(`${address}/api/v0/jobs?limit=1`, {
+      headers: { Accept: 'application/json', Authorization: `Bearer ${token}` },
+      signal: controller.signal,
+    });
+    return res.status !== 404;
+  } catch {
+    return true;
   } finally {
     clearTimeout(timer);
   }
 }
 
-// The turn a turn job ran, from its result once it ended. A running job's
-// turn is in its attempt's turn.created event (turnFromEvents).
+// The turn a turn job ran. The job names its session when it is made, and its
+// attempt is its turn: the newest attempt whose turn the runner reported
+// started (turn_started). An attempt that never started its turn names none.
+// A result that names a turn itself, as older services wrote, is read first.
 export function resultRef(job: Job): TurnRef | null {
   const r = job.result;
-  return r?.session && r.turn ? { session: r.session, turn: r.turn } : null;
+  if (r?.session && r.turn) return { session: r.session, turn: r.turn };
+  if (job.kind !== 'turn' || !job.session) return null;
+  const started = (job.attempts ?? []).filter((a) => a.turn_started);
+  const at = started[started.length - 1];
+  return at ? { session: job.session, turn: at.id } : null;
 }
 
 export function turnFromEvents(events: JobEvent[]): TurnRef | null {
