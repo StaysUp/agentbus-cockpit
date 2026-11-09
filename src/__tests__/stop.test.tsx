@@ -167,7 +167,8 @@ describe('The Stop button', () => {
     const svc = fakeService({ sessions: [row('s1', { resumable: false })], events: { s1: handPointed } });
     const r = await mount(svc);
     expect(liveLine(r)?.textContent).toMatch(/^Waiting on the model · call 1 · \d+s$/);
-    expect(goBtn(r).textContent).toBe('Send');
+    // No Stop: a message typed here would queue behind it.
+    expect(goBtn(r).textContent).toBe('Queue');
     r.unmount();
   });
 

@@ -1,4 +1,5 @@
 import {
+  QueuedJob,
   AgentSummary,
   CallContext,
   CockpitEvent,
@@ -37,6 +38,7 @@ interface ApiTurn {
   session: string;
   agent: string;
   agent_id?: string;
+  idempotency_key?: string;
   folder: string;
   origin?: ApiOrigin;
   prompt: string;
@@ -79,6 +81,7 @@ function turnRow(t: ApiTurn, n: number): Turn {
     modelCalls: typeof t.model_calls === 'number' ? t.model_calls : undefined,
     agent: t.agent || undefined,
     agentId: t.agent_id || undefined,
+    key: t.idempotency_key || undefined,
     folder: t.folder || undefined,
     origin: turnOrigin(t.origin),
     state: t.state,
@@ -225,6 +228,22 @@ export class LiveDataSource implements DataSource {
     return Array.isArray(data.harnesses) ? data.harnesses : [];
   }
 
+  // GET /api/v0/jobs/<id>: a queued message's turn job. A job that ended
+  // failed or cancelled before its turn started says why, in the refusal the
+  // runner recorded when there is one.
+  async queuedJob(job: string): Promise<QueuedJob> {
+    const res = await fetch(`${this.baseUrl}/api/v0/jobs/${encodeURIComponent(job)}`, { headers: this.headers() });
+    if (!res.ok) throw new Error(await apiError(res));
+    const j = await res.json();
+    const ended = j.state === 'finished' || j.state === 'failed' || j.state === 'cancelled';
+    // A job whose turn started ran the message, whatever its end: only one
+    // that ended before any attempt started its turn did not.
+    const started = Array.isArray(j.attempts) && j.attempts.some((a: { turn_started?: boolean }) => a.turn_started === true);
+    const failed = !started && (j.state === 'failed' || j.state === 'cancelled');
+    const refused = j.result && typeof j.result.refused === 'string' ? (j.result.refused as string) : '';
+    return { ended, failed, why: failed ? refused || `the job ${j.state}${j.reason ? `: ${j.reason}` : ''}` : undefined };
+  }
+
   // GET /api/v0/agents: the saved agents, in the order they were made.
   async listAgents(): Promise<SavedAgent[]> {
     const res = await fetch(`${this.baseUrl}/api/v0/agents`, { headers: this.headers() });
@@ -260,15 +279,17 @@ export class LiveDataSource implements DataSource {
 
   // POST /api/v0/turns with session: the next turn of a session, in its own
   // folder, on its latest agent or the saved agent req.agent names. 202
-  // {id, turn, base_url}; 404 for an unknown session; 409 when a turn is
-  // running or the session cannot be continued from here.
+  // {id, turn, base_url}, or {id, job, queued, ahead} when it waits behind
+  // the session's running turn; 404 for an unknown session; 409 when the
+  // session cannot be continued from here.
   async sendMessage(
     sessionId: string,
-    req: { prompt: string; read_only?: boolean; model?: string; agent?: string }
+    req: { prompt: string; read_only?: boolean; model?: string; agent?: string; idempotency_key?: string }
   ): Promise<Started> {
     const body: Record<string, unknown> = { session: sessionId, prompt: req.prompt, read_only: req.read_only };
     if (req.model) body.model = req.model;
     if (req.agent) body.agent = req.agent;
+    if (req.idempotency_key) body.idempotency_key = req.idempotency_key;
     return this.post('/api/v0/turns', body);
   }
 
@@ -294,7 +315,7 @@ export class LiveDataSource implements DataSource {
       headers: { ...this.headers(), 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
-    if (!res.ok) throw new Error(await apiError(res));
+    if (!res.ok) throw Object.assign(new Error(await apiError(res)), { status: res.status });
     return res.json();
   }
 

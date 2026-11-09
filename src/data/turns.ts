@@ -3,6 +3,7 @@
 // The rules come from CLIENT_API.md, "Turns".
 import {
   AgentSummary,
+  SavedAgent,
   CockpitEvent,
   ModelCallPair,
   SessionSummary,
@@ -331,7 +332,9 @@ export function summarizeSession(
   let agent = (named?.agent as string) || '';
   if (!agent) agent = client.toLowerCase().includes('claude') ? 'claude' : 'unknown';
   // The first that names one gives first_agent, as the API reads it.
-  const firstAgent = (events.find((e) => NAMING_KINDS.has(e.kind) && typeof e.agent === 'string' && e.agent)?.agent as string) || undefined;
+  const firstNaming = events.find((e) => NAMING_KINDS.has(e.kind) && typeof e.agent === 'string' && e.agent);
+  const firstAgent = (firstNaming?.agent as string) || undefined;
+  const firstAgentId = (firstNaming?.agent_id as string) || undefined;
   let folder = (named?.folder as string) || '';
   if (!folder) folder = guessFolder(events);
 
@@ -362,6 +365,7 @@ export function summarizeSession(
     id: sessionId,
     agent,
     first_agent: firstAgent,
+    ...(firstAgentId ? { first_agent_id: firstAgentId } : {}),
     client,
     folder: folder || undefined,
     title: turns[0]?.prompt || sessionId,
@@ -406,37 +410,58 @@ function guessFolder(events: CockpitEvent[]): string {
 
 // The agent a session is listed under: its first. A session whose later
 // turns ran on another agent stays in one place.
+// The agent a session is listed under: the saved agent it started on, else
+// the harness of its first turn. A later turn on another agent never moves it.
 export function sessionGroup(s: SessionSummary): string {
-  return s.first_agent || s.agent;
+  return s.first_agent_id || s.first_agent || s.agent;
 }
 
-export function buildAgents(sessions: SessionSummary[]): AgentSummary[] {
+// The rows of the Agents column: every saved agent, in the order the service
+// lists them, even one with no session, each with its sessions; then one row
+// for each other group sessions fall in (a harness alone, or an agent since
+// removed), named as before saved agents existed.
+export function buildAgents(sessions: SessionSummary[], saved: SavedAgent[] = []): AgentSummary[] {
   const groups = new Map<string, SessionSummary[]>();
+  for (const a of saved) groups.set(a.id, []);
   for (const s of sessions) {
     const g = sessionGroup(s);
     if (!groups.has(g)) groups.set(g, []);
     groups.get(g)!.push(s);
   }
+  const byId = new Map(saved.map((a) => [a.id, a]));
   return Array.from(groups.entries()).map(([id, list]) => {
     const usage = createEmptyUsage();
     for (const s of list) addUsage(usage, s.usage);
-    const name = agentName(id, list);
+    const a = byId.get(id);
+    const harness = a?.harness ?? (list.find((s) => s.first_agent)?.first_agent || id);
+    const name = a ? a.name : agentName(id, list);
     return {
       id,
       name,
-      vendor: id === 'claude' ? 'anthropic' : 'unknown',
-      mark: id === 'claude' ? 'C' : name.charAt(0).toUpperCase(),
+      vendor: harness === 'claude' ? 'anthropic' : harness === 'codex' ? 'openai' : 'unknown',
+      mark: harness === 'claude' ? 'C' : harness === 'codex' ? 'X' : name.charAt(0).toUpperCase(),
       sessionCount: list.length,
       openCount: list.filter((s) => s.open).length,
       usage,
+      ...(a ? { saved: a, line: savedLine(a) } : {}),
     };
   });
 }
 
+// A saved agent's access and model, in a few words.
+function savedLine(a: SavedAgent): string {
+  const access = a.access === 'subscription' ? 'subscription' : a.access === 'openrouter' ? 'OpenRouter' : a.access;
+  return a.model ? `${access} · ${a.model}` : access;
+}
+
 // The agent "" holds sessions no run started. Name it after the
 // harness that sent them (the client up to its version), or "unknown agent".
+// A saved agent's id that is no longer saved names its harness.
 function agentName(id: string, sessions: SessionSummary[]): string {
   if (id === 'claude') return 'Claude Code';
+  if (id === 'codex') return 'codex';
+  const first = sessions.find((s) => s.first_agent)?.first_agent;
+  if (id !== '' && first && first !== id) return `${first === 'claude' ? 'Claude Code' : first} (removed agent)`;
   if (id !== '') return id;
   const client = sessions.find((s) => s.client)?.client ?? '';
   return client.split('/')[0] || 'unknown agent';

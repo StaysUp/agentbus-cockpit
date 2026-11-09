@@ -81,6 +81,9 @@ export interface Turn {
   // and in older files.
   agent?: string;
   agentId?: string;
+  // The idempotency_key the turn was sent with: the cockpit matches a
+  // message it queued to the turn that runs it.
+  key?: string;
   folder?: string;
   // From the turn's turn.started: who started it when the person did not.
   // kind result: AgentBus delivered the result of work this session asked
@@ -143,6 +146,9 @@ export interface SessionSummary {
   // a session whose later turns ran on another agent keeps its first.
   agent: string;
   first_agent?: string;
+  // The saved agent the session started on (from the same event as
+  // first_agent). Absent when that turn named a harness alone.
+  first_agent_id?: string;
   client: string;
   folder?: string;
   title: string;
@@ -179,6 +185,10 @@ export interface AgentSummary {
   sessionCount: number;
   openCount: number;
   usage: Usage;
+  // The saved agent this row is, when it is one: it can be edited and removed.
+  saved?: SavedAgent;
+  // How it reaches its model, in a few words, such as "subscription · haiku".
+  line?: string;
 }
 
 // One way a harness reaches a model, from GET /api/v0/harnesses.
@@ -239,6 +249,20 @@ export interface RunRequest {
 export interface Started {
   id: string;
   turn?: string;
+  // The turn waits in the queue: behind the session's earlier turns (ahead
+  // says how many), or for a runner. turn is then absent.
+  queued?: boolean;
+  ahead?: number;
+  // The turn job that runs it.
+  job?: string;
+}
+
+// Where a queued message's turn job stands (GET /api/v0/jobs/<id>): ended,
+// and why it ended without a turn when it did.
+export interface QueuedJob {
+  ended: boolean;
+  failed: boolean;
+  why?: string;
 }
 
 // GET /api/v0/calls/<exchange>/context: what one model call sent, split into
@@ -283,6 +307,9 @@ export interface DataSource {
   // API's own words.
   getHarnesses?(): Promise<Harness[]>;
   listAgents?(): Promise<SavedAgent[]>;
+  // Where a queued message's turn job stands, by the job id
+  // POST /api/v0/turns answered with.
+  queuedJob?(job: string): Promise<QueuedJob>;
   createAgent?(f: AgentFields): Promise<SavedAgent>;
   updateAgent?(id: string, f: AgentFields): Promise<SavedAgent>;
   removeAgent?(id: string): Promise<void>;
@@ -291,7 +318,10 @@ export interface DataSource {
   // resolves with the session id and, from the live API, the new turn's id.
   startRun?(req: RunRequest): Promise<Started>;
   // agent names a saved agent: the turn runs on it, in the session's folder.
-  sendMessage?(sessionId: string, req: { prompt: string; read_only?: boolean; model?: string; agent?: string }): Promise<Started>;
+  sendMessage?(
+    sessionId: string,
+    req: { prompt: string; read_only?: boolean; model?: string; agent?: string; idempotency_key?: string }
+  ): Promise<Started>;
   // A source that runs turns can stop one: 'stopping' when the service took
   // the stop (202, also when it was already stopping), 'not-running' when the
   // turn has already ended (409). Rejects with an Error in the API's own words.

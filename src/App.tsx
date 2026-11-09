@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import rawSessionsJsonl from '../testdata/sessions-v0.jsonl?raw';
 import { AgentsColumn } from './components/AgentsColumn';
-import { ConvoColumn } from './components/ConvoColumn';
+import { ConvoColumn, Pending, PendingUpdate } from './components/ConvoColumn';
 import { AgentsDialog } from './components/AgentsDialog';
 import { NewSessionDialog } from './components/NewSessionDialog';
 import { RightPanel } from './components/RightPanel';
@@ -28,6 +28,9 @@ import {
   Turn,
   TurnDetail,
 } from './types';
+
+// No pending messages, the same array each time.
+const NO_PENDING: Pending[] = [];
 
 // The longest wait before the sessions are fetched again after an event.
 const LIST_REFRESH_MS = 500;
@@ -166,7 +169,14 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
   };
 
 
-  const agents = useMemo(() => buildAgents(allSessions ?? []), [allSessions]);
+  // The agents form: closed (null), or open for a new agent or on one to edit.
+  const [agentsDialog, setAgentsDialog] = useState<{ edit?: SavedAgent } | null>(null);
+  // The saved agents: the rows of the Agents column, the picker beside Send
+  // and each turn's agent name. Read at the start, whenever the agents form
+  // closes, and after a remove (agentsKey).
+  const [savedAgents, setSavedAgents] = useState<SavedAgent[] | undefined>(undefined);
+  const [agentsKey, setAgentsKey] = useState(0);
+  const agents = useMemo(() => buildAgents(allSessions ?? [], savedAgents), [allSessions, savedAgents]);
   const sessions = useMemo(
     () => (allSessions ?? []).filter((s) => selectedAgentId !== null && sessionGroup(s) === selectedAgentId),
     [allSessions, selectedAgentId]
@@ -375,9 +385,15 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
 
   // After any list change, keep the agent and session if they still exist;
   // otherwise take the first available.
+  // The first pick is the agent of the newest session, so the cockpit opens
+  // on recent work rather than on a saved agent with nothing in it.
+  // Nothing is picked before the sessions are read: a saved agent listed
+  // first would otherwise be kept, empty, once they arrive.
   useEffect(() => {
+    if (allSessions === null) return;
+    const newest = allSessions[0];
     setSelectedAgentId((cur) =>
-      cur !== null && agents.some((a) => a.id === cur) ? cur : (agents[0]?.id ?? null)
+      cur !== null && agents.some((a) => a.id === cur) ? cur : newest ? sessionGroup(newest) : (agents[0]?.id ?? null)
     );
   }, [agents]);
   useEffect(() => {
@@ -430,11 +446,6 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
   const loadHarnesses = useCallback(() => dataSource.getHarnesses!(), [dataSource]);
   const loadSaved = useCallback(() => dataSource.listAgents!(), [dataSource]);
   const canKeepAgents = !!(dataSource.listAgents && dataSource.getHarnesses && dataSource.createAgent);
-  // The agents dialog: closed (null), or open on the list or on a new agent's form.
-  const [agentsDialog, setAgentsDialog] = useState<{ startNew: boolean } | null>(null);
-  // The saved agents, for the picker beside Send and each turn's agent
-  // name. Read at the start and again whenever the agents dialog closes.
-  const [savedAgents, setSavedAgents] = useState<SavedAgent[] | undefined>(undefined);
   useEffect(() => {
     if (!dataSource.listAgents || agentsDialog !== null) return;
     let active = true;
@@ -445,7 +456,13 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
     return () => {
       active = false;
     };
-  }, [dataSource, agentsDialog]);
+  }, [dataSource, agentsDialog, agentsKey]);
+  // Removes a saved agent from its row, then lists the agents again. A
+  // refusal throws the API's words for the row to show.
+  const removeAgent = async (id: string) => {
+    await dataSource.removeAgent!(id);
+    setAgentsKey((k) => k + 1);
+  };
   // With the job queue, a prompt is a turn job: a runner runs it, and the
   // turn shows here once the runner has started it. Without the jobs API,
   // POST /api/v0/turns starts it, which also runs it as a job.
@@ -470,15 +487,32 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
   // new one's turns load, so never the newly selected row.
   const shownId = shown?.session.id ?? null;
   const shownRow = shownId === null ? undefined : allSessions?.find((s) => s.id === shownId);
+  // The messages sent from each session that are not turns yet, kept here so
+  // they outlive a switch to another session and back.
+  const [pendingBySession, setPendingBySession] = useState<Record<string, Pending[]>>({});
+  const shownSessionId = shownId;
+  const onPending = useCallback(
+    (update: PendingUpdate) => {
+      if (!shownSessionId) return;
+      setPendingBySession((m) => ({ ...m, [shownSessionId]: update(m[shownSessionId] ?? []) }));
+    },
+    [shownSessionId]
+  );
+  // Reads a queued message's job; the same function across renders, so the
+  // poll that uses it is not restarted by every job-list refresh.
+  const queuedJob = useMemo(() => (dataSource.queuedJob ? (job: string) => dataSource.queuedJob!(job) : undefined), [dataSource]);
+  // A message is always POST /api/v0/turns, which queues it behind the
+  // session's running turn: it never waits for that turn to end. key matches
+  // the queued message to the turn that runs it.
   const sendMessage = dataSource.sendMessage
-    ? async (prompt: string, readOnly: boolean, agent?: string) => {
-        if (shownId === null) return;
+    ? async (prompt: string, readOnly: boolean, agent: string | undefined, key: string): Promise<Started | undefined> => {
+        if (shownId === null) return undefined;
         const gen = nextSend();
         const from = shownId;
-        const started = jobs
-          ? await runAsJob({ session: from, agent, prompt, read_only: readOnly || undefined })
-          : await dataSource.sendMessage!(from, { prompt, read_only: readOnly, agent });
+        const started = await dataSource.sendMessage!(from, { prompt, read_only: readOnly, agent, idempotency_key: key });
+        refreshJobs?.();
         awaitTurn(gen, started, from);
+        return started;
       }
     : undefined;
 
@@ -694,8 +728,9 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
           setSelectedAgentId(agentId);
           selectSessionLevel();
         }}
-        onAddAgent={canKeepAgents ? () => setAgentsDialog({ startNew: true }) : undefined}
-        onManageAgents={canKeepAgents ? () => setAgentsDialog({ startNew: false }) : undefined}
+        onAddAgent={canKeepAgents ? () => setAgentsDialog({}) : undefined}
+        onEditAgent={canKeepAgents && dataSource.updateAgent ? (a) => a.saved && setAgentsDialog({ edit: a.saved }) : undefined}
+        onRemoveAgent={canKeepAgents && dataSource.removeAgent ? removeAgent : undefined}
       />
 
       <SessionsColumn
@@ -708,8 +743,9 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
           setAwaitedSession(null);
           chooseSession(sessId);
         }}
-        onNewSession={canStart ? () => setNewSession({}) : undefined}
-        empty={allSessions.length === 0}
+        // New session starts on the selected agent when it is a saved one.
+        onNewSession={canStart ? () => setNewSession({ agent: agents.find((a) => a.id === selectedAgentId)?.saved?.id }) : undefined}
+        empty={sessions.length === 0}
       />
 
       {sessionView ? (
@@ -719,6 +755,10 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
           resumable={sessionView.resumable}
           open={sessionView.open}
           onSend={sendMessage}
+          queuedJob={queuedJob}
+          keyed={!!dataSource.queuedJob}
+          pending={pendingBySession[sessionView.id] ?? NO_PENDING}
+          onPending={onPending}
           onStop={stopTurn}
           stopping={stopping}
           live={dataSource.subscribe ? liveTurns[sessionView.id] : undefined}
@@ -801,7 +841,7 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
             canKeepAgents
               ? () => {
                   setNewSession(null);
-                  setAgentsDialog({ startNew: true });
+                  setAgentsDialog({});
                 }
               : undefined
           }
@@ -809,12 +849,10 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
       )}
       {agentsDialog && canKeepAgents && (
         <AgentsDialog
-          loadAgents={loadSaved}
           loadHarnesses={loadHarnesses}
           createAgent={(f) => dataSource.createAgent!(f)}
           updateAgent={(id, f) => dataSource.updateAgent!(id, f)}
-          removeAgent={(id) => dataSource.removeAgent!(id)}
-          startNew={agentsDialog.startNew}
+          edit={agentsDialog.edit}
           onClose={() => setAgentsDialog(null)}
         />
       )}

@@ -40,6 +40,19 @@ function oneTurn(session: string, prompt: string, n = 1): CockpitEvent[] {
   ];
 }
 
+// The idempotency_key of the last message the cockpit sent: its turn's
+// turn.started carries it, as the service stores it.
+function sentKey(svc: { reqs: Req[] }): string {
+  const posts = svc.reqs.filter((q) => q.method === 'POST' && q.path === '/api/v0/turns');
+  return (posts[posts.length - 1]?.body as { idempotency_key?: string } | undefined)?.idempotency_key ?? '';
+}
+
+// The body of the last POST /api/v0/turns.
+function sentBody(svc: { reqs: Req[] }): unknown {
+  const posts = svc.reqs.filter((q) => q.method === 'POST' && q.path === '/api/v0/turns');
+  return posts[posts.length - 1]?.body;
+}
+
 // GET /api/v0/turns rows for one session's events, newest first: the
 // service's own rules, as the replay source applies them.
 function apiTurns(events: CockpitEvent[]) {
@@ -52,6 +65,7 @@ function apiTurns(events: CockpitEvent[]) {
       agent: t.agent ?? '',
       folder: t.folder ?? '',
       prompt: t.detail!.rawPrompt ?? '',
+      idempotency_key: t.detail!.events.find((e) => e.kind === 'turn.started')?.idempotency_key,
       started_seq: t.startedSeq!,
       started: t.startedAt,
       ended: t.endedAt,
@@ -462,9 +476,10 @@ describe('The started turn', () => {
     await setValue(r.container.querySelector('#c-reply textarea'), 'go');
     await submitForm(r.container.querySelector('#c-reply form'));
     await svc.push(ev({ session: 's1', kind: 'session.opened', hold: 'h2', turn: 'Tnext' }));
-    await svc.push(ev({ session: 's1', kind: 'turn.started', turn: 'Tnext', text: 'go' }));
+    await svc.push(ev({ session: 's1', kind: 'turn.started', turn: 'Tnext', text: 'go', idempotency_key: sentKey(svc) }));
     await settle();
-    expect((r.container.querySelector('#c-reply textarea') as HTMLTextAreaElement).disabled).toBe(true);
+    // A running turn never blocks the box: a message would queue behind it.
+    expect((r.container.querySelector('#c-reply textarea') as HTMLTextAreaElement).disabled).toBe(false);
     // The agent exits 1 before any model call: the turn is over.
     await svc.push(ev({ session: 's1', kind: 'session.closed', hold: 'h2', turn: 'Tnext', exit_code: 1 }));
     await settle();
@@ -490,14 +505,16 @@ describe('The prompt box', () => {
     expect(svc.reqs.some((q) => q.path.endsWith('/messages'))).toBe(false);
     const sent = svc.reqs.find((q) => q.path === '/api/v0/turns' && q.method === 'POST');
     expect(sent?.method).toBe('POST');
-    expect(sent?.body).toEqual({ session: 's1', prompt: 'and now the tests', read_only: false });
+    expect(sent?.body).toEqual({ session: 's1', prompt: 'and now the tests', read_only: false, idempotency_key: expect.stringMatching(/^cockpit-msg-/) });
     const pending = r.container.querySelector('.tb.pending .bubble');
     expect(pending?.textContent).toBe('and now the tests');
-    // While it is pending, the box waits.
-    expect((r.container.querySelector('#c-reply textarea') as HTMLTextAreaElement).disabled).toBe(true);
+    // While it is pending the box still takes a message: it would queue.
+    expect((r.container.querySelector('#c-reply textarea') as HTMLTextAreaElement).disabled).toBe(false);
 
     // The turn fills in from the stream and the pending copy goes.
-    for (const e of oneTurn('s1', 'and now the tests', 2)) await svc.push(e);
+    const key = sentKey(svc);
+    for (const e of oneTurn('s1', 'and now the tests', 2))
+      await svc.push(e.kind === 'turn.started' ? { ...e, idempotency_key: key } : e);
     await settle();
     expect(r.container.querySelector('.tb.pending')).toBeNull();
     const bubbles = Array.from(r.container.querySelectorAll('.tb .bubble')).map((b) => b.textContent);
@@ -513,12 +530,14 @@ describe('The prompt box', () => {
     r.unmount();
   });
 
-  it('is disabled while a turn is running, with the reason', async () => {
+  it('takes a message while a turn is running, as Queue', async () => {
     const running = oneTurn('s1', 'first').slice(0, 2); // started and requested, no reply yet
-    const svc = fakeService({ sessions: [row('s1', { resumable: true, open: true })], events: { s1: running } });
+    const svc = fakeService({ sessions: [row('s1', { resumable: false, open: true })], events: { s1: running } });
     const r = await mount(svc);
-    expect((r.container.querySelector('#c-reply textarea') as HTMLTextAreaElement).disabled).toBe(true);
-    expect(r.container.querySelector('#c-reply .reply-why')?.textContent).toBe('a turn is running');
+    expect((r.container.querySelector('#c-reply textarea') as HTMLTextAreaElement).disabled).toBe(false);
+    expect(r.container.querySelector('#c-reply .reply-why')).toBeNull();
+    await setValue(r.container.querySelector('#c-reply textarea'), 'after that');
+    expect((r.container.querySelector('#c-reply button.go') as HTMLButtonElement).textContent).toBe('Queue');
     r.unmount();
   });
 
@@ -531,21 +550,17 @@ describe('The prompt box', () => {
   const sendBtn = (r: { container: HTMLElement }) => r.container.querySelector('#c-reply button.go') as HTMLButtonElement;
   const box = (r: { container: HTMLElement }) => r.container.querySelector('#c-reply textarea') as HTMLTextAreaElement;
 
-  it('keeps Send disabled between the reply and session.closed, and enables it after', async () => {
+  it('between the reply and session.closed a message queues; after it, Send', async () => {
     const svc = fakeService({ sessions: [row('s1', { resumable: true, open: true })], events: { s1: closing('s1') } });
     const r = await mount(svc);
     // The reply is on screen; the turn is not closed.
     expect(r.container.querySelector('#convo .m-agent')?.textContent).toContain('ok');
-    expect(box(r).disabled).toBe(true);
-    expect(sendBtn(r).disabled).toBe(true);
-    expect(sendBtn(r).textContent).toBe('finishing…');
-    expect(r.container.querySelector('#c-reply .reply-why')?.textContent).toBe('finishing the last turn');
-    expect(r.container.querySelector('#c-reply .form-error')).toBeNull();
-
-    // A reply event alone does not enable it.
-    await svc.push(ev({ session: 's1', kind: 'turn.completed', turn: 'T1-s1', exchange: 'x1', outcome: 'finished' }));
-    await settle();
-    expect(sendBtn(r).disabled).toBe(true);
+    expect(box(r).disabled).toBe(false);
+    await setValue(box(r), 'next');
+    expect(sendBtn(r).textContent).toBe('Queue');
+    expect(sendBtn(r).disabled).toBe(false);
+    expect(r.container.querySelector('#c-reply .reply-why')).toBeNull();
+    await setValue(box(r), '');
 
     // session.closed arrives: the row is no longer open, the turn is finished.
     svc.state.sessions = [row('s1', { resumable: true, open: false })];
@@ -558,7 +573,231 @@ describe('The prompt box', () => {
     r.unmount();
   });
 
-  it('on a 409 shows the service reason and keeps the typed text', async () => {
+  it('a message sent while a turn runs shows as queued, then as its turn', async () => {
+    const running = oneTurn('s1', 'first').slice(0, 2);
+    let key = '';
+    const svc = fakeService({
+      sessions: [row('s1', { resumable: false, open: true })],
+      events: { s1: running },
+      messages: (_id, body) => {
+        key = String((body as Record<string, unknown>).idempotency_key);
+        return json({ id: 's1', turn: '', job: 'job_2', base_url: '', queued: true, ahead: 1 }, 202);
+      },
+    });
+    const r = await mount(svc);
+    await setValue(box(r), 'after that');
+    await submitForm(r.container.querySelector('#c-reply form'));
+    await settle();
+    const p = r.container.querySelector('.tb.pending.queued');
+    expect(p?.querySelector('.bubble')?.textContent).toBe('after that');
+    expect(p?.querySelector('.tb-state')?.textContent).toBe('queued · runs after the running turn');
+    expect(box(r).value).toBe('');
+    // A second one queues beside it.
+    await setValue(box(r), 'and then this');
+    await submitForm(r.container.querySelector('#c-reply form'));
+    await settle();
+    expect(r.container.querySelectorAll('.tb.pending.queued').length).toBe(2);
+    expect(svc.reqs.filter((q) => q.method === 'POST' && q.path === '/api/v0/turns').length).toBe(2);
+    expect(key).toMatch(/^cockpit-msg-/);
+    r.unmount();
+  });
+
+  it('a failed send stays on screen with the reason and Edit, and goes when its own turn is listed', async () => {
+    const svc = fakeService({
+      sessions: [row('s1', { resumable: true })],
+      events: { s1: oneTurn('s1', 'first') },
+      messages: () => json({ error: 'the store could not be written' }, 500),
+    });
+    const r = await mount(svc);
+    await setValue(box(r), 'first message');
+    await submitForm(r.container.querySelector('#c-reply form'));
+    await settle();
+    const failed = () => r.container.querySelector('.tb.pending.failed');
+    expect(failed()?.querySelector('.bubble')?.textContent).toBe('first message');
+    expect(failed()?.querySelector('.form-error')?.textContent).toBe('the store could not be written');
+    expect(failed()?.querySelector('.pend-back')?.textContent).toBe('Edit');
+    // The service had taken it after all: its turn arrives with its key, and
+    // the failed copy goes.
+    const key = sentKey(svc);
+    for (const e of oneTurn('s1', 'first message', 2)) await svc.push(e.kind === 'turn.started' ? { ...e, idempotency_key: key } : e);
+    await settle();
+    expect(failed()).toBeNull();
+    r.unmount();
+  });
+
+  it('every message names the agent picked for it', async () => {
+    const running = oneTurn('s1', 'first')
+      .slice(0, 2)
+      .map((e) => (e.kind === 'turn.started' ? { ...e, agent: 'claude', agent_id: 'claude' } : e));
+    const svc = fakeService({
+      sessions: [row('s1', { resumable: false, open: true })],
+      events: { s1: running },
+      agents: AGENTS,
+      messages: (id) => json({ id, turn: '', base_url: '', job: 'job_q', queued: true, ahead: 1 }, 202),
+    });
+    const r = await mount(svc);
+    const pick = () => r.container.querySelector('#c-reply .next-agent') as HTMLSelectElement;
+    const choose = async (v: string) =>
+      act(async () => {
+        pick().value = v;
+        pick().dispatchEvent(new Event('change', { bubbles: true }));
+      });
+    for (const [agent, text] of [['claude', 'one'], ['codex', 'two'], ['codex', 'three'], ['claude', 'four']]) {
+      await choose(agent);
+      await setValue(box(r), text);
+      await submitForm(r.container.querySelector('#c-reply form'));
+      await settle();
+      expect((sentBody(svc) as { agent?: string }).agent).toBe(agent);
+    }
+    r.unmount();
+  });
+
+  it('a queued job whose turn started is not offered for a retry', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const running = oneTurn('s1', 'first').slice(0, 2);
+    const svc = fakeService({
+      sessions: [row('s1', { resumable: false, open: true })],
+      events: { s1: running },
+      messages: (id) => json({ id, turn: '', base_url: '', job: 'job_s', queued: true, ahead: 1 }, 202),
+    });
+    const inner = svc.fn.getMockImplementation()!;
+    svc.fn.mockImplementation(async (input: string, init?: RequestInit) => {
+      if (new URL(input).pathname === '/api/v0/jobs/job_s')
+        return json({ id: 'job_s', state: 'failed', reason: 'agent', attempts: [{ id: 't_1', turn_started: true }] });
+      return inner(input, init);
+    });
+    const r = await mount(svc);
+    await setValue(box(r), 'ran, then failed');
+    await submitForm(r.container.querySelector('#c-reply form'));
+    await settle();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3500);
+    });
+    await settle();
+    expect(r.container.querySelector('.tb.pending.failed')).toBeNull();
+    r.unmount();
+  });
+
+  it('a queued message is still there after a switch to another session and back', async () => {
+    const running = oneTurn('s1', 'first').slice(0, 2);
+    const svc = fakeService({
+      sessions: [row('s1', { resumable: false, open: true }), row('s2', { resumable: true })],
+      events: { s1: running, s2: oneTurn('s2', 'other') },
+      messages: (id) => json({ id, turn: '', base_url: '', job: 'job_q', queued: true, ahead: 1 }, 202),
+    });
+    const r = await mount(svc);
+    await setValue(box(r), 'wait for me');
+    await submitForm(r.container.querySelector('#c-reply form'));
+    await settle();
+    expect(r.container.querySelector('.tb.pending.queued')).not.toBeNull();
+    await click(r.container.querySelector('#sessions [data-session="s2"]'));
+    await settle();
+    expect(r.container.querySelector('.tb.pending')).toBeNull();
+    await click(r.container.querySelector('#sessions [data-session="s1"]'));
+    await settle();
+    expect(r.container.querySelector('.tb.pending.queued .bubble')?.textContent).toBe('wait for me');
+    r.unmount();
+  });
+
+  it('after a switch whose answer was lost, the next message still names its agent', async () => {
+    const running = oneTurn('s1', 'first')
+      .slice(0, 2)
+      .map((e) => (e.kind === 'turn.started' ? { ...e, agent: 'claude', agent_id: 'claude' } : e));
+    let n = 0;
+    const svc = fakeService({
+      sessions: [row('s1', { resumable: false, open: true })],
+      events: { s1: running },
+      agents: AGENTS,
+      messages: (id) => (++n === 1 ? json({ error: 'gateway timeout' }, 504) : json({ id, turn: '', base_url: '', job: 'job_q', queued: true, ahead: 2 }, 202)),
+    });
+    const r = await mount(svc);
+    const pick = () => r.container.querySelector('#c-reply .next-agent') as HTMLSelectElement;
+    const choose = async (v: string) =>
+      act(async () => {
+        pick().value = v;
+        pick().dispatchEvent(new Event('change', { bubbles: true }));
+      });
+    await choose('codex');
+    await setValue(box(r), 'on codex');
+    await submitForm(r.container.querySelector('#c-reply form'));
+    await settle();
+    expect(r.container.querySelector('.tb.pending.failed')).not.toBeNull();
+    await choose('claude');
+    await setValue(box(r), 'on claude');
+    await submitForm(r.container.querySelector('#c-reply form'));
+    await settle();
+    expect((sentBody(svc) as { agent?: string }).agent).toBe('claude');
+    r.unmount();
+  });
+
+  it('a turn another client sent does not clear a failed or a queued message', async () => {
+    const running = oneTurn('s1', 'first').slice(0, 2);
+    let n = 0;
+    const svc = fakeService({
+      sessions: [row('s1', { resumable: false, open: true })],
+      events: { s1: running },
+      messages: (id) => (++n === 1 ? json({ error: 'no' }, 400) : json({ id, turn: '', base_url: '', job: 'job_q', queued: true, ahead: 1 }, 202)),
+    });
+    const r = await mount(svc);
+    await setValue(box(r), 'will fail');
+    await submitForm(r.container.querySelector('#c-reply form'));
+    await setValue(box(r), 'will queue');
+    await submitForm(r.container.querySelector('#c-reply form'));
+    await settle();
+    // A turn with no key, from elsewhere.
+    for (const e of oneTurn('s1', 'from a terminal', 2)) await svc.push(e);
+    await settle();
+    expect(r.container.querySelector('.tb.pending.failed .bubble')?.textContent).toBe('will fail');
+    expect(r.container.querySelector('.tb.pending.queued .bubble')?.textContent).toBe('will queue');
+    r.unmount();
+  });
+
+  it('Edit takes a failed message back into the box', async () => {
+    const svc = fakeService({
+      sessions: [row('s1', { resumable: true })],
+      events: { s1: oneTurn('s1', 'first') },
+      messages: () => json({ error: 'no' }, 400),
+    });
+    const r = await mount(svc);
+    await setValue(box(r), 'lost?');
+    await submitForm(r.container.querySelector('#c-reply form'));
+    await settle();
+    await setValue(box(r), 'typed since');
+    await click(r.container.querySelector('.tb.pending.failed .pend-back'));
+    expect(box(r).value).toBe('typed since\nlost?');
+    expect(r.container.querySelector('.tb.pending')).toBeNull();
+    r.unmount();
+  });
+
+  it('a queued message whose job ends without its turn shows as failed, with why', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const running = oneTurn('s1', 'first').slice(0, 2);
+    const svc = fakeService({
+      sessions: [row('s1', { resumable: false, open: true })],
+      events: { s1: running },
+      messages: (id) => json({ id, turn: '', base_url: '', job: 'job_q', queued: true, ahead: 1 }, 202),
+    });
+    const inner = svc.fn.getMockImplementation()!;
+    svc.fn.mockImplementation(async (input: string, init?: RequestInit) => {
+      if (new URL(input).pathname === '/api/v0/jobs/job_q')
+        return json({ id: 'job_q', state: 'failed', reason: 'setup', result: { refused: 'this session cannot be continued from here', status: 409 } });
+      return inner(input, init);
+    });
+    const r = await mount(svc);
+    await setValue(box(r), 'after that');
+    await submitForm(r.container.querySelector('#c-reply form'));
+    await settle();
+    expect(r.container.querySelector('.tb.pending.queued')).not.toBeNull();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3500);
+    });
+    await settle();
+    const failed = r.container.querySelector('.tb.pending.failed');
+    expect(failed?.querySelector('.form-error')?.textContent).toBe('this session cannot be continued from here');
+    r.unmount();
+  });
+
+  it('on a 409 shows the service reason on the message, which stays', async () => {
     const svc = fakeService({
       sessions: [row('s1', { resumable: true })],
       events: { s1: oneTurn('s1', 'first') },
@@ -567,9 +806,9 @@ describe('The prompt box', () => {
     const r = await mount(svc);
     await setValue(box(r), 'again');
     await submitForm(r.container.querySelector('#c-reply form'));
-    expect(r.container.querySelector('#c-reply .form-error')?.textContent).toBe('a turn is already running in this session');
-    expect(r.container.querySelector('.tb.pending')).toBeNull();
-    expect(box(r).value).toBe('again');
+    const failed = r.container.querySelector('.tb.pending.failed');
+    expect(failed?.querySelector('.form-error')?.textContent).toBe('a turn is already running in this session');
+    expect(failed?.querySelector('.bubble')?.textContent).toBe('again');
     expect(sendBtn(r).textContent).toBe('Send');
     expect(svc.reqs.filter((q) => q.method === 'POST' && q.path === '/api/v0/turns').length).toBe(1);
     r.unmount();
@@ -584,8 +823,8 @@ describe('The prompt box', () => {
     const r = await mount(svc);
     await setValue(box(r), 'again');
     await submitForm(r.container.querySelector('#c-reply form'));
-    expect(r.container.querySelector('#c-reply .form-error')?.textContent).toBe('this session cannot be continued from here');
-    expect(box(r).value).toBe('again');
+    expect(r.container.querySelector('.tb.pending.failed .form-error')?.textContent).toBe('this session cannot be continued from here');
+    expect(r.container.querySelector('.tb.pending.failed .bubble')?.textContent).toBe('again');
     r.unmount();
   });
 });
@@ -645,11 +884,12 @@ describe('Agents', () => {
       model: 'qwen/qwen3-coder:free',
       key_env: 'OPENROUTER_API_KEY',
     });
-    // Back on the list, with the new agent.
+    // The form closes, and the new agent is a row of the Agents column, with
+    // no session yet.
     expect(r.container.querySelector('.agent-form')).toBeNull();
-    const rows = Array.from(r.container.querySelectorAll('.ad-list li')).map((li) => li.textContent);
-    expect(rows).toHaveLength(3);
-    expect(rows[2]).toContain('Claude Code · qwen/qwen3-coder:free · OpenRouter · OPENROUTER_API_KEY');
+    await settle();
+    const rows = Array.from(r.container.querySelectorAll('#agents [data-agent]')).map((x) => x.textContent);
+    expect(rows.some((t) => t!.includes('Claude Code · qwen/qwen3-coder:free') && t!.includes('0 sessions') && t!.includes('OpenRouter · qwen/qwen3-coder:free'))).toBe(true);
     r.unmount();
   });
 
@@ -701,34 +941,68 @@ describe('Agents', () => {
     r.unmount();
   });
 
-  it('while a remove is in flight, Keep, Edit and + Agent wait', async () => {
-    let finish: (r: Response) => void = () => {};
+  it('lists every saved agent in the Agents column, with no Saved button', async () => {
     const svc = fakeService({ sessions: [row('s1')], events: { s1: oneTurn('s1', 'hi') }, agents: AGENTS });
-    const inner = svc.fn.getMockImplementation()!;
-    svc.fn.mockImplementation(async (input: string, init?: RequestInit) => {
-      if (init?.method === 'DELETE') return new Promise<Response>((res) => (finish = res));
-      return inner(input, init);
-    });
     const r = await mount(svc);
-    await click(r.container.querySelector('#agents button.manage-agents'));
     await settle();
-    await click(r.container.querySelector('.ad-list li[data-agent="codex"] .ad-remove'));
-    await click(r.container.querySelector('.ad-list li[data-agent="codex"] .ad-yes'));
-    const set = r.container.querySelector('.agents-dialog > fieldset') as HTMLFieldSetElement;
-    expect(set.disabled).toBe(true);
-    expect(set.querySelector('li[data-agent="codex"] .ad-act button:not(.ad-yes)')?.textContent).toBe('Keep');
-    await act(async () => finish(new Response(null, { status: 204 })));
-    await settle();
-    expect((r.container.querySelector('.agents-dialog > fieldset') as HTMLFieldSetElement).disabled).toBe(false);
+    expect(r.container.querySelector('#agents .manage-agents')).toBeNull();
+    const ids = Array.from(r.container.querySelectorAll('#agents [data-agent]')).map((x) => x.getAttribute('data-agent'));
+    expect(ids).toEqual(expect.arrayContaining(['claude', 'codex']));
+    // codex has no session, and is listed all the same.
+    expect(r.container.querySelector('#agents [data-agent="codex"]')!.textContent).toContain('0 sessions');
     r.unmount();
   });
 
-  it('the list edits an agent with PUT and removes one with DELETE after a confirm', async () => {
+  it('opens on the newest session\'s agent even when the saved agents arrive first', async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((res) => (release = res));
+    const svc = fakeService({ sessions: [row('s1')], events: { s1: oneTurn('s1', 'hi') }, agents: AGENTS,
+      saved: [{ id: 'a_empty', name: 'Empty', harness: 'codex', access: 'subscription' }, ...SAVED] });
+    const inner = svc.fn.getMockImplementation()!;
+    svc.fn.mockImplementation(async (input: string, init?: RequestInit) => {
+      if (new URL(input).pathname === '/api/v0/sessions') await gate;
+      return inner(input, init);
+    });
+    vi.stubGlobal('fetch', svc.fn);
+    const r = await render(<App dataSource={new LiveDataSource({ baseUrl: BASE, token: 't' })} />);
+    await settle();
+    await act(async () => release());
+    await settle();
+    expect(r.container.querySelector('#agents .agent.on')?.getAttribute('data-agent')).toBe('claude');
+    expect(r.container.querySelector('#sessions [data-session="s1"]')).not.toBeNull();
+    r.unmount();
+  });
+
+  it('while a remove is in flight, Remove and Keep wait; then the row is gone', async () => {
+    let finish: () => void = () => {};
+    const svc = fakeService({ sessions: [row('s1')], events: { s1: oneTurn('s1', 'hi') }, agents: AGENTS });
+    const inner = svc.fn.getMockImplementation()!;
+    svc.fn.mockImplementation(async (input: string, init?: RequestInit) => {
+      // The DELETE answers only when the test says, as the service would.
+      if (init?.method === 'DELETE') return new Promise<Response>((res) => (finish = () => res(inner(input, init))));
+      return inner(input, init);
+    });
+    const r = await mount(svc);
+    await settle();
+    await click(r.container.querySelector('#agents [data-agent="codex"]'));
+    await click(r.container.querySelector('#agents [data-agent="codex"] .ag-remove'));
+    await click(r.container.querySelector('#agents [data-agent="codex"] .ag-yes'));
+    expect((r.container.querySelector('#agents [data-agent="codex"] .ag-keep') as HTMLButtonElement).disabled).toBe(true);
+    expect((r.container.querySelector('#agents [data-agent="codex"] .ag-yes') as HTMLButtonElement).disabled).toBe(true);
+    await act(async () => finish());
+    await settle();
+    expect(svc.reqs.find((q) => q.method === 'DELETE')?.path).toBe('/api/v0/agents/codex');
+    expect(r.container.querySelector('#agents [data-agent="codex"]')).toBeNull();
+    r.unmount();
+  });
+
+  it('a row edits its agent with PUT, and a remove asks first', async () => {
     const svc = fakeService({ sessions: [row('s1')], events: { s1: oneTurn('s1', 'hi') }, agents: AGENTS });
     const r = await mount(svc);
-    await click(r.container.querySelector('#agents button.manage-agents'));
     await settle();
-    await click(r.container.querySelector('.ad-list li[data-agent="claude"] .ad-edit'));
+    await click(r.container.querySelector('#agents [data-agent="claude"]'));
+    await click(r.container.querySelector('#agents [data-agent="claude"] .ag-edit'));
+    await settle();
     const form = () => r.container.querySelector('.agent-form')!;
     expect((form().querySelector('input[name="name"]') as HTMLInputElement).value).toBe('Claude Code');
     const sel = form().querySelector('select[name="model"]') as HTMLSelectElement;
@@ -740,13 +1014,17 @@ describe('Agents', () => {
     const put = svc.reqs.find((q) => q.method === 'PUT');
     expect(put?.path).toBe('/api/v0/agents/claude');
     expect(put?.body).toEqual({ name: 'Claude Code', harness: 'claude', access: 'subscription', model: 'opus' });
+    expect(r.container.querySelector('.agent-form')).toBeNull();
 
-    await click(r.container.querySelector('.ad-list li[data-agent="codex"] .ad-remove'));
+    await click(r.container.querySelector('#agents [data-agent="codex"]'));
+    await click(r.container.querySelector('#agents [data-agent="codex"] .ag-remove'));
     expect(svc.reqs.some((q) => q.method === 'DELETE')).toBe(false);
-    await click(r.container.querySelector('.ad-list li[data-agent="codex"] .ad-yes'));
+    await click(r.container.querySelector('#agents [data-agent="codex"] .ag-keep'));
+    expect(r.container.querySelector('#agents [data-agent="codex"] .ag-yes')).toBeNull();
+    await click(r.container.querySelector('#agents [data-agent="codex"] .ag-remove'));
+    await click(r.container.querySelector('#agents [data-agent="codex"] .ag-yes'));
     await settle();
     expect(svc.reqs.find((q) => q.method === 'DELETE')?.path).toBe('/api/v0/agents/codex');
-    expect(Array.from(r.container.querySelectorAll('.ad-list li')).map((li) => li.getAttribute('data-agent'))).toEqual(['claude']);
     r.unmount();
   });
 });
@@ -989,7 +1267,7 @@ describe('Failures in a turn', () => {
     r.unmount();
   });
 
-  it('shows the service reason for a plain-text error and keeps the typed message', async () => {
+  it('shows the service reason for a plain-text error on the message, which stays', async () => {
     const svc = fakeService({
       sessions: [row('s1', { resumable: true })],
       events: { s1: oneTurn('s1', 'first') },
@@ -999,10 +1277,12 @@ describe('Failures in a turn', () => {
     const r = await mount(svc);
     await setValue(r.container.querySelector('#c-reply textarea'), 'try again');
     await submitForm(r.container.querySelector('#c-reply form'));
-    expect(r.container.querySelector('#c-reply .form-error')?.textContent).toBe(
+    // The message stays, failed, with the service's words.
+    const failed = r.container.querySelector('.tb.pending.failed');
+    expect(failed?.querySelector('.form-error')?.textContent).toBe(
       'session s1 was continued by own replay, and no turn of it has a finished reply to replay'
     );
-    expect((r.container.querySelector('#c-reply textarea') as HTMLTextAreaElement).value).toBe('try again');
+    expect(failed?.querySelector('.bubble')?.textContent).toBe('try again');
     r.unmount();
   });
 });

@@ -86,10 +86,11 @@ describe('switching agent per message', () => {
     expect(pick.value).toBe('codex');
     expect((r.container.querySelector('#c-reply textarea') as HTMLTextAreaElement).placeholder).toBe('Message Codex…');
 
-    // The same agent: no agent is sent, so the session keeps its own.
+    // The same agent is named too; the service keeps the session's model
+    // for it.
     await send(r.container, 'one more');
     await waitFor(() => sendMessage.mock.calls.length === 1, 'the first send');
-    expect(sendMessage.mock.calls[0]).toEqual(['s1', { prompt: 'one more', read_only: false, agent: undefined }]);
+    expect(sendMessage.mock.calls[0]).toEqual(['s1', { prompt: 'one more', read_only: false, agent: 'codex', idempotency_key: expect.stringMatching(/^cockpit-msg-/) }]);
 
     r.unmount();
   });
@@ -102,11 +103,11 @@ describe('switching agent per message', () => {
     expect((r.container.querySelector('#c-reply textarea') as HTMLTextAreaElement).placeholder).toBe('Message Claude Code · haiku…');
     await send(r.container, 'back to haiku');
     await waitFor(() => sendMessage.mock.calls.length === 1, 'the send');
-    expect(sendMessage.mock.calls[0]).toEqual(['s1', { prompt: 'back to haiku', read_only: false, agent: 'a_haiku' }]);
+    expect(sendMessage.mock.calls[0]).toEqual(['s1', { prompt: 'back to haiku', read_only: false, agent: 'a_haiku', idempotency_key: expect.stringMatching(/^cockpit-msg-/) }]);
     r.unmount();
   });
 
-  it('names the picked agent in the turn job when the service keeps a queue', async () => {
+  it('sends the picked agent through POST /api/v0/turns when the service keeps a queue', async () => {
     const { src, sendMessage } = source(mixed());
     const created: JobSpec[] = [];
     const T0 = '2026-11-09T01:00:00Z';
@@ -132,9 +133,10 @@ describe('switching agent per message', () => {
     await waitFor(() => r.container.querySelector('#c-reply .next-agent') !== null, 'the picker');
     await setValue(r.container.querySelector('#c-reply .next-agent'), 'a_haiku');
     await send(r.container, 'back to haiku');
-    await waitFor(() => created.length === 1, 'the job');
-    expect(created[0]).toMatchObject({ session: 's1', agent: 'a_haiku', prompt: 'back to haiku' });
-    expect(sendMessage).not.toHaveBeenCalled();
+    // With a queue too, a message is POST /api/v0/turns, which makes its job.
+    await waitFor(() => sendMessage.mock.calls.length === 1, 'the send');
+    expect((sendMessage.mock.calls[0] as unknown[])[1]).toMatchObject({ agent: 'a_haiku', prompt: 'back to haiku' });
+    expect(created).toHaveLength(0);
     r.unmount();
   });
 
@@ -147,10 +149,10 @@ describe('switching agent per message', () => {
     const r = await render(<App dataSource={src} />);
     await waitFor(() => r.container.querySelector('#c-reply .next-agent') !== null, 'the picker');
     await setValue(r.container.querySelector('#c-reply .next-agent'), 'a_haiku');
-    // The agent is removed; the list is read again when the agents dialog closes.
+    // The agent is removed; the list is read again when the agents form closes.
     list = SAVED.filter((a) => a.id !== 'a_haiku');
     await act(async () => {
-      r.container.querySelector<HTMLButtonElement>('.manage-agents')!.click();
+      r.container.querySelector<HTMLButtonElement>('#agents .add-agent')!.click();
     });
     await flush();
     await act(async () => {
@@ -160,7 +162,7 @@ describe('switching agent per message', () => {
     expect((r.container.querySelector('#c-reply .next-agent') as HTMLSelectElement).value).toBe('codex');
     await send(r.container, 'still here?');
     await waitFor(() => sendMessage.mock.calls.length === 1, 'the send');
-    expect((sendMessage.mock.calls[0] as unknown[])[1]).toEqual({ prompt: 'still here?', read_only: false, agent: undefined });
+    expect((sendMessage.mock.calls[0] as unknown[])[1]).toEqual({ prompt: 'still here?', read_only: false, agent: 'codex', idempotency_key: expect.stringMatching(/^cockpit-msg-/) });
     r.unmount();
   });
 

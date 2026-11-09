@@ -449,8 +449,8 @@ describe('the switch window', () => {
       expect(foot).toContain(a ? '100 tokens' : '5.0k tokens');
       expect(r.container.querySelectorAll('#convo .tb')).toHaveLength(a ? 1 : 2);
       expect(q('#convo .m-agent')?.textContent).toContain(`${who} answer`);
-      // A takes a next message; B is held open, so its box is closed.
-      expect((q('#input') as HTMLTextAreaElement).disabled).toBe(!a);
+      // Both take a next message: B's would queue behind its open turn.
+      expect((q('#input') as HTMLTextAreaElement).disabled).toBe(false);
       if (level === 'turn') {
         expect(q('#right .colhead-title')?.textContent).toContain(a ? 'alpha prompt' : 'beta prompt');
         expect(q('#right .colhead-title')?.textContent).toContain(a ? 'turn 1 of 1' : 'turn 1 of 2');

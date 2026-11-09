@@ -1,22 +1,21 @@
 import React, { useEffect, useState } from "react";
 import { AccessOption, AgentFields, Harness, SavedAgent } from "../types";
 
-// The saved agents (GET /api/v0/agents) with edit and remove, and the
-// "+ Agent" form: Harness, then Access (only what that harness offers), then
-// Model (what that harness and access offer; any id for OpenRouter), then
-// Name (filled from harness and model until the person types one), then the
-// extras, shown and disabled. An agent says nothing about where it runs.
+// The "+ Agent" form, and the same form to edit a saved agent: Harness,
+// then Access (only what that harness offers), then Model (what that harness
+// and access offer; any id for OpenRouter), then Name (filled from harness
+// and model until the person types one), then the extras, shown and
+// disabled. An agent says nothing about where it runs. The agents themselves
+// are listed in the left column (AgentsColumn), which edits and removes them.
 
 interface AgentsDialogProps {
-  loadAgents: () => Promise<SavedAgent[]>;
   loadHarnesses: () => Promise<Harness[]>;
   createAgent: (f: AgentFields) => Promise<SavedAgent>;
   updateAgent: (id: string, f: AgentFields) => Promise<SavedAgent>;
-  removeAgent: (id: string) => Promise<void>;
   onClose: () => void;
-  // Open with the form for a new agent.
-  startNew?: boolean;
-  // Called after any change, so other screens can list the agents again.
+  // The agent to edit; absent, the form makes a new one.
+  edit?: SavedAgent;
+  // Called after a save, so other screens can list the agents again.
   onChanged?: () => void;
 }
 
@@ -90,65 +89,47 @@ const Off: React.FC<{ label: string; value: string }> = ({ label, value }) => (
 );
 
 export const AgentsDialog: React.FC<AgentsDialogProps> = ({
-  loadAgents,
   loadHarnesses,
   createAgent,
   updateAgent,
-  removeAgent,
   onClose,
-  startNew,
+  edit,
   onChanged,
 }) => {
-  const [agents, setAgents] = useState<SavedAgent[] | null>(null);
   const [harnesses, setHarnesses] = useState<Harness[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  // The form: null when closed; editing names the agent being edited.
+  // The form, once the harnesses are known.
   const [form, setForm] = useState<FormState | null>(null);
-  const [editing, setEditing] = useState<string | null>(null);
-  const [wantNew, setWantNew] = useState(!!startNew);
-  const [confirming, setConfirming] = useState<string | null>(null);
+  const editing = edit?.id ?? null;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const reload = () =>
-    loadAgents().then(
-      (list) => setAgents(list),
-      (err: Error) => setLoadError(err.message),
-    );
   useEffect(() => {
     let active = true;
-    Promise.all([loadAgents(), loadHarnesses()]).then(
-      ([list, hs]) => {
+    loadHarnesses().then(
+      (hs) => {
         if (!active) return;
-        setAgents(list);
         setHarnesses(hs);
+        setForm(edit ? formOf(edit) : freshForm(hs));
       },
       (err: Error) => active && setLoadError(err.message),
     );
     return () => {
       active = false;
     };
-  }, [loadAgents, loadHarnesses]);
-  useEffect(() => {
-    if (wantNew && harnesses) {
-      setForm(freshForm(harnesses));
-      setEditing(null);
-      setWantNew(false);
-    }
-  }, [wantNew, harnesses]);
+    // The form is made once, for the agent the dialog opened on.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadHarnesses]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      // While a save or a remove is in flight nothing closes: its answer
-      // would land on whatever came next.
+      // While a save is in flight nothing closes: its answer would land on
+      // whatever came next.
       if (e.key !== "Escape" || busy) return;
-      if (form) {
-        setForm(null);
-        setError(null);
-      } else onClose();
+      onClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [form, onClose, busy]);
+  }, [onClose, busy]);
 
   const hs = harnesses ?? [];
   const harness = form ? hs.find((h) => h.name === form.harness) : undefined;
@@ -203,32 +184,19 @@ export const AgentsDialog: React.FC<AgentsDialogProps> = ({
     }
     setBusy(true);
     setError(null);
+    let saved = false;
     try {
       if (editing) await updateAgent(editing, fields(form));
       else await createAgent(fields(form));
-      setForm(null);
-      setEditing(null);
-      await reload();
-      onChanged?.();
+      saved = true;
     } catch (err) {
       setError((err as Error).message);
     } finally {
       setBusy(false);
     }
-  };
-
-  const remove = async (id: string) => {
-    setBusy(true);
-    setError(null);
-    try {
-      await removeAgent(id);
-      setConfirming(null);
-      await reload();
+    if (saved) {
       onChanged?.();
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setBusy(false);
+      onClose();
     }
   };
 
@@ -246,91 +214,11 @@ export const AgentsDialog: React.FC<AgentsDialogProps> = ({
       <div
         className="new-dialog agents-dialog"
         role="dialog"
-        aria-label="Agents"
+        aria-label={editing ? "Edit agent" : "New agent"}
       >
-        <div className="nd-title">Agents</div>
+        <div className="nd-title">{editing ? `Edit ${edit?.name}` : "New agent"}</div>
         {loadError && <div className="form-error">{loadError}</div>}
-        {!agents && !loadError && <div className="nd-note">Looking…</div>}
-        {agents && !form && (
-          // While a remove is in flight every control waits for it.
-          <fieldset className="ad-set" disabled={busy}>
-            <ul className="ad-list">
-              {agents.length === 0 && <li className="dim">No agents yet.</li>}
-              {agents.map((a) => (
-                <li key={a.id} data-agent={a.id}>
-                  <span className="ad-t">
-                    <b>{a.name}</b>
-                    <span>
-                      {agentLine(a, hs)}
-                      {a.access === "openrouter" && a.key_set === false && (
-                        <>
-                          {" "}
-                          · <span className="warn">key not set</span>
-                        </>
-                      )}
-                    </span>
-                  </span>
-                  {confirming === a.id ? (
-                    <span className="ad-act">
-                      <span>Remove?</span>
-                      <button
-                        type="button"
-                        className="ad-yes"
-                        disabled={busy}
-                        onClick={() => remove(a.id)}
-                      >
-                        Remove
-                      </button>
-                      <button type="button" onClick={() => setConfirming(null)}>
-                        Keep
-                      </button>
-                    </span>
-                  ) : (
-                    <span className="ad-act">
-                      <button
-                        type="button"
-                        className="ad-edit"
-                        disabled={!harnesses}
-                        onClick={() => {
-                          setForm(formOf(a));
-                          setEditing(a.id);
-                          setError(null);
-                        }}
-                      >
-                        Edit
-                      </button>
-                      <button
-                        type="button"
-                        className="ad-remove"
-                        onClick={() => setConfirming(a.id)}
-                      >
-                        Remove
-                      </button>
-                    </span>
-                  )}
-                </li>
-              ))}
-            </ul>
-            {error && <div className="form-error">{error}</div>}
-            <div className="nd-actions">
-              <button
-                type="button"
-                className="connect-go ad-new"
-                disabled={!harnesses}
-                onClick={() => {
-                  setForm(freshForm(hs));
-                  setEditing(null);
-                  setError(null);
-                }}
-              >
-                + Agent
-              </button>
-              <button type="button" className="use-recorded" onClick={onClose}>
-                Close
-              </button>
-            </div>
-          </fieldset>
-        )}
+        {!form && !loadError && <div className="nd-note">Looking…</div>}
         {form && (
           <form className="agent-form" onSubmit={save}>
             {/* While a save is in flight nothing in the form changes: the
@@ -493,11 +381,7 @@ export const AgentsDialog: React.FC<AgentsDialogProps> = ({
                 <button
                   type="button"
                   className="use-recorded"
-                  onClick={() => {
-                    setForm(null);
-                    setEditing(null);
-                    setError(null);
-                  }}
+                  onClick={onClose}
                 >
                   Cancel
                 </button>

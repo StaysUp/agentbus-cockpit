@@ -321,17 +321,18 @@ describe('Fix', () => {
     expect(document.activeElement).toBe(box);
     expect(fake.calls.created).toHaveLength(0);
 
-    // The person edits it and presses Send: the next turn job of the session.
+    // The person edits it and presses Send: the session's next turn.
     await setValue(box, box.value + '\nKeep the API the same.');
     await act(async () => {
       r.container.querySelector('#c-reply form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
     });
-    await waitFor(() => fake.calls.created.length === 1, 'the job');
-    expect(fake.calls.created[0].session).toBe('s1');
-    expect(fake.calls.created[0].read_only).toBeUndefined();
-    expect(sendMessage).not.toHaveBeenCalled();
-    expect(fake.calls.created[0].prompt).toContain('- P1 calc.go:7: adds instead of subtracting');
-    expect(fake.calls.created[0].prompt).toContain('Keep the API the same.');
+    await waitFor(() => sendMessage.mock.calls.length === 1, 'the send');
+    const [session, req] = sendMessage.mock.calls[0] as unknown as [string, { prompt: string; read_only: boolean }];
+    expect(session).toBe('s1');
+    expect(req.read_only).toBe(false);
+    expect(req.prompt).toContain('- P1 calc.go:7: adds instead of subtracting');
+    expect(req.prompt).toContain('Keep the API the same.');
+    expect(fake.calls.created).toHaveLength(0);
     r.unmount();
   });
 
@@ -386,7 +387,9 @@ describe('the session CI/CD view', () => {
 });
 
 describe('sending with the job queue', () => {
-  it('a next message is a turn job of the session, not a direct turn', async () => {
+  // POST /api/v0/turns makes the turn job itself, and queues it behind a
+  // running turn: one path for every message.
+  it('a next message goes to POST /api/v0/turns, which makes its job', async () => {
     const fake = fakeJobs([job({ id: 'job_1', result: { session: 's1', turn: 'T1' } })]);
     const { src, sendMessage } = source(turnEvents());
     const r = await render(<App dataSource={src} jobs={fake.src} />);
@@ -395,9 +398,9 @@ describe('sending with the job queue', () => {
     await act(async () => {
       r.container.querySelector('#c-reply form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
     });
-    await waitFor(() => fake.calls.created.length === 1, 'the job');
-    expect(fake.calls.created[0]).toEqual({ session: 's1', prompt: 'now add a test' });
-    expect(sendMessage).not.toHaveBeenCalled();
+    await waitFor(() => sendMessage.mock.calls.length === 1, 'the send');
+    expect(sendMessage.mock.calls[0]).toEqual(['s1', { prompt: 'now add a test', read_only: false, agent: expect.any(String), idempotency_key: expect.stringMatching(/^cockpit-msg-/) }]);
+    expect(fake.calls.created).toHaveLength(0);
     r.unmount();
   });
 
