@@ -82,6 +82,11 @@ export interface Turn {
   agent?: string;
   agentId?: string;
   folder?: string;
+  // From the turn's turn.started: who started it when the person did not.
+  // kind result: AgentBus delivered the result of work this session asked
+  // for, and the prompt is that result. kind asked: another session's turn
+  // asked for this one. Absent for a turn the person started.
+  origin?: TurnOrigin;
   state: TurnState;
   // True when the person stopped the turn (POST /api/v0/turns/<id>/stop).
   stopped?: boolean;
@@ -97,6 +102,19 @@ export interface Turn {
   // The turn's own events, paired, once they are loaded
   // (GET /api/v0/turns/{id}/events). Only loaded turns have it.
   detail?: TurnDetail;
+}
+
+// Who started a turn when the person did not (origin on GET /api/v0/turns).
+export interface TurnOrigin {
+  kind: 'asked' | 'result';
+  // asked: the session and turn that asked. result: the session and turn the
+  // work ran in.
+  session?: string;
+  turn?: string;
+  // result: the job whose result it is, turn or review, and the agent.
+  job?: string;
+  jobKind?: string;
+  agent?: string;
 }
 
 // One turn's events, and what the cockpit reads from them.

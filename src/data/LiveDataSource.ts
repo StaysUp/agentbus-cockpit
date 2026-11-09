@@ -16,7 +16,7 @@ import {
   TurnState,
   Usage,
 } from '../types';
-import { buildAgents, extractCleanPrompt, sessionGroup, turnDetail } from './turns';
+import { ApiOrigin, buildAgents, extractCleanPrompt, sessionGroup, turnDetail, turnOrigin } from './turns';
 
 export interface LiveDataSourceConfig {
   baseUrl?: string; // defaults to http://127.0.0.1:8787
@@ -38,6 +38,7 @@ interface ApiTurn {
   agent: string;
   agent_id?: string;
   folder: string;
+  origin?: ApiOrigin;
   prompt: string;
   prompt_truncated?: boolean;
   // The reply to the turn's last model call (first 500 characters), the
@@ -79,6 +80,7 @@ function turnRow(t: ApiTurn, n: number): Turn {
     agent: t.agent || undefined,
     agentId: t.agent_id || undefined,
     folder: t.folder || undefined,
+    origin: turnOrigin(t.origin),
     state: t.state,
     stopped: t.stopped === true || undefined,
     outcome: t.outcome,

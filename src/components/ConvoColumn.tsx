@@ -42,6 +42,10 @@ interface ConvoColumnProps {
   // The person edits it and presses Send; nothing is sent by itself.
   prefill?: { session: string; text: string } | null;
   onPrefillTaken?: () => void;
+  // Opens another session, for the links of a delivered result (to the
+  // session that did the work) and of an asked turn (to the session that
+  // asked). Without it the links are not shown.
+  onOpenSession?: (sessionId: string) => void;
 }
 
 // The harnesses' own names, for a turn no saved agent names.
@@ -55,6 +59,55 @@ export function turnAgentName(turn: Turn, agents?: SavedAgent[]): string {
   if (saved) return saved.name;
   return turn.agent ? (HARNESS_NAMES[turn.agent] ?? turn.agent) : '';
 }
+
+// The name of an agent an origin names: a saved agent's id, else a harness.
+export function agentNameOf(id: string | undefined, agents?: SavedAgent[]): string {
+  if (!id) return 'an agent';
+  return agents?.find((a) => a.id === id)?.name ?? HARNESS_NAMES[id] ?? id;
+}
+
+// The line above a turn's message when the person did not type it: a
+// delivered result names the agent that did the work and links to its
+// session; an asked turn links to the session that asked.
+const OriginLine: React.FC<{ turn: Turn; agents?: SavedAgent[]; onOpenSession?: (id: string) => void }> = ({
+  turn,
+  agents,
+  onOpenSession,
+}) => {
+  const o = turn.origin;
+  if (!o) return null;
+  const link = (label: string) =>
+    o.session && onOpenSession ? (
+      <>
+        {' · '}
+        <a
+          href="#"
+          className="origin-link"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            onOpenSession(o.session!);
+          }}
+        >
+          {label}
+        </a>
+      </>
+    ) : null;
+  if (o.kind === 'result') {
+    return (
+      <div className="m-origin">
+        {o.jobKind === 'review' ? 'Review result from ' : 'Result from '}
+        <b>{agentNameOf(o.agent, agents)}</b>, delivered by AgentBus, not typed by you
+        {link('open its session')}
+      </div>
+    );
+  }
+  return (
+    <div className="m-origin">
+      Asked by another agent{link('open the session that asked')}
+    </div>
+  );
+};
 
 // The saved agent a session's next message goes to by default: the one that
 // ran its latest turn. A turn started by harness name alone names the
@@ -90,6 +143,7 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
   prefill,
   onPrefillTaken,
   agents,
+  onOpenSession,
 }) => {
   const [draft, setDraft] = useState('');
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -256,8 +310,9 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
                       </>
                     )}
                   </div>
-                  <div className="m-user">
-                    <div className="bubble">
+                  <OriginLine turn={turn} agents={agents} onOpenSession={onOpenSession} />
+                  <div className={`m-user${turn.origin ? ' from-agent' : ''}`}>
+                    <div className={`bubble${turn.origin?.kind === 'result' ? ' delivered' : ''}`}>
                       {turn.prompt}
                       {turn.promptTruncated ? '…' : ''}
                     </div>

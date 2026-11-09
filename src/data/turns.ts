@@ -9,9 +9,28 @@ import {
   ToolCallPair,
   Turn,
   TurnDetail,
+  TurnOrigin,
   TurnState,
   Usage,
 } from '../types';
+
+// A turn's origin as turn.started and GET /api/v0/turns send it.
+export interface ApiOrigin {
+  kind: string;
+  session?: string;
+  turn?: string;
+  job?: string;
+  job_kind?: string;
+  agent?: string;
+}
+
+// A turn's origin as the screens read it; a kind this cockpit does not know is
+// left out.
+export function turnOrigin(o: unknown): TurnOrigin | undefined {
+  const a = o as ApiOrigin | undefined;
+  if (!a || typeof a !== 'object' || (a.kind !== 'asked' && a.kind !== 'result')) return undefined;
+  return { kind: a.kind, session: a.session, turn: a.turn, job: a.job, jobKind: a.job_kind, agent: a.agent };
+}
 
 // Kinds that belong to the session, not to any turn.
 const SESSION_KINDS = new Set([
@@ -275,6 +294,7 @@ export function buildTurns(sessionId: string, rawEvents: CockpitEvent[]): Turn[]
       agent: (named?.agent as string) || undefined,
       agentId: (named?.agent_id as string) || undefined,
       folder: (named?.folder as string) || undefined,
+      origin: turnOrigin(named?.origin),
       state,
       stopped,
       outcome: completed ? (completed.outcome as string) || 'finished' : undefined,

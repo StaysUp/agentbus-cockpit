@@ -730,6 +730,19 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
           panelOpen={panelOpen}
           agentName={agents.find((x) => x.id === sessionView.agent)?.name}
           agents={savedAgents}
+          onOpenSession={(id) => {
+            // A session not listed yet is opened once its row arrives, under
+            // its own agent, as for a session just started.
+            const s = allSessions?.find((x) => x.id === id);
+            nextSend();
+            setAwaitedTurn(null);
+            if (!s) {
+              setAwaitedSession(id);
+              return;
+            }
+            setAwaitedSession(null);
+            chooseSession(id, sessionGroup(s));
+          }}
         />
       ) : (
         <main id="convo">
