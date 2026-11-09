@@ -380,8 +380,9 @@ describe('the conversation column', () => {
     const a = await app();
     const heads = () => a.qa('#convo .tb-h').map((h) => h.textContent);
     // An unopened turn's calls and model come from the turn list; an opened
-    // turn's from its events. They agree.
-    const both = ['Turn 1 claude-sonnet-5 · 2 model calls', 'Turn 2 claude-sonnet-5 · 1 model call'];
+    // turn's from its events. They agree. A turn a run started names its
+    // agent first; turn 2 names none.
+    const both = ['Turn 1 Claude Code · claude-sonnet-5 · 2 model calls', 'Turn 2 claude-sonnet-5 · 1 model call'];
     expect(heads()).toEqual(both);
     expect(a.qa('#convo .tsep')).toHaveLength(1);
     await click(a.qa('#convo .tb')[1]);

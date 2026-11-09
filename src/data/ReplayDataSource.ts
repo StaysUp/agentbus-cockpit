@@ -1,5 +1,5 @@
 import { AgentSummary, CockpitEvent, DataSource, SessionSummary, Turn, TurnDetail, TurnList } from '../types';
-import { buildAgents, buildTurns, summarizeSession } from './turns';
+import { buildAgents, buildTurns, sessionGroup, summarizeSession } from './turns';
 
 // Reads a recorded .jsonl file. A file has no turn list, so the turns are
 // grouped from its events (./turns), and served through the same two calls
@@ -47,7 +47,7 @@ export class ReplayDataSource implements DataSource {
 
   async getSessions(agentId?: string): Promise<SessionSummary[]> {
     if (agentId === undefined) return this.sessions;
-    return this.sessions.filter((s) => s.agent === agentId);
+    return this.sessions.filter((s) => sessionGroup(s) === agentId);
   }
 
   async getTurns(sessionId: string): Promise<TurnList> {

@@ -13,13 +13,14 @@ import { addLiveEvent, LiveTurns, mergeLive, noteEventTime } from './data/liveSt
 import { refreshNow } from './utils/useNow';
 import { Job, JobsSource, JobSpec, startTurnJob } from './data/jobs';
 import { useJobs } from './data/useJobs';
-import { addStreamedCost, addTurnEvents, buildAgents, createEmptyUsage, turnDetail } from './data/turns';
+import { addStreamedCost, addTurnEvents, buildAgents, createEmptyUsage, sessionGroup, turnDetail } from './data/turns';
 import {
   CockpitEvent,
   DataSource,
   EventSelection,
   Level,
   RunRequest,
+  SavedAgent,
   SessionDetail,
   SessionList,
   SessionSummary,
@@ -167,7 +168,7 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
 
   const agents = useMemo(() => buildAgents(allSessions ?? []), [allSessions]);
   const sessions = useMemo(
-    () => (allSessions ?? []).filter((s) => selectedAgentId !== null && s.agent === selectedAgentId),
+    () => (allSessions ?? []).filter((s) => selectedAgentId !== null && sessionGroup(s) === selectedAgentId),
     [allSessions, selectedAgentId]
   );
   const loading = allSessions === null;
@@ -413,7 +414,7 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
     if (awaitedSession === null) return;
     const s = allSessions?.find((x) => x.id === awaitedSession);
     if (!s) return;
-    chooseSession(s.id, s.agent);
+    chooseSession(s.id, sessionGroup(s));
     setAwaitedSession(null);
   }, [allSessions, awaitedSession]);
 
@@ -431,6 +432,20 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
   const canKeepAgents = !!(dataSource.listAgents && dataSource.getHarnesses && dataSource.createAgent);
   // The agents dialog: closed (null), or open on the list or on a new agent's form.
   const [agentsDialog, setAgentsDialog] = useState<{ startNew: boolean } | null>(null);
+  // The saved agents, for the picker beside Send and each turn's agent
+  // name. Read at the start and again whenever the agents dialog closes.
+  const [savedAgents, setSavedAgents] = useState<SavedAgent[] | undefined>(undefined);
+  useEffect(() => {
+    if (!dataSource.listAgents || agentsDialog !== null) return;
+    let active = true;
+    dataSource.listAgents().then(
+      (list) => active && setSavedAgents(list),
+      () => undefined
+    );
+    return () => {
+      active = false;
+    };
+  }, [dataSource, agentsDialog]);
   // With the job queue, a prompt is a turn job: a runner runs it, and the
   // turn shows here once the runner has started it. Without the jobs API,
   // POST /api/v0/turns starts it, which also runs it as a job.
@@ -456,13 +471,13 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
   const shownId = shown?.session.id ?? null;
   const shownRow = shownId === null ? undefined : allSessions?.find((s) => s.id === shownId);
   const sendMessage = dataSource.sendMessage
-    ? async (prompt: string, readOnly: boolean) => {
+    ? async (prompt: string, readOnly: boolean, agent?: string) => {
         if (shownId === null) return;
         const gen = nextSend();
         const from = shownId;
         const started = jobs
-          ? await runAsJob({ session: from, prompt, read_only: readOnly || undefined })
-          : await dataSource.sendMessage!(from, { prompt, read_only: readOnly });
+          ? await runAsJob({ session: from, agent, prompt, read_only: readOnly || undefined })
+          : await dataSource.sendMessage!(from, { prompt, read_only: readOnly, agent });
         awaitTurn(gen, started, from);
       }
     : undefined;
@@ -714,6 +729,7 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
           level={shownLevel}
           panelOpen={panelOpen}
           agentName={agents.find((x) => x.id === sessionView.agent)?.name}
+          agents={savedAgents}
         />
       ) : (
         <main id="convo">

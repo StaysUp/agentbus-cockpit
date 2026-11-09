@@ -16,7 +16,7 @@ import {
   TurnState,
   Usage,
 } from '../types';
-import { buildAgents, extractCleanPrompt, turnDetail } from './turns';
+import { buildAgents, extractCleanPrompt, sessionGroup, turnDetail } from './turns';
 
 export interface LiveDataSourceConfig {
   baseUrl?: string; // defaults to http://127.0.0.1:8787
@@ -36,6 +36,7 @@ interface ApiTurn {
   id: string;
   session: string;
   agent: string;
+  agent_id?: string;
   folder: string;
   prompt: string;
   prompt_truncated?: boolean;
@@ -76,6 +77,7 @@ function turnRow(t: ApiTurn, n: number): Turn {
     model: t.model || undefined,
     modelCalls: typeof t.model_calls === 'number' ? t.model_calls : undefined,
     agent: t.agent || undefined,
+    agentId: t.agent_id || undefined,
     folder: t.folder || undefined,
     state: t.state,
     stopped: t.stopped === true || undefined,
@@ -131,7 +133,7 @@ export class LiveDataSource implements DataSource {
 
   async getSessions(agentId?: string): Promise<SessionSummary[]> {
     const { sessions } = await this.snapshot();
-    return agentId === undefined ? sessions : sessions.filter((s) => s.agent === agentId);
+    return agentId === undefined ? sessions : sessions.filter((s) => sessionGroup(s) === agentId);
   }
 
   // GET /api/v0/turns?session=<id>: one session's turns, newest first, a page
@@ -255,11 +257,16 @@ export class LiveDataSource implements DataSource {
   }
 
   // POST /api/v0/turns with session: the next turn of a session, in its own
-  // agent and folder. 202 {id, turn, base_url}; 404 for an unknown session;
-  // 409 when a turn is running or the session cannot be continued from here.
-  async sendMessage(sessionId: string, req: { prompt: string; read_only?: boolean; model?: string }): Promise<Started> {
+  // folder, on its latest agent or the saved agent req.agent names. 202
+  // {id, turn, base_url}; 404 for an unknown session; 409 when a turn is
+  // running or the session cannot be continued from here.
+  async sendMessage(
+    sessionId: string,
+    req: { prompt: string; read_only?: boolean; model?: string; agent?: string }
+  ): Promise<Started> {
     const body: Record<string, unknown> = { session: sessionId, prompt: req.prompt, read_only: req.read_only };
     if (req.model) body.model = req.model;
+    if (req.agent) body.agent = req.agent;
     return this.post('/api/v0/turns', body);
   }
 

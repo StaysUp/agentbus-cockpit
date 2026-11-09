@@ -75,9 +75,12 @@ export interface Turn {
   replyTruncated?: boolean;
   model?: string;
   modelCalls?: number;
-  // From the turn's turn.started: the agent and folder of the run that
-  // started it. Absent for a turn no run started, and in older files.
+  // From the turn's turn.started: the agent (harness) and folder of the run
+  // that started it, and the saved agent that ran it (agentId). Turns of one
+  // session may name different agents. Absent for a turn no run started,
+  // and in older files.
   agent?: string;
+  agentId?: string;
   folder?: string;
   state: TurnState;
   // True when the person stopped the turn (POST /api/v0/turns/<id>/stop).
@@ -118,7 +121,10 @@ export interface TurnList {
 
 export interface SessionSummary {
   id: string;
+  // The agent (harness) of the session's latest turn, and of its first:
+  // a session whose later turns ran on another agent keeps its first.
   agent: string;
+  first_agent?: string;
   client: string;
   folder?: string;
   title: string;
@@ -266,7 +272,8 @@ export interface DataSource {
   // rejects with an Error whose message is the API's own words. Starting
   // resolves with the session id and, from the live API, the new turn's id.
   startRun?(req: RunRequest): Promise<Started>;
-  sendMessage?(sessionId: string, req: { prompt: string; read_only?: boolean; model?: string }): Promise<Started>;
+  // agent names a saved agent: the turn runs on it, in the session's folder.
+  sendMessage?(sessionId: string, req: { prompt: string; read_only?: boolean; model?: string; agent?: string }): Promise<Started>;
   // A source that runs turns can stop one: 'stopping' when the service took
   // the stop (202, also when it was already stopping), 'not-running' when the
   // turn has already ended (409). Rejects with an Error in the API's own words.

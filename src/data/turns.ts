@@ -273,6 +273,7 @@ export function buildTurns(sessionId: string, rawEvents: CockpitEvent[]): Turn[]
       model: (lastCall?.requested.model as string) || undefined,
       modelCalls: detail.modelCalls.length,
       agent: (named?.agent as string) || undefined,
+      agentId: (named?.agent_id as string) || undefined,
       folder: (named?.folder as string) || undefined,
       state,
       stopped,
@@ -309,6 +310,8 @@ export function summarizeSession(
   // client string and to paths seen in tool inputs.
   let agent = (named?.agent as string) || '';
   if (!agent) agent = client.toLowerCase().includes('claude') ? 'claude' : 'unknown';
+  // The first that names one gives first_agent, as the API reads it.
+  const firstAgent = (events.find((e) => NAMING_KINDS.has(e.kind) && typeof e.agent === 'string' && e.agent)?.agent as string) || undefined;
   let folder = (named?.folder as string) || '';
   if (!folder) folder = guessFolder(events);
 
@@ -338,6 +341,7 @@ export function summarizeSession(
   return {
     id: sessionId,
     agent,
+    first_agent: firstAgent,
     client,
     folder: folder || undefined,
     title: turns[0]?.prompt || sessionId,
@@ -380,11 +384,18 @@ function guessFolder(events: CockpitEvent[]): string {
   return '';
 }
 
+// The agent a session is listed under: its first. A session whose later
+// turns ran on another agent stays in one place.
+export function sessionGroup(s: SessionSummary): string {
+  return s.first_agent || s.agent;
+}
+
 export function buildAgents(sessions: SessionSummary[]): AgentSummary[] {
   const groups = new Map<string, SessionSummary[]>();
   for (const s of sessions) {
-    if (!groups.has(s.agent)) groups.set(s.agent, []);
-    groups.get(s.agent)!.push(s);
+    const g = sessionGroup(s);
+    if (!groups.has(g)) groups.set(g, []);
+    groups.get(g)!.push(s);
   }
   return Array.from(groups.entries()).map(([id, list]) => {
     const usage = createEmptyUsage();

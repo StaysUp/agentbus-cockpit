@@ -1,0 +1,199 @@
+// @vitest-environment jsdom
+// Switching agent per message: a picker beside Send, each turn's agent in
+// its header, and a mixed session listed under its first agent.
+import { act } from 'react';
+import { describe, expect, it, vi } from 'vitest';
+import { App } from '../App';
+import { Job, JobSpec, JobsSource } from '../data/jobs';
+import { buildAgents, createEmptyUsage } from '../data/turns';
+import { CockpitEvent, DataSource, SavedAgent, SessionSummary } from '../types';
+import { ev, flush, liveReplay, render } from './helpers';
+
+const SAVED: SavedAgent[] = [
+  { id: 'claude', name: 'Claude Code', harness: 'claude', access: 'subscription' },
+  { id: 'a_haiku', name: 'Claude Code · haiku', harness: 'claude', access: 'subscription', model: 'haiku' },
+  { id: 'codex', name: 'Codex', harness: 'codex', access: 'subscription' },
+];
+
+// Turn 1 on the haiku agent, turn 2 on codex.
+function mixed(session = 's1'): CockpitEvent[] {
+  const turn = (t: string, text: string, agent: string, agentId: string, reply: string) => [
+    ev({ session, kind: 'turn.started', turn: t, text, agent, agent_id: agentId, folder: '/w' }),
+    ev({ session, kind: 'model.requested', turn: t, exchange: `x-${t}`, model: agent === 'claude' ? 'claude-haiku' : 'gpt-x' }),
+    ev({ session, kind: 'model.responded', turn: t, exchange: `x-${t}`, status: 200, text: reply, stop_reason: 'end_turn' }),
+    ev({ session, kind: 'turn.completed', turn: t, exchange: `x-${t}`, outcome: 'finished' }),
+  ];
+  return [...turn('T1', 'remember OSPREY', 'claude', 'a_haiku', 'OK'), ...turn('T2', 'which bird?', 'codex', 'codex', 'OSPREY')];
+}
+
+function source(events: CockpitEvent[]) {
+  const base = liveReplay(events);
+  const resumable = <T extends { resumable?: boolean }>(list: T[]) => list.map((s) => ({ ...s, resumable: true }));
+  const sendMessage = vi.fn(async (id: string) => ({ id, turn: 'Tnext' }));
+  const src: DataSource = {
+    ...base.source,
+    getSessions: async (a) => resumable(await base.source.getSessions(a)),
+    subscribe: (cb, snap) => base.source.subscribe!(cb, (list, c) => snap?.(resumable(list), c)),
+    listAgents: async () => SAVED,
+    sendMessage,
+  };
+  return { src, sendMessage };
+}
+
+async function waitFor(check: () => boolean, what: string) {
+  for (let i = 0; i < 100; i++) {
+    if (check()) return;
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
+  }
+  throw new Error('timed out waiting for ' + what);
+}
+
+async function setValue(el: Element | null, value: string) {
+  if (!el) throw new Error('no field');
+  const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLSelectElement.prototype;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(proto, 'value')!.set!.call(el, value);
+    el.dispatchEvent(new Event(el instanceof HTMLSelectElement ? 'change' : 'input', { bubbles: true }));
+  });
+}
+
+async function send(c: HTMLElement, text: string) {
+  await setValue(c.querySelector('#c-reply textarea'), text);
+  await act(async () => {
+    c.querySelector('#c-reply form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  });
+  await flush();
+}
+
+describe('switching agent per message', () => {
+  it('names the agent of each turn in its header', async () => {
+    const { src } = source(mixed());
+    const r = await render(<App dataSource={src} />);
+    await waitFor(() => r.container.querySelectorAll('#convo .tb-agent').length === 2, 'the turns');
+    const names = [...r.container.querySelectorAll('#convo .tb-agent')].map((x) => x.textContent);
+    expect(names).toEqual(['Claude Code · haiku', 'Codex']);
+    r.unmount();
+  });
+
+  it('offers the saved agents beside Send, on the latest turn’s agent, and sends a picked one', async () => {
+    const { src, sendMessage } = source(mixed());
+    const r = await render(<App dataSource={src} />);
+    await waitFor(() => r.container.querySelector('#c-reply .next-agent') !== null, 'the picker');
+    const pick = r.container.querySelector('#c-reply .next-agent') as HTMLSelectElement;
+    expect([...pick.options].map((o) => o.textContent)).toEqual(['Claude Code', 'Claude Code · haiku', 'Codex']);
+    expect(pick.value).toBe('codex');
+    expect((r.container.querySelector('#c-reply textarea') as HTMLTextAreaElement).placeholder).toBe('Message Codex…');
+
+    // The same agent: no agent is sent, so the session keeps its own.
+    await send(r.container, 'one more');
+    await waitFor(() => sendMessage.mock.calls.length === 1, 'the first send');
+    expect(sendMessage.mock.calls[0]).toEqual(['s1', { prompt: 'one more', read_only: false, agent: undefined }]);
+
+    r.unmount();
+  });
+
+  it('sends the picked agent when it differs from the session’s', async () => {
+    const { src, sendMessage } = source(mixed());
+    const r = await render(<App dataSource={src} />);
+    await waitFor(() => r.container.querySelector('#c-reply .next-agent') !== null, 'the picker');
+    await setValue(r.container.querySelector('#c-reply .next-agent'), 'a_haiku');
+    expect((r.container.querySelector('#c-reply textarea') as HTMLTextAreaElement).placeholder).toBe('Message Claude Code · haiku…');
+    await send(r.container, 'back to haiku');
+    await waitFor(() => sendMessage.mock.calls.length === 1, 'the send');
+    expect(sendMessage.mock.calls[0]).toEqual(['s1', { prompt: 'back to haiku', read_only: false, agent: 'a_haiku' }]);
+    r.unmount();
+  });
+
+  it('names the picked agent in the turn job when the service keeps a queue', async () => {
+    const { src, sendMessage } = source(mixed());
+    const created: JobSpec[] = [];
+    const T0 = '2026-11-09T01:00:00Z';
+    let made: Job | null = null;
+    const jobs: JobsSource = {
+      address: 'http://jobs.test',
+      pollMs: 10,
+      listJobs: async () => (made ? [made] : []),
+      getJob: async () => made!,
+      createTurnJob: async (spec) => {
+        created.push(spec);
+        made = {
+          id: 'job_1', kind: 'turn', state: 'running', spec, verdict: null, created: T0, updated: T0, attempt: 'att_1',
+          attempts: [{ id: 'att_1', number: 1, runner: 'r', state: 'running', taken: T0, started: T0 }],
+        };
+        return made;
+      },
+      review: async () => made!,
+      cancel: async () => undefined,
+      attemptEvents: async () => [{ seq: 1, time: T0, kind: 'turn.created', data: { session: 's1', turn: 'Tnext' } }],
+    };
+    const r = await render(<App dataSource={src} jobs={jobs} />);
+    await waitFor(() => r.container.querySelector('#c-reply .next-agent') !== null, 'the picker');
+    await setValue(r.container.querySelector('#c-reply .next-agent'), 'a_haiku');
+    await send(r.container, 'back to haiku');
+    await waitFor(() => created.length === 1, 'the job');
+    expect(created[0]).toMatchObject({ session: 's1', agent: 'a_haiku', prompt: 'back to haiku' });
+    expect(sendMessage).not.toHaveBeenCalled();
+    r.unmount();
+  });
+
+  it('drops a pick whose agent was removed, and sends the session’s own', async () => {
+    const { src, sendMessage } = source(mixed());
+    let list = SAVED;
+    src.listAgents = async () => list;
+    src.getHarnesses = async () => [{ name: 'claude', found: true }, { name: 'codex', found: true }];
+    src.createAgent = async () => SAVED[0];
+    const r = await render(<App dataSource={src} />);
+    await waitFor(() => r.container.querySelector('#c-reply .next-agent') !== null, 'the picker');
+    await setValue(r.container.querySelector('#c-reply .next-agent'), 'a_haiku');
+    // The agent is removed; the list is read again when the agents dialog closes.
+    list = SAVED.filter((a) => a.id !== 'a_haiku');
+    await act(async () => {
+      r.container.querySelector<HTMLButtonElement>('.manage-agents')!.click();
+    });
+    await flush();
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    });
+    await waitFor(() => (r.container.querySelector('#c-reply .next-agent') as HTMLSelectElement).options.length === 2, 'the new list');
+    expect((r.container.querySelector('#c-reply .next-agent') as HTMLSelectElement).value).toBe('codex');
+    await send(r.container, 'still here?');
+    await waitFor(() => sendMessage.mock.calls.length === 1, 'the send');
+    expect((sendMessage.mock.calls[0] as unknown[])[1]).toEqual({ prompt: 'still here?', read_only: false, agent: undefined });
+    r.unmount();
+  });
+
+  it('keeps a session whose agent is not saved in the list, by its harness name', async () => {
+    const events = mixed().map((e) => (e.turn === 'T2' && e.kind === 'turn.started' ? { ...e, agent_id: 'a_gone' } : e));
+    const { src } = source(events);
+    const r = await render(<App dataSource={src} />);
+    await waitFor(() => r.container.querySelector('#c-reply .next-agent') !== null, 'the picker');
+    const pick = r.container.querySelector('#c-reply .next-agent') as HTMLSelectElement;
+    expect(pick.value).toBe('a_gone');
+    expect(pick.options[0].textContent).toBe('Codex');
+    r.unmount();
+  });
+});
+
+describe('a mixed session in the Agents column', () => {
+  it('is listed under its first agent', () => {
+    const row = (id: string, agent: string, first?: string): SessionSummary => ({
+      id,
+      agent,
+      first_agent: first,
+      client: '',
+      title: id,
+      started: '',
+      last: '',
+      open: false,
+      turns: 1,
+      usage: createEmptyUsage(),
+    });
+    const groups = buildAgents([row('s1', 'codex', 'claude'), row('s2', 'claude', 'claude'), row('s3', 'codex')]);
+    expect(groups.map((g) => [g.id, g.sessionCount])).toEqual([
+      ['claude', 2],
+      ['codex', 1],
+    ]);
+  });
+});

@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { liveStatus, LiveTurn } from '../data/liveStatus';
 import { turnNotes } from '../data/turns';
-import { Level, SessionDetail, Turn } from '../types';
+import { Level, SavedAgent, SessionDetail, Turn } from '../types';
 import { useNow } from '../utils/useNow';
 import { formatCost, formatTokens, stateLabel, turnStateClass } from '../utils/format';
 import { Cost } from './Cost';
@@ -22,8 +22,13 @@ interface ConvoColumnProps {
   // whether a run still holds the session open.
   resumable?: boolean;
   open?: boolean;
-  // Given only when the source can continue sessions. Rejects with the API's message.
-  onSend?: (prompt: string, readOnly: boolean) => Promise<void>;
+  // Given only when the source can continue sessions. Rejects with the API's
+  // message. agent is the saved agent picked beside Send, when it is not the
+  // agent of the session's latest turn: the turn runs on it.
+  onSend?: (prompt: string, readOnly: boolean, agent?: string) => Promise<void>;
+  // The saved agents. With onSend, a picker beside Send: any message may go
+  // to any of them. Each turn's header names the agent that ran it.
+  agents?: SavedAgent[];
   // Given only when the source can stop a turn. Rejects with the API's message.
   onStop?: (turn: Turn) => Promise<void>;
   // The turns the person asked to stop that have not ended yet.
@@ -37,6 +42,29 @@ interface ConvoColumnProps {
   // The person edits it and presses Send; nothing is sent by itself.
   prefill?: { session: string; text: string } | null;
   onPrefillTaken?: () => void;
+}
+
+// The harnesses' own names, for a turn no saved agent names.
+const HARNESS_NAMES: Record<string, string> = { claude: 'Claude Code', codex: 'Codex' };
+
+// The name of the agent that ran a turn: its saved agent's, else its
+// harness's. Empty when the turn names none.
+export function turnAgentName(turn: Turn, agents?: SavedAgent[]): string {
+  const id = turn.agentId ?? turn.agent;
+  const saved = id ? agents?.find((a) => a.id === id) : undefined;
+  if (saved) return saved.name;
+  return turn.agent ? (HARNESS_NAMES[turn.agent] ?? turn.agent) : '';
+}
+
+// The saved agent a session's next message goes to by default: the one that
+// ran its latest turn. A turn started by harness name alone names the
+// harness, which is also the id of that harness's default agent.
+export function currentAgent(turns: Turn[]): string {
+  for (let i = turns.length - 1; i >= 0; i--) {
+    const t = turns[i];
+    if (t.agentId || t.agent) return t.agentId ?? t.agent ?? '';
+  }
+  return '';
 }
 
 // The person's message from the moment it is sent until its turn arrives.
@@ -61,6 +89,7 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
   live,
   prefill,
   onPrefillTaken,
+  agents,
 }) => {
   const [draft, setDraft] = useState('');
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -71,6 +100,8 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
     inputRef.current?.focus();
   }, [prefill, session.id]);
   const [readOnly, setReadOnly] = useState(false);
+  // The agent picked beside Send; null follows the session's latest turn.
+  const [picked, setPicked] = useState<string | null>(null);
   const [pending, setPending] = useState<Pending | null>(null);
   const [sendError, setSendError] = useState<string | null>(null);
 
@@ -125,6 +156,26 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
     }
   };
 
+  // The picker: the saved agents, and the session's own agent when it is not
+  // one of them (removed since, or a harness with no saved agent).
+  const current = currentAgent(session.turnsList);
+  const showPick = !!onSend && !!agents && agents.length > 0;
+  const pickList = !showPick
+    ? []
+    : current && !agents!.some((a) => a.id === current)
+      ? [{ id: current, name: lastTurn ? turnAgentName(lastTurn, agents) || current : current }, ...agents!]
+      : agents!;
+  // A pick no longer in the list (its agent was removed) counts as none.
+  const pickedShown = picked !== null && pickList.some((a) => a.id === picked) ? picked : null;
+  const nextAgent = pickedShown ?? current;
+  const nextName = pickList.find((a) => a.id === nextAgent)?.name;
+  // Once the session's latest turn ran on the picked agent, or the pick left
+  // the list, the pick follows the session again, so a later switch made
+  // elsewhere shows here.
+  useEffect(() => {
+    if (picked !== null && (picked === current || pickedShown === null)) setPicked(null);
+  }, [current, picked, pickedShown]);
+
   const send = async (e: React.FormEvent) => {
     e.preventDefault();
     const prompt = draft;
@@ -133,7 +184,7 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
     setSendError(null);
     setDraft('');
     try {
-      await onSend!(prompt, readOnly);
+      await onSend!(prompt, readOnly, nextAgent && nextAgent !== current ? nextAgent : undefined);
       setPending((p) => p && { ...p, accepted: true });
     } catch (err) {
       setPending(null);
@@ -175,9 +226,12 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
             const showLive =
               live !== undefined && turn.state === 'running' && !(status && !status.running && answer) && !(status?.state === 'finishing' && answer);
             const replyIn = live !== undefined && turn.state === 'running' && !showLive;
-            // The turn header's facts: the model that made the turn, then its
-            // calls. A line breaks between facts, never inside one.
+            // The turn header's facts: the agent that ran the turn, the model
+            // that made it, then its calls. A line breaks between facts, never
+            // inside one.
+            const ranBy = turnAgentName(turn, agents);
             const facts = [
+              ranBy ? <i className="tb-agent">{ranBy}</i> : null,
               model ? <i className="tb-model">{model}</i> : null,
               calls !== undefined ? <i className="tb-calls">{calls} {calls === 1 ? 'model call' : 'model calls'}</i> : null,
             ].filter((x): x is React.ReactElement => x !== null);
@@ -279,12 +333,12 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
       </div>
 
       <div id="c-reply">
-        <form className="box" onSubmit={send}>
+        <form className={`box${showPick ? ' with-pick' : ''}`} onSubmit={send}>
           <textarea
             id="input"
             ref={inputRef}
             rows={Math.min(8, draft.split('\n').length)}
-            placeholder={`Message ${agentName || 'the agent'}…`}
+            placeholder={`Message ${nextName || agentName || 'the agent'}…`}
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => {
@@ -295,6 +349,23 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
             }}
             disabled={!canSend}
           />
+          {showPick && (
+            <select
+              className="next-agent"
+              aria-label="Agent for the next message"
+              title="Agent for the next message"
+              value={nextAgent}
+              disabled={!canSend}
+              onChange={(e) => setPicked(e.target.value)}
+            >
+              {!nextAgent && <option value="">Agent</option>}
+              {pickList.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name}
+                </option>
+              ))}
+            </select>
+          )}
           {showStop ? (
             <button type="button" className="go stop" disabled={lastStopping} onClick={stop}>
               {lastStopping ? 'Stopping…' : 'Stop'}
