@@ -3,7 +3,7 @@
 // my folder" through POST /api/v0/turns/<id>/apply, with a refusal shown in
 // the API's words.
 import { act } from 'react';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../App';
 import { ChangesDialog } from '../components/ChangesDialog';
 import { LiveDataSource } from '../data/LiveDataSource';
@@ -35,6 +35,27 @@ const diff: TurnDiff = {
   commands: ['go test ./...'],
   apply: { state: 'none' },
 };
+
+// The Changes button is off by default (src/features.ts); these tests turn
+// it on, except the one that checks the default.
+beforeEach(() => {
+  vi.stubEnv('VITE_REVIEW_UI', '1');
+});
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
+describe('Changes by default', () => {
+  it('is hidden: applies are asked for in the chat', async () => {
+    vi.stubEnv('VITE_REVIEW_UI', '');
+    const { source } = liveReplay(finished, { getTurnDiff: vi.fn(), applyTurn: vi.fn() });
+    const r = await render(<App dataSource={source} />);
+    await flush();
+    expect(r.container.querySelector('#convo .tb')).not.toBeNull();
+    expect(r.container.querySelector('.tb-changes')).toBeNull();
+    r.unmount();
+  });
+});
 
 describe('Changes', () => {
   it('shows a turn diff, and a refused apply names each file in the API words', async () => {

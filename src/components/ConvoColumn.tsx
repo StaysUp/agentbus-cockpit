@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { reviewUI } from '../features';
 import { liveStatus, LiveTurn } from '../data/liveStatus';
 import { turnNotes } from '../data/turns';
 import { Level, QueuedJob, SavedAgent, SessionDetail, Started, Turn } from '../types';
@@ -511,7 +512,7 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
                         </>
                       ) : null}
                     </span>
-                    {onChanges && turn.state !== 'running' && (
+                    {onChanges && reviewUI() && turn.state !== 'running' && (
                       <button
                         type="button"
                         className="tb-changes"

@@ -87,10 +87,11 @@ from the same address with the same token, so there is nothing more to connect.
 - **Each prompt runs as a job.** The runner takes it and runs it as a turn. A job no runner has
   taken yet stays queued, and the message waits with it. A session's next message keeps the model
   of its first one.
-- **Reviews are asked for in the chat**, for example "have codex check it", not with buttons.
+- **Reviews and applies are asked for in the chat**, for example "have codex check it" or
+  "apply that turn to my folder", not with buttons.
 
-The review screens (Review and Fix on a turn, the CI/CD tab, the session's job list) are still in
-the code, off by default. To turn them on, start the cockpit with `VITE_REVIEW_UI=1`:
+The review screens (Review and Fix on a turn, the CI/CD tab, the session's job list) and a turn's
+Changes dialog ("Apply to my folder") are still in the code, off by default. To turn them on, start the cockpit with `VITE_REVIEW_UI=1`:
 
 ```sh
 VITE_REVIEW_UI=1 npm run dev
