@@ -253,6 +253,7 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
   const lastStopping = !!lastTurn && lastState === 'running' && !!stopping?.has(lastTurn.id);
   // While the last turn runs, an empty box shows Stop; typing turns it into
   // Queue, which sends the message to wait behind the running turn.
+  const sendLabel = active > 0 || lastState === 'running' ? 'Queue' : 'Send';
   const canStop = !!onStop && !!lastTurn?.agent && lastState === 'running' && (lastStopping || !finishing);
   const showStop = canStop && draft.trim() === '';
 
@@ -553,9 +554,26 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
               {lastStopping ? 'Stopping…' : 'Stop'}
             </button>
           ) : (
-            <button type="submit" className="go" disabled={!canSend || draft.trim() === ''}>
-              {active > 0 || lastState === 'running' ? 'Queue' : 'Send'}
-            </button>
+            <span className="go-split">
+              <button type="submit" className="go" disabled={!canSend || draft.trim() === ''}>
+                {sendLabel}
+              </button>
+              {/* How to send. Fork (run in parallel from the same point) is
+                  shown but not built yet. */}
+              <select
+                className="send-mode"
+                aria-label="How to send"
+                title="How to send"
+                value="send"
+                disabled={!canSend}
+                onChange={() => undefined}
+              >
+                <option value="send">{sendLabel === 'Queue' ? 'Queue: run after the running turn' : 'Send'}</option>
+                <option value="fork" disabled>
+                  Fork: run in parallel from here (coming soon)
+                </option>
+              </select>
+            </span>
           )}
         </form>
         {onSend && (

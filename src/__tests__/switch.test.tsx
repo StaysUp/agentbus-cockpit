@@ -178,6 +178,21 @@ describe('switching agent per message', () => {
   });
 });
 
+describe('the Send menu', () => {
+  it('offers Send and a Fork that is shown but not built yet', async () => {
+    const { src } = source(mixed());
+    const r = await render(<App dataSource={src} />);
+    await waitFor(() => r.container.querySelector('#c-reply .send-mode') !== null, 'the send menu');
+    const menu = r.container.querySelector('#c-reply .send-mode') as HTMLSelectElement;
+    expect(menu.value).toBe('send');
+    const opts = [...menu.options];
+    expect(opts.map((o) => o.value)).toEqual(['send', 'fork']);
+    expect(opts[1].disabled).toBe(true);
+    expect(opts[1].textContent).toContain('coming soon');
+    r.unmount();
+  });
+});
+
 describe('a mixed session in the Agents column', () => {
   it('is listed under its first agent', () => {
     const row = (id: string, agent: string, first?: string): SessionSummary => ({
