@@ -17,8 +17,8 @@ interface NewSessionDialogProps {
 }
 
 // A new session is a saved agent and a folder, with a first message. The
-// service isolates it: a folder in a git repo gets its own worktree at the
-// folder's HEAD, any other folder is used as it is.
+// service isolates it: the conversation works on its own copy of the folder,
+// and nothing reaches the folder until a turn's changes are applied.
 export const NewSessionDialog: React.FC<NewSessionDialogProps> = ({ loadAgents, loadHarnesses, onStart, onClose, initialAgent, onAddAgent }) => {
   const [agents, setAgents] = useState<SavedAgent[] | null>(null);
   const [harnesses, setHarnesses] = useState<Harness[] | undefined>(undefined);
@@ -121,7 +121,7 @@ export const NewSessionDialog: React.FC<NewSessionDialogProps> = ({ loadAgents, 
             ))}
           </div>
         )}
-        <div className="nd-note">A folder on the machine where AgentBus runs. In a git repo the session gets its own worktree, so your folder is not changed.</div>
+        <div className="nd-note">A folder on the machine where AgentBus runs. The conversation works on its own copy of it, so your folder is not changed until you apply a turn's changes.</div>
         <label>
           <span>First message</span>
           <textarea name="prompt" rows={4} value={prompt} onChange={(e) => setPrompt(e.target.value)} />

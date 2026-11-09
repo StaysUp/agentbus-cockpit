@@ -63,6 +63,8 @@ interface ConvoColumnProps {
   // Given when the source can name sessions: a new title for this one.
   // Rejects with the API's words.
   onRename?: (sessionId: string, title: string) => Promise<void>;
+  // Given when the source keeps each turn's diff: opens a turn's changes.
+  onChanges?: (turn: Turn) => void;
 }
 
 // The harnesses' own names, for a turn no saved agent names.
@@ -193,6 +195,7 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
   pending: keptPending,
   onPending,
   onRename,
+  onChanges,
 }) => {
   const [draft, setDraft] = useState('');
   // The header's name is being edited.
@@ -508,6 +511,18 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
                         </>
                       ) : null}
                     </span>
+                    {onChanges && turn.state !== 'running' && (
+                      <button
+                        type="button"
+                        className="tb-changes"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onChanges(turn);
+                        }}
+                      >
+                        Changes
+                      </button>
+                    )}
                   </div>
                 </div>
               </React.Fragment>

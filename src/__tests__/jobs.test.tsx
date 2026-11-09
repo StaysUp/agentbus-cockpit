@@ -405,8 +405,9 @@ describe('sending with the job queue', () => {
   });
 
   // New session is a saved agent and a folder: the job names the agent's id
-  // and isolate, and the service picks the worktree. No worktree, base,
-  // model or read-only choice is shown.
+  // and isolate, and the service makes the copy. No worktree, base,
+  // model or read-only choice is shown, and the note says the conversation
+  // works on its own copy of the folder.
   it('New session makes a job with the agent, the folder and isolate, and shows no workspace choice', async () => {
     const fake = fakeJobs([]);
     const { src } = source(turnEvents());
@@ -416,6 +417,8 @@ describe('sending with the job queue', () => {
     await flush();
     const dialog = r.container.querySelector('.new-dialog')!;
     expect(dialog.textContent).not.toContain('New worktree');
+    expect(dialog.textContent).not.toContain('worktree');
+    expect(dialog.textContent).toContain('works on its own copy');
     expect(dialog.querySelector('[role="radiogroup"]')).toBeNull();
     expect(dialog.querySelector('input[name="base"], input[name="model"], input[name="read_only"]')).toBeNull();
     await setValue(dialog.querySelector('input[name="folder"]'), '/Users/ana/repo');

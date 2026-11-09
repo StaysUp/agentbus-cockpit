@@ -11,7 +11,9 @@ import {
   SessionList,
   SessionSummary,
   Started,
+  ApplyState,
   Turn,
+  TurnDiff,
   TurnDetail,
   TurnList,
   TurnState,
@@ -309,6 +311,27 @@ export class LiveDataSource implements DataSource {
     if (res.status === 409) return 'not-running';
     if (!res.ok) throw new Error(await apiError(res));
     return 'stopping';
+  }
+
+  // GET /api/v0/turns/<id>/diff: the turn's files, calls and commands.
+  async getTurnDiff(sessionId: string, turnId: string): Promise<TurnDiff> {
+    const res = await fetch(
+      `${this.baseUrl}/api/v0/turns/${encodeURIComponent(turnId)}/diff?session=${encodeURIComponent(sessionId)}`,
+      { headers: this.headers() }
+    );
+    if (!res.ok) throw new Error(await apiError(res));
+    return res.json();
+  }
+
+  // POST /api/v0/turns/<id>/apply: 200 applied (or already), 202 still
+  // running, 409 refused with each file and why. All three are answers.
+  async applyTurn(turnId: string): Promise<ApplyState> {
+    const res = await fetch(`${this.baseUrl}/api/v0/turns/${encodeURIComponent(turnId)}/apply`, {
+      method: 'POST',
+      headers: this.headers(),
+    });
+    if (res.ok || res.status === 409) return res.json();
+    throw new Error(await apiError(res));
   }
 
   private async post(path: string, body: unknown): Promise<Started> {

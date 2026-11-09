@@ -4,6 +4,7 @@ import { AgentsColumn } from './components/AgentsColumn';
 import { ConvoColumn, Pending, PendingUpdate } from './components/ConvoColumn';
 import { AgentsDialog } from './components/AgentsDialog';
 import { NewSessionDialog } from './components/NewSessionDialog';
+import { ChangesDialog } from './components/ChangesDialog';
 import { RightPanel } from './components/RightPanel';
 import { SessionsColumn } from './components/SessionsColumn';
 import { rememberFolder } from './data/folders';
@@ -432,6 +433,12 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
 
   // The New session dialog: closed (null), or open with an agent to preselect.
   const [newSession, setNewSession] = useState<{ agent?: string } | null>(null);
+  // The turn whose changes are open, from GET /api/v0/turns/<id>/diff.
+  const [changesTurn, setChangesTurn] = useState<Turn | null>(null);
+  const loadChanges = useCallback(
+    () => dataSource.getTurnDiff!(changesTurn!.sessionId, changesTurn!.id),
+    [dataSource, changesTurn]
+  );
   const loadContext = useMemo(
     () => (dataSource.getCallContext ? (x: string, full: boolean) => dataSource.getCallContext!(x, full) : undefined),
     [dataSource]
@@ -787,6 +794,7 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
             chooseSession(id);
           }}
           onRename={renameSession}
+          onChanges={dataSource.getTurnDiff ? setChangesTurn : undefined}
         />
       ) : (
         <main id="convo">
@@ -849,6 +857,15 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
                 }
               : undefined
           }
+        />
+      )}
+      {changesTurn && dataSource.getTurnDiff && (
+        <ChangesDialog
+          key={changesTurn.id}
+          turnNumber={changesTurn.turnNumber}
+          loadDiff={loadChanges}
+          apply={dataSource.applyTurn ? () => dataSource.applyTurn!(changesTurn.id) : undefined}
+          onClose={() => setChangesTurn(null)}
         />
       )}
       {agentsDialog && canKeepAgents && (

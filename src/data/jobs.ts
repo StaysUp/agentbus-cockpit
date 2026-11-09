@@ -18,8 +18,8 @@ export interface JobSpec {
   // A saved agent's id. The service fills in its harness, access and model.
   agent?: string;
   folder?: string;
-  // With folder: a new git worktree of the folder's repo at its HEAD when
-  // the folder is in a git repo, else the folder as it is.
+  // With folder: the session's own copy of the folder, as the service's
+  // isolation setting makes it; false uses the folder as it is.
   isolate?: boolean;
   repo?: string;
   base?: string;

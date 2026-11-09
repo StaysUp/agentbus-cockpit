@@ -234,8 +234,7 @@ export interface SavedAgent extends AgentFields {
 }
 
 // POST /api/v0/turns: a saved agent and a folder, with the first message.
-// The service isolates the session in a git worktree when the folder is in
-// a git repo.
+// The service gives the session its own copy of the folder.
 export interface RunRequest {
   agent: string;
   folder: string;
@@ -246,6 +245,43 @@ export interface RunRequest {
 
 // The reply to POST /api/v0/turns: the session, and the turn it started.
 // Every event of that turn carries the turn id.
+// GET /api/v0/turns/<id>/diff, as the cockpit reads it: what one turn
+// changed, ran and called.
+export interface TurnDiffFile {
+  path: string;
+  change: 'added' | 'modified' | 'deleted';
+  size: number;
+  diff?: string;
+  diff_left_out?: boolean;
+  content?: string;
+}
+
+export interface ApplyState {
+  // none, queued, running, applied, refused or failed.
+  state: string;
+  already?: boolean;
+  files?: string[];
+  conflicts?: { path: string; why: string }[];
+  error?: string;
+}
+
+export interface TurnDiff {
+  turn: string;
+  session: string;
+  state: string;
+  files: {
+    isolated: boolean;
+    count: number;
+    truncated?: boolean;
+    changes: TurnDiffFile[];
+    git_diff?: string;
+  } | null;
+  model_calls: { count: number };
+  tools: { count: number };
+  commands: string[];
+  apply: ApplyState;
+}
+
 export interface Started {
   id: string;
   turn?: string;
@@ -329,6 +365,12 @@ export interface DataSource {
   // the stop (202, also when it was already stopping), 'not-running' when the
   // turn has already ended (409). Rejects with an Error in the API's own words.
   stopTurn?(turnId: string): Promise<'stopping' | 'not-running'>;
+  // A source that keeps isolated copies has these: one turn's full diff, and
+  // applying its changes to the person's folder. apply resolves with the
+  // API's answer on 200, 202 and 409 (a refusal names each file); any other
+  // failure rejects with the API's words.
+  getTurnDiff?(sessionId: string, turnId: string): Promise<TurnDiff>;
+  applyTurn?(turnId: string): Promise<ApplyState>;
   // A source that keeps request bodies has this: one model call's request
   // and reply by its exchange. Rejects with an Error in the API's own words.
   getCallContext?(exchange: string, full: boolean): Promise<CallContext>;
