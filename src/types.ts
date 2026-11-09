@@ -322,6 +322,9 @@ export interface DataSource {
     sessionId: string,
     req: { prompt: string; read_only?: boolean; model?: string; agent?: string; idempotency_key?: string }
   ): Promise<Started>;
+  // A source that can name sessions has this: a new title for one. Rejects
+  // with an Error in the API's own words.
+  renameSession?(sessionId: string, title: string): Promise<void>;
   // A source that runs turns can stop one: 'stopping' when the service took
   // the stop (202, also when it was already stopping), 'not-running' when the
   // turn has already ended (409). Rejects with an Error in the API's own words.

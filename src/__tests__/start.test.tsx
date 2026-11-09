@@ -98,6 +98,8 @@ function fakeService(opts: {
   messages?: (id: string, body: unknown) => Response | Promise<Response>;
   // Turns per page of GET /turns.
   turnPage?: number;
+  // PATCH /sessions/<id>: a rename. Without it the row's title changes.
+  rename?: (id: string, body: unknown) => Response | Promise<Response>;
 }) {
   const reqs: Req[] = [];
   const enc = new TextEncoder();
@@ -137,6 +139,13 @@ function fakeService(opts: {
     if (am && method === 'DELETE') {
       state.saved = state.saved.filter((a) => a.id !== am[1]);
       return new Response(null, { status: 204 });
+    }
+    const sm = p.match(/^\/api\/v0\/sessions\/([^/]+)$/);
+    if (sm && method === 'PATCH') {
+      if (opts.rename) return opts.rename(sm[1], body);
+      const title = (body as { title: string }).title;
+      state.sessions = state.sessions.map((x) => (x.id === sm[1] ? { ...x, title } : x));
+      return json({ seq: ++seq, id: 'evt_r', title });
     }
     const session = (body as { session?: string } | undefined)?.session;
     if (p === '/api/v0/runs') return json({ error: 'no such API path' }, 404);
@@ -422,10 +431,11 @@ describe('The started turn', () => {
     r.unmount();
   });
 
-  // A start whose reply lands after the person picked something
-  // else must not pull them to the new session when it is listed.
+  // A start whose reply lands after the person picked another session must
+  // not pull them to the new session when it is listed. A pick of an agent
+  // changes no session, so the new session is still opened.
   for (const how of ['session', 'agent'] as const) {
-    it(`a start whose reply lands after a pick of another ${how} leaves the selection where it was put`, async () => {
+    it(`a start whose reply lands after a pick of another ${how} ${how === 'session' ? 'leaves the selection where it was put' : 'still opens the new session'}`, async () => {
       let reply: ((r: Response) => void) | null = null;
       const svc = fakeService({
         sessions: [row('s1'), row('s2', { agent: 'codex', last: '2026-11-05T09:05:00Z' }), row('s3', { last: '2026-11-05T09:01:00Z' })],
@@ -452,10 +462,11 @@ describe('The started turn', () => {
           (b) => b.querySelector('b')?.textContent?.toLowerCase().includes('codex')
         );
         await click(codex ?? null);
-        want = 's2';
+        want = 's1';
       }
       await settle();
       expect(r.container.querySelector('#sessions .sess.on code')?.textContent).toBe(want);
+      if (how === 'agent') want = 'new1';
 
       // The reply lands, and the new session is listed.
       await act(async () => reply!(json({ id: 'new1', turn: 'Tn', base_url: `${BASE}/s/new1/t/Tn` }, 202)));
@@ -1283,6 +1294,151 @@ describe('Failures in a turn', () => {
       'session s1 was continued by own replay, and no turn of it has a finished reply to replay'
     );
     expect(failed?.querySelector('.bubble')?.textContent).toBe('try again');
+    r.unmount();
+  });
+});
+
+// The Sessions column lists every session, newest first, whatever agent is
+// selected; a session is renamed from its row or the conversation's header.
+describe('The sessions list and rename', () => {
+  beforeEach(() => {
+    vi.useRealTimers();
+  });
+
+  const titles = (c: HTMLElement) => Array.from(c.querySelectorAll('#sessions .sess')).map((b) => rowSession(b));
+
+  it('lists every session newest first, and picking an agent filters nothing', async () => {
+    const svc = fakeService({
+      sessions: [
+        row('s3', { agent: 'codex', first_agent: 'codex', last: '2026-11-05T09:30:00Z' }),
+        row('s2', { first_agent: 'claude', last: '2026-11-05T09:20:00Z' }),
+        row('s1', { agent: 'codex', first_agent: 'claude', last: '2026-11-05T09:10:00Z' }),
+      ],
+      events: { s1: oneTurn('s1', 'one'), s2: oneTurn('s2', 'two'), s3: oneTurn('s3', 'three') },
+      agents: AGENTS,
+    });
+    const r = await mount(svc);
+    expect(titles(r.container)).toEqual(['s3', 's2', 's1']);
+    for (const a of Array.from(r.container.querySelectorAll('#agents .agent'))) {
+      await click(a);
+      await settle();
+      expect(titles(r.container)).toEqual(['s3', 's2', 's1']);
+    }
+    r.unmount();
+  });
+
+  // jsdom has no layout: this checks every row is rendered, oldest last.
+  // That the column scrolls to it was checked in a browser.
+  it('a long list renders every session, the oldest last', async () => {
+    const many = Array.from({ length: 60 }, (_, i) => row(`s${i}`, { last: `2026-11-05T09:${String(59 - i).padStart(2, '0')}:00Z` }));
+    const svc = fakeService({ sessions: many, events: { s0: oneTurn('s0', 'zero') } });
+    const r = await mount(svc);
+    expect(titles(r.container)).toHaveLength(60);
+    expect(titles(r.container)[59]).toBe('s59');
+    r.unmount();
+  });
+
+  it('the pencil on a row renames it: Enter saves through PATCH, and the row shows the name', async () => {
+    const svc = fakeService({
+      sessions: [row('s1', { title: 'first words' }), row('s2', { title: 'other', last: '2026-11-05T09:05:00Z' })],
+      events: { s1: oneTurn('s1', 'one'), s2: oneTurn('s2', 'two') },
+    });
+    const r = await mount(svc);
+    const s2 = r.container.querySelector('#sessions .sess[data-session="s2"]')!.closest('.sess-row')!;
+    await click(s2.querySelector('.s-rename'));
+    const box = r.container.querySelector('#sessions .title-edit input') as HTMLInputElement;
+    expect(box.value).toBe('other');
+    await setValue(box, '  Login fix  ');
+    await act(async () => {
+      box.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    });
+    await settle();
+    const patch = svc.reqs.filter((q) => q.method === 'PATCH');
+    expect(patch).toEqual([{ method: 'PATCH', path: '/api/v0/sessions/s2', body: { title: 'Login fix' } }]);
+    expect(r.container.querySelector('#sessions .title-edit')).toBeNull();
+    expect(r.container.querySelector('#sessions .sess[data-session="s2"] .s-tt')?.textContent).toBe('Login fix');
+    // The rename selects nothing: s1 stays on screen.
+    expect(shownSession(r.container)).toBe('s1');
+    r.unmount();
+  });
+
+  it('Escape cancels a rename and sends nothing; a refusal shows the API words and keeps the box', async () => {
+    const svc = fakeService({
+      sessions: [row('s1', { title: 'first words' })],
+      events: { s1: oneTurn('s1', 'one') },
+      rename: () => json({ error: 'title is at most 120 characters' }, 400),
+    });
+    const r = await mount(svc);
+    // The selected row's name starts a rename when clicked.
+    await click(r.container.querySelector('#sessions .sess.on .s-tt'));
+    let box = r.container.querySelector('#sessions .title-edit input') as HTMLInputElement;
+    await setValue(box, 'something');
+    await act(async () => {
+      box.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+    await settle();
+    expect(r.container.querySelector('#sessions .title-edit')).toBeNull();
+    expect(svc.reqs.some((q) => q.method === 'PATCH')).toBe(false);
+    expect(r.container.querySelector('#sessions .sess.on .s-tt')?.textContent).toBe('first words');
+
+    await click(r.container.querySelector('#sessions .sess.on .s-tt'));
+    box = r.container.querySelector('#sessions .title-edit input') as HTMLInputElement;
+    await setValue(box, 'x'.repeat(10));
+    await act(async () => {
+      box.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    });
+    await settle();
+    expect(r.container.querySelector('#sessions .title-edit .form-error')?.textContent).toBe('title is at most 120 characters');
+    expect(r.container.querySelector('#sessions .title-edit input')).not.toBeNull();
+    r.unmount();
+  });
+
+  it("the conversation's header renames the session too", async () => {
+    const svc = fakeService({ sessions: [row('s1', { title: 'first words' })], events: { s1: oneTurn('s1', 'one') } });
+    const r = await mount(svc);
+    await click(r.container.querySelector('#c-head .c-rename'));
+    const box = r.container.querySelector('#c-head .title-edit input') as HTMLInputElement;
+    await setValue(box, 'Header name');
+    await act(async () => {
+      box.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    });
+    await settle();
+    expect(svc.reqs.filter((q) => q.method === 'PATCH').map((q) => q.body)).toEqual([{ title: 'Header name' }]);
+    expect(r.container.querySelector('#c-head .colhead-title')?.textContent).toBe('Header name');
+    expect(r.container.querySelector('#sessions .sess.on .s-tt')?.textContent).toBe('Header name');
+    r.unmount();
+  });
+
+  it('a refusal in the header shows the API words; a long name of emoji is sent whole', async () => {
+    const svc = fakeService({
+      sessions: [row('s1', { title: 'first words' })],
+      events: { s1: oneTurn('s1', 'one') },
+      rename: () => json({ error: 'title is at most 120 characters' }, 400),
+    });
+    const r = await mount(svc);
+    await click(r.container.querySelector('#c-head .c-rename'));
+    const box = r.container.querySelector('#c-head .title-edit input') as HTMLInputElement;
+    // 80 emoji are 80 characters to the API and 160 UTF-16 units: the box keeps them all.
+    const emoji = '\u{1F600}'.repeat(80);
+    expect(box.maxLength).toBe(-1);
+    await setValue(box, emoji);
+    await act(async () => {
+      box.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    });
+    await settle();
+    expect(svc.reqs.filter((q) => q.method === 'PATCH').map((q) => q.body)).toEqual([{ title: emoji }]);
+    expect(r.container.querySelector('#c-head .title-edit .form-error')?.textContent).toBe('title is at most 120 characters');
+    expect(r.container.querySelector('#c-head .title-edit')?.classList.contains('colhead-title')).toBe(false);
+    r.unmount();
+  });
+
+  it('a session.renamed from the stream reads the list again', async () => {
+    const svc = fakeService({ sessions: [row('s1', { title: 'first words' })], events: { s1: oneTurn('s1', 'one') } });
+    const r = await mount(svc);
+    svc.state.sessions = [row('s1', { title: 'Named elsewhere' })];
+    await svc.push(ev({ session: 's1', kind: 'session.renamed', title: 'Named elsewhere', old_title: 'first words' }));
+    await settle();
+    expect(r.container.querySelector('#sessions .sess.on .s-tt')?.textContent).toBe('Named elsewhere');
     r.unmount();
   });
 });

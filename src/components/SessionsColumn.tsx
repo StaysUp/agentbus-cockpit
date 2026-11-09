@@ -6,6 +6,7 @@ import { formatAgo, formatCost, formatTokens } from '../utils/format';
 import { Cost } from './Cost';
 import { CopyButton, PlusIcon } from './Icons';
 import { LiveLine } from './LiveLine';
+import { PencilIcon, TitleEdit } from './TitleEdit';
 
 interface SessionsColumnProps {
   sessions: SessionSummary[];
@@ -18,6 +19,9 @@ interface SessionsColumnProps {
   // The latest turn of each session with its events, from the stream. A
   // card whose turn runs shows its live status in place of cost and time.
   live?: LiveTurns;
+  // Given when the source can name sessions: a new title for one. Rejects
+  // with the API's words.
+  onRename?: (sessionId: string, title: string) => Promise<void>;
 }
 
 export const SessionsColumn: React.FC<SessionsColumnProps> = ({
@@ -27,7 +31,10 @@ export const SessionsColumn: React.FC<SessionsColumnProps> = ({
   onNewSession,
   empty,
   live,
+  onRename,
 }) => {
+  // The session whose name is being edited, if any.
+  const [editing, setEditing] = useState<string | null>(null);
   // "3 min ago" moves on with the clock, not only when an event arrives.
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -87,36 +94,63 @@ export const SessionsColumn: React.FC<SessionsColumnProps> = ({
               {ago ? ` · ${ago}` : ''}
             </span>
           );
+          const isEditing = editing === s.id && !!onRename;
           // While its turn runs, the cost moves to the title line (as in the sketch).
+          // The selected card's name starts a rename when clicked.
           const title = (
             <span className="s-t">
               {s.open ? <i className="live" /> : null}
-              <span className="s-tt">{s.title}</span>
+              {isEditing ? (
+                <TitleEdit title={s.title} onSave={(t) => onRename!(s.id, t)} onDone={() => setEditing(null)} />
+              ) : isSelected && onRename ? (
+                <span className="s-tt s-tt-edit" title="Rename" onClick={() => setEditing(s.id)}>
+                  {s.title}
+                </span>
+              ) : (
+                <span className="s-tt">{s.title}</span>
+              )}
               {/* A new session's row says $0 before its first reply is priced; show nothing until one is. */}
               {status && formatCost(s.cost_usd) && !(s.cost_usd === 0 && status.costUsd === null) ? (
                 <Cost className="s-cost" usd={s.cost_usd} complete={s.cost_complete} />
               ) : null}
             </span>
           );
+          // A pencil on hover starts a rename. It sits beside the card, not
+          // in it, since a button cannot hold another.
+          const pencil =
+            onRename && !isEditing ? (
+              <button type="button" className="s-rename" aria-label="Rename" title="Rename" onClick={() => setEditing(s.id)}>
+                <PencilIcon />
+              </button>
+            ) : null;
           // The selected card is the session's header: it adds the session id
-          // with a copy button. It is not a button, so the copy button can sit in it.
-          if (isSelected) {
+          // with a copy button. It is not a button, so the copy button can sit
+          // in it. A card being renamed is not a button either, so its box can.
+          if (isSelected || isEditing) {
             return (
-              <div key={s.id} className="sess on" data-session={s.id}>
-                {title}
-                {meta}
-                <span className="s-id">
-                  <code>{s.id}</code>
-                  <CopyButton text={s.id} />
-                </span>
+              <div key={s.id} className="sess-row">
+                <div className={`sess ${isSelected ? 'on' : ''}`} data-session={s.id}>
+                  {title}
+                  {meta}
+                  {isSelected && (
+                    <span className="s-id">
+                      <code>{s.id}</code>
+                      <CopyButton text={s.id} />
+                    </span>
+                  )}
+                </div>
+                {pencil}
               </div>
             );
           }
           return (
-            <button key={s.id} className="sess" data-session={s.id} onClick={() => onSelectSession(s.id)}>
-              {title}
-              {meta}
-            </button>
+            <div key={s.id} className="sess-row">
+              <button className="sess" data-session={s.id} onClick={() => onSelectSession(s.id)}>
+                {title}
+                {meta}
+              </button>
+              {pencil}
+            </div>
           );
         })}
       </div>

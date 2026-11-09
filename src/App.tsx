@@ -37,7 +37,7 @@ const LIST_REFRESH_MS = 500;
 
 // Kinds that change a session's summary (agent, folder, open) as the service
 // computes it; on these, fetch the sessions again at once.
-const SUMMARY_KINDS = new Set(['session.registered', 'session.opened', 'session.closed', 'events.dropped']);
+const SUMMARY_KINDS = new Set(['session.registered', 'session.opened', 'session.closed', 'session.renamed', 'events.dropped']);
 
 // Kinds that change a row of GET /api/v0/turns: a new turn, its end, its
 // cost and usage, its state, its model calls, model and reply. On these the
@@ -103,11 +103,13 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
   const jobsView = useJobs(jobs);
   const refreshJobs = jobsView?.refresh;
 
-  // Every session from one snapshot; agents and the Sessions column derive
-  // from it. null until the first list arrives.
+  // Every session from one snapshot, newest activity first. The Sessions
+  // column lists all of them, whatever agent is selected: a session can use
+  // many agents. null until the first list arrives.
   const [allSessions, setAllSessions] = useState<SessionSummary[] | null>(null);
-  // null means nothing is selected. "" is a real agent id: sessions no run
-  // started.
+  // The agent selected in the Agents column: "+ Session" starts on it. It
+  // does not filter the sessions. null means nothing is selected; "" is a
+  // real agent id: sessions no run started.
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
 
@@ -139,12 +141,11 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
     setLevel('session');
     setSelection(null);
   };
-  // One rule for every way a session gets picked (the list, an agent, a
-  // session the cockpit started, or a pick made because the shown one left
-  // the list): the pick selects the session level. Only the first pick on
-  // load keeps the default, turn 1.
-  const chooseSession = (sessionId: string | null, agentId?: string) => {
-    if (agentId !== undefined) setSelectedAgentId(agentId);
+  // One rule for every way a session gets picked (the list, a session the
+  // cockpit started, or a pick made because the shown one left the list):
+  // the pick selects the session level. Only the first pick on load keeps
+  // the default, turn 1. The selected agent stays as it is.
+  const chooseSession = (sessionId: string | null) => {
     setSelectedSessionId(sessionId);
     selectSessionLevel();
   };
@@ -177,10 +178,7 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
   const [savedAgents, setSavedAgents] = useState<SavedAgent[] | undefined>(undefined);
   const [agentsKey, setAgentsKey] = useState(0);
   const agents = useMemo(() => buildAgents(allSessions ?? [], savedAgents), [allSessions, savedAgents]);
-  const sessions = useMemo(
-    () => (allSessions ?? []).filter((s) => selectedAgentId !== null && sessionGroup(s) === selectedAgentId),
-    [allSessions, selectedAgentId]
-  );
+  const sessions = useMemo(() => allSessions ?? [], [allSessions]);
   const loading = allSessions === null;
   // Bumped on each snapshot the stream starts from: read the shown session again.
   const [reloadKey, setReloadKey] = useState(0);
@@ -384,9 +382,7 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
   }, [dataSource, listKey]);
 
   // After any list change, keep the agent and session if they still exist;
-  // otherwise take the first available.
-  // The first pick is the agent of the newest session, so the cockpit opens
-  // on recent work rather than on a saved agent with nothing in it.
+  // otherwise take the first available: the newest session, and its agent.
   // Nothing is picked before the sessions are read: a saved agent listed
   // first would otherwise be kept, empty, once they arrive.
   useEffect(() => {
@@ -430,7 +426,7 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
     if (awaitedSession === null) return;
     const s = allSessions?.find((x) => x.id === awaitedSession);
     if (!s) return;
-    chooseSession(s.id, sessionGroup(s));
+    chooseSession(s.id);
     setAwaitedSession(null);
   }, [allSessions, awaitedSession]);
 
@@ -513,6 +509,18 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
         refreshJobs?.();
         awaitTurn(gen, started, from);
         return started;
+      }
+    : undefined;
+
+  // A new name for a session: PATCH /api/v0/sessions/<id>. The row shows it
+  // at once, and the list is read again. A refusal rejects with the API's
+  // words, for the row or the header to show.
+  const renameSession = dataSource.renameSession
+    ? async (id: string, title: string) => {
+        await dataSource.renameSession!(id, title);
+        const t = title.trim();
+        setAllSessions((list) => list && list.map((row) => (row.id === id ? { ...row, title: t } : row)));
+        setListKey((k) => k + 1);
       }
     : undefined;
 
@@ -719,15 +727,9 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
         sourceLabel={sourceLabel}
         onDisconnect={onDisconnect}
         disconnectLabel={disconnectLabel}
-        onSelectAgent={(agentId) => {
-          // The session follows from the agent (the effect above picks its
-          // first session); the level is the session's either way.
-          nextSend();
-          setAwaitedTurn(null);
-          setAwaitedSession(null);
-          setSelectedAgentId(agentId);
-          selectSessionLevel();
-        }}
+        // Selecting an agent only marks it, for "+ Session": the session on
+        // screen and the list stay.
+        onSelectAgent={setSelectedAgentId}
         onAddAgent={canKeepAgents ? () => setAgentsDialog({}) : undefined}
         onEditAgent={canKeepAgents && dataSource.updateAgent ? (a) => a.saved && setAgentsDialog({ edit: a.saved }) : undefined}
         onRemoveAgent={canKeepAgents && dataSource.removeAgent ? removeAgent : undefined}
@@ -745,6 +747,7 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
         }}
         // New session starts on the selected agent when it is a saved one.
         onNewSession={canStart ? () => setNewSession({ agent: agents.find((a) => a.id === selectedAgentId)?.saved?.id }) : undefined}
+        onRename={renameSession}
         empty={sessions.length === 0}
       />
 
@@ -771,8 +774,8 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
           agentName={agents.find((x) => x.id === sessionView.agent)?.name}
           agents={savedAgents}
           onOpenSession={(id) => {
-            // A session not listed yet is opened once its row arrives, under
-            // its own agent, as for a session just started.
+            // A session not listed yet is opened once its row arrives, as for
+            // a session just started.
             const s = allSessions?.find((x) => x.id === id);
             nextSend();
             setAwaitedTurn(null);
@@ -781,8 +784,9 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
               return;
             }
             setAwaitedSession(null);
-            chooseSession(id, sessionGroup(s));
+            chooseSession(id);
           }}
+          onRename={renameSession}
         />
       ) : (
         <main id="convo">

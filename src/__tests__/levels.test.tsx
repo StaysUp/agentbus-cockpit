@@ -154,12 +154,11 @@ describe('selection levels', () => {
     a.r.unmount();
   });
 
-  it('picking an agent leaves an open panel open, at the session', async () => {
+  it('picking an agent leaves the panel, the level and the session as they were', async () => {
     const a = await app();
+    const before = { open: a.open(), marks: a.marks().length, head: a.head(), on: a.q('#sessions .sess.on code')?.textContent };
     await click(a.q('#agents .agent'));
-    expect(a.open()).toBe(true);
-    expect(a.marks()).toHaveLength(0);
-    expect(a.head()).toMatch(/^Session/);
+    expect({ open: a.open(), marks: a.marks().length, head: a.head(), on: a.q('#sessions .sess.on code')?.textContent }).toEqual(before);
     a.r.unmount();
   });
 

@@ -271,6 +271,12 @@ export class LiveDataSource implements DataSource {
     if (!res.ok) throw new Error(await apiError(res));
   }
 
+  // PATCH /api/v0/sessions/<id>: a new name for the session. It answers with
+  // the session.renamed it stored; the list names the session by it.
+  async renameSession(sessionId: string, title: string): Promise<void> {
+    await this.send('PATCH', `/api/v0/sessions/${encodeURIComponent(sessionId)}`, { title });
+  }
+
   // POST /api/v0/turns: start an agent with a first prompt, in a new session.
   // 202 {id, turn, base_url}: id is the session, turn the new turn.
   async startRun(req: RunRequest): Promise<Started> {

@@ -6,6 +6,7 @@ import { useNow } from '../utils/useNow';
 import { formatCost, formatTokens, stateLabel, turnStateClass } from '../utils/format';
 import { Cost } from './Cost';
 import { LiveLine } from './LiveLine';
+import { PencilIcon, TitleEdit } from './TitleEdit';
 
 interface ConvoColumnProps {
   session: SessionDetail;
@@ -59,6 +60,9 @@ interface ConvoColumnProps {
   // session that did the work) and of an asked turn (to the session that
   // asked). Without it the links are not shown.
   onOpenSession?: (sessionId: string) => void;
+  // Given when the source can name sessions: a new title for this one.
+  // Rejects with the API's words.
+  onRename?: (sessionId: string, title: string) => Promise<void>;
 }
 
 // The harnesses' own names, for a turn no saved agent names.
@@ -188,8 +192,11 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
   keyed,
   pending: keptPending,
   onPending,
+  onRename,
 }) => {
   const [draft, setDraft] = useState('');
+  // The header's name is being edited.
+  const [renaming, setRenaming] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   useEffect(() => {
     if (!prefill || prefill.session !== session.id) return;
@@ -364,7 +371,29 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
   return (
     <main id="convo" data-session={session.id}>
       <header id="c-head" className="colhead">
-        <div className="colhead-title">{session.title}</div>
+        {renaming && onRename ? (
+          <TitleEdit
+            className="c-title-input"
+            title={session.title}
+            onSave={(t) => onRename(session.id, t)}
+            onDone={() => setRenaming(false)}
+          />
+        ) : (
+          <>
+            <div
+              className={`colhead-title ${onRename ? 'c-title-edit' : ''}`}
+              title={onRename ? 'Rename' : undefined}
+              onClick={onRename ? () => setRenaming(true) : undefined}
+            >
+              {session.title}
+            </div>
+            {onRename && (
+              <button type="button" className="c-rename" aria-label="Rename" title="Rename" onClick={() => setRenaming(true)}>
+                <PencilIcon />
+              </button>
+            )}
+          </>
+        )}
       </header>
 
       <div id="c-msgs">

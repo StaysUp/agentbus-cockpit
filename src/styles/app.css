@@ -720,3 +720,23 @@ label.nd-check > span { font-size: max(11px, 0.75rem); color: var(--ink); }
 #c-reply .send-mode { width: 1.5rem; height: 2rem; border: 0; border-left: 1px solid rgba(255,255,255,.25); border-radius: 0 0.5rem 0.5rem 0; background: var(--ink) no-repeat center / 0.625rem url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='white' stroke-width='1.5'/%3E%3C/svg%3E"); color: transparent; font: inherit; cursor: pointer; -webkit-appearance: none; appearance: none; }
 #c-reply .send-mode option { color: var(--ink); }
 #c-reply .send-mode:disabled { opacity: .22; cursor: default; }
+
+/* ---------- rename ---------- */
+/* Every row keeps its height, so a long list scrolls rather than squeezes. */
+#sessions .colbody > *, #agents .colbody > * { flex: none; }
+.sess-row { position: relative; }
+.sess-row .s-t { padding-right: 1.25rem; }
+.s-rename, .c-rename { width: 1.5rem; height: 1.5rem; display: grid; place-items: center; border: 0; border-radius: 0.375rem; background: transparent; color: var(--ink3); cursor: pointer; flex: none; }
+.s-rename { position: absolute; top: 0.5rem; right: 0.375rem; opacity: 0; }
+.sess-row:hover .s-rename, .s-rename:focus-visible { opacity: 1; }
+.c-rename { opacity: 0; }
+#c-head:hover .c-rename, .c-rename:focus-visible { opacity: 1; }
+.s-rename:hover, .c-rename:hover { background: rgba(0,0,0,.06); color: var(--ink); }
+.s-tt-edit, .c-title-edit { cursor: text; }
+.title-edit { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.title-edit input { width: 100%; box-sizing: border-box; font: inherit; color: var(--ink); padding: 0.125rem 0.375rem; border: 1px solid var(--line2); border-radius: 0.375rem; background: #fff; }
+.title-edit .form-error { font-size: max(11px, 0.75rem); font-weight: 400; white-space: normal; }
+/* The header is one line high: its refusal floats under the box. */
+#c-head .c-title-input { position: relative; }
+#c-head .c-title-input input { font-size: 1rem; font-weight: 650; }
+#c-head .c-title-input .form-error { position: absolute; top: calc(100% + 0.25rem); left: 0; right: 0; z-index: 20; background: #fff; border: 1px solid var(--line2); border-radius: 0.375rem; padding: 0.25rem 0.5rem; box-shadow: 0 2px 8px rgba(0,0,0,.08); }

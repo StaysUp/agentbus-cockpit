@@ -18,9 +18,10 @@ interface AgentsColumnProps {
 }
 
 // The Agents column: every saved agent, even one with no session yet, with
-// its access and how many sessions it has; the selected one's sessions are
-// in the column beside it. Sessions no saved agent started are listed under
-// their harness, after the saved agents.
+// its access and how many sessions started on it. Selecting one marks it for
+// "+ Session"; the Sessions column lists every session either way. Sessions
+// no saved agent started are counted under their harness, after the saved
+// agents.
 export const AgentsColumn: React.FC<AgentsColumnProps> = ({
   agents,
   selectedAgentId,
