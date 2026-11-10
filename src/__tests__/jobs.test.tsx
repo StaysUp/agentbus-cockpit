@@ -453,6 +453,20 @@ describe('jobs data', () => {
     expect(v.ofSession('s1').map((j) => j.id)).toEqual(['a', 'b', 'r1', 'r2']);
   });
 
+  it("lists a session's apply jobs with its turns, and no snapshot job", () => {
+    const v = jobsView(
+      [
+        job({ id: 'a', result: { session: 's1', turn: 'T1' } }),
+        job({ id: 'ap', kind: 'apply', session: 's1', links: { applies_turn: 'T1' }, created: '2026-11-08T10:05:00Z' }),
+        job({ id: 'sn', kind: 'snapshot', created: '2026-11-08T10:00:30Z' }),
+      ],
+      {},
+      null,
+      () => {}
+    );
+    expect(v.ofSession('s1').map((j) => j.id)).toEqual(['a', 'ap']);
+  });
+
   it('startTurnJob waits for turn.created, and says why a job ended without a turn', async () => {
     const fake = fakeJobs([]);
     const { ref } = await startTurnJob(fake.src, { agent: 'claude', folder: '/w', prompt: 'x' }, { intervalMs: 1 });

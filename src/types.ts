@@ -1,3 +1,4 @@
+import type { FolderInfo } from './data/folders';
 export interface Usage {
   input_tokens: number;
   output_tokens: number;
@@ -85,6 +86,9 @@ export interface Turn {
   // message it queued to the turn that runs it.
   key?: string;
   folder?: string;
+  // The reference of the person's folder (turn.started folder_ref): GET
+  // /api/v0/folders gives its name. Absent in older records.
+  folderRef?: string;
   // From the turn's turn.started: who started it when the person did not.
   // kind result: AgentBus delivered the result of work this session asked
   // for, and the prompt is that result. kind asked: another session's turn
@@ -151,6 +155,8 @@ export interface SessionSummary {
   first_agent_id?: string;
   client: string;
   folder?: string;
+  // The reference of the folder, when the source gives it.
+  folder_ref?: string;
   title: string;
   started: string;
   last: string;
@@ -259,8 +265,15 @@ export interface TurnDiffFile {
 export interface ApplyState {
   // none, queued, running, applied, refused or failed.
   state: string;
+  // The turn the apply was asked for. An apply makes the folder as the
+  // session was at that turn: every turn not yet applied, up to it. With
+  // already, the turn whose apply covered this one.
+  turn?: string;
   already?: boolean;
   files?: string[];
+  // All the files written or removed: files may list fewer (truncated).
+  count?: number;
+  truncated?: boolean;
   conflicts?: { path: string; why: string }[];
   error?: string;
 }
@@ -342,6 +355,9 @@ export interface DataSource {
   // on, and the agents to list, save, edit and remove. Each rejects with the
   // API's own words.
   getHarnesses?(): Promise<Harness[]>;
+  // The folders the runners own (GET /api/v0/folders), each by its
+  // reference and name.
+  listFolders?(): Promise<FolderInfo[]>;
   listAgents?(): Promise<SavedAgent[]>;
   // Where a queued message's turn job stands, by the job id
   // POST /api/v0/turns answered with.

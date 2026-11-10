@@ -18,12 +18,19 @@ export interface JobSpec {
   // A saved agent's id. The service fills in its harness, access and model.
   agent?: string;
   folder?: string;
+  // A folder another machine owns, by its reference and its connector (GET
+  // /api/v0/folders), in place of folder.
+  folder_ref?: string;
+  connector?: string;
   // With folder: the session's own copy of the folder, as the service's
   // isolation setting makes it; false uses the folder as it is.
   isolate?: boolean;
   repo?: string;
   base?: string;
+  // Words a runner must have (agentbus runner -labels).
+  labels?: string[];
   session?: string;
+  // Empty for an apply or snapshot job: they start no turn.
   prompt: string;
   model?: string;
   read_only?: boolean;
@@ -65,21 +72,43 @@ export interface JobResult {
 
 export interface Job {
   id: string;
-  kind: 'turn' | 'review';
+  // apply and snapshot run on a folder's connector and start no turn.
+  kind: 'turn' | 'review' | 'apply' | 'snapshot';
   state: JobState;
   spec: JobSpec;
-  links?: { reviews_job?: string; continues_turn?: string; redo_of?: string };
+  // applies_turn: for an apply job, the turn whose changes it applies.
+  links?: { reviews_job?: string; continues_turn?: string; redo_of?: string; applies_turn?: string; applies_job?: string };
   attempt?: string;
   reason?: string;
   verdict: Verdict | null;
   findings?: Finding[];
   result?: JobResult;
   session?: string;
-  workspace?: { session: string; runner: string; kind: string; folder: string };
+  workspace?: Workspace;
   attempts?: JobAttempt[];
   created: string;
   updated: string;
   ended?: string;
+}
+
+// Where a session's turns run, on its runner. space: a copy or worktree, by
+// its id on the runner. folder_ref: a folder used as it is. folder: a path on
+// the runner, only for a session made before these ids. The cockpit reads no
+// file through any of them.
+export interface Workspace {
+  session: string;
+  runner: string;
+  kind: string; // worktree, copy or folder
+  space?: string;
+  folder_ref?: string;
+  folder?: string;
+  repo?: string;
+  base?: string;
+  // The snapshot id of the copy as it was made.
+  snapshot?: string;
+  created?: string;
+  closed?: string;
+  removed?: string;
 }
 
 export interface JobEvent {

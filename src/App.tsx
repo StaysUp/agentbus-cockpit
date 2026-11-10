@@ -7,7 +7,7 @@ import { NewSessionDialog } from './components/NewSessionDialog';
 import { ChangesDialog } from './components/ChangesDialog';
 import { RightPanel } from './components/RightPanel';
 import { SessionsColumn } from './components/SessionsColumn';
-import { rememberFolder } from './data/folders';
+import { FolderInfo, FoldersContext, rememberFolder } from './data/folders';
 import { ReplayDataSource } from './data/ReplayDataSource';
 import { applyList, countedIn, isNewerList, ListCursor, StreamedCost, streamedCost } from './data/sessionList';
 import { addLiveEvent, LiveTurns, mergeLive, noteEventTime } from './data/liveStatus';
@@ -449,6 +449,22 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
   const loadHarnesses = useCallback(() => dataSource.getHarnesses!(), [dataSource]);
   const loadSaved = useCallback(() => dataSource.listAgents!(), [dataSource]);
   const canKeepAgents = !!(dataSource.listAgents && dataSource.getHarnesses && dataSource.createAgent);
+  // The folders the runners own, by reference: a turn built from a snapshot
+  // on another machine names its folder by reference, and this gives its
+  // name. Read again when the list of sessions grows (a new folder).
+  const [folders, setFolders] = useState<FolderInfo[]>([]);
+  const sessionCount = sessions.length;
+  useEffect(() => {
+    if (!dataSource.listFolders) return;
+    let active = true;
+    dataSource.listFolders().then(
+      (list) => active && setFolders(list),
+      () => undefined
+    );
+    return () => {
+      active = false;
+    };
+  }, [dataSource, sessionCount]);
   useEffect(() => {
     if (!dataSource.listAgents || agentsDialog !== null) return;
     let active = true;
@@ -727,6 +743,7 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
   }
 
   return (
+    <FoldersContext.Provider value={folders}>
     <div id="app" className={panelOpen ? 'panel' : 'nopanel'}>
       <AgentsColumn
         agents={agents}
@@ -878,6 +895,7 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
         />
       )}
     </div>
+    </FoldersContext.Provider>
   );
 };
 

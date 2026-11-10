@@ -23,6 +23,7 @@ import { Job } from '../data/jobs';
 import { JobsView } from '../data/useJobs';
 import { JobsTab, ReviewBar } from './Jobs';
 import { reviewUI } from '../features';
+import { folderLabel, useFolders } from '../data/folders';
 
 interface RightPanelProps {
   turn: Turn | null;
@@ -199,6 +200,7 @@ const TurnPanel: React.FC<TurnPanelProps> = ({
     setExpandedEventId(null);
     onSelectEvent?.(null);
   };
+  const folders = useFolders();
   React.useEffect(() => {
     if (!escRef) return;
     const collapse = () => {
@@ -227,7 +229,9 @@ const TurnPanel: React.FC<TurnPanelProps> = ({
 
   // The turn's own folder, from its turn.started. The session's folder is
   // its latest run's, so it is not offered for an earlier turn.
-  const folder = turn.folder;
+  // The name shown: the folder's, when the service lists its reference.
+  // Tool paths are shortened by the path the turn ran in (turn.folder).
+  const folder = folderLabel(turn.folder, turn.folderRef, folders);
 
   // How the turn continued, from its turn.started: the chat no longer shows it.
   const continued = continuedLine(turn.detail, session?.turnsList ?? []);
@@ -699,7 +703,7 @@ const TurnPanel: React.FC<TurnPanelProps> = ({
         {tab === 'tools' && (
           <ToolsTab
             detail={detail}
-            folder={folder}
+            folder={turn.folder}
             now={now}
             running={!!live && turn.state === 'running'}
             openId={expandedEventId}

@@ -19,6 +19,7 @@ import {
   TurnState,
   Usage,
 } from '../types';
+import { FolderInfo } from './folders';
 import { ApiOrigin, buildAgents, extractCleanPrompt, sessionGroup, turnDetail, turnOrigin } from './turns';
 
 export interface LiveDataSourceConfig {
@@ -42,6 +43,8 @@ interface ApiTurn {
   agent_id?: string;
   idempotency_key?: string;
   folder: string;
+  // The folder's reference, when the service gives it on a turn row.
+  folder_ref?: string;
   origin?: ApiOrigin;
   prompt: string;
   prompt_truncated?: boolean;
@@ -85,6 +88,7 @@ function turnRow(t: ApiTurn, n: number): Turn {
     agentId: t.agent_id || undefined,
     key: t.idempotency_key || undefined,
     folder: t.folder || undefined,
+    folderRef: t.folder_ref || undefined,
     origin: turnOrigin(t.origin),
     state: t.state,
     stopped: t.stopped === true || undefined,
@@ -324,14 +328,36 @@ export class LiveDataSource implements DataSource {
   }
 
   // POST /api/v0/turns/<id>/apply: 200 applied (or already), 202 still
-  // running, 409 refused with each file and why. All three are answers.
+  // running, 409 refused with each file and why. All three are answers. A
+  // 409 with no state (an apply of an earlier turn has not ended) is an
+  // error in the API's words.
   async applyTurn(turnId: string): Promise<ApplyState> {
     const res = await fetch(`${this.baseUrl}/api/v0/turns/${encodeURIComponent(turnId)}/apply`, {
       method: 'POST',
       headers: this.headers(),
     });
-    if (res.ok || res.status === 409) return res.json();
+    if (res.ok) return res.json();
+    if (res.status === 409) {
+      const text = await res.text().catch(() => '');
+      let body: unknown;
+      try {
+        body = JSON.parse(text);
+      } catch {
+        // Not JSON: the text is the error.
+      }
+      if (body && typeof (body as ApplyState).state === 'string') return body as ApplyState;
+      const msg = (body as { error?: unknown } | undefined)?.error;
+      throw new Error(typeof msg === 'string' && msg ? msg : text.trim() || 'agentbus answered 409');
+    }
     throw new Error(await apiError(res));
+  }
+
+  // GET /api/v0/folders: the folders the runners own, by reference.
+  async listFolders(): Promise<FolderInfo[]> {
+    const res = await fetch(`${this.baseUrl}/api/v0/folders`, { headers: this.headers() });
+    if (!res.ok) throw new Error(await apiError(res));
+    const body = await res.json();
+    return Array.isArray(body?.folders) ? body.folders : [];
   }
 
   private async post(path: string, body: unknown): Promise<Started> {

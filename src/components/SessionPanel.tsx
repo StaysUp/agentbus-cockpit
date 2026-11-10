@@ -7,6 +7,7 @@ import { PanelHead } from './PanelHead';
 import { Job, TurnRef } from '../data/jobs';
 import { SessionJobs } from './Jobs';
 import { reviewUI } from '../features';
+import { folderLabel, sessionFolderRef, useFolders } from '../data/folders';
 
 interface SessionPanelProps {
   session: SessionDetail;
@@ -35,6 +36,7 @@ export const SessionPanel: React.FC<SessionPanelProps> = ({
   jobsError,
 }) => {
   const turns = session.turnsList;
+  const folder = folderLabel(session.folder, sessionFolderRef(session), useFolders());
   return (
     <section id="right">
       <PanelHead up={[]} onClose={onClose}>
@@ -70,7 +72,7 @@ export const SessionPanel: React.FC<SessionPanelProps> = ({
           <span>Agent</span>
           <span>{agentName}</span>
           <span>Folder</span>
-          <span>{session.folder ? session.folder : <span className="dim">not known</span>}</span>
+          <span>{folder ? folder : <span className="dim">not known</span>}</span>
         </div>
       </div>
 

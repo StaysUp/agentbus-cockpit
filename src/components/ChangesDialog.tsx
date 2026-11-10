@@ -109,8 +109,8 @@ export const ChangesDialog: React.FC<ChangesDialogProps> = ({ turnNumber, loadDi
         )}
         {state && state.state === 'applied' && (
           <div className="nd-note ch-applied">
-            {state.already ? 'Applied before.' : 'Applied to your folder.'} {state.files?.length ?? 0}{' '}
-            {state.files?.length === 1 ? 'file' : 'files'} written.
+            {state.already ? 'Applied before.' : 'Applied to your folder.'} {appliedCount(state)}{' '}
+            {appliedCount(state) === 1 ? 'file' : 'files'} written.
           </div>
         )}
         {state && (state.state === 'queued' || state.state === 'running') && <div className="nd-note">Applying…</div>}
@@ -143,3 +143,8 @@ export const ChangesDialog: React.FC<ChangesDialogProps> = ({ turnNumber, loadDi
     </div>
   );
 };
+
+// How many files an apply wrote or removed: count, when the list was cut.
+function appliedCount(s: ApplyState): number {
+  return Math.max(s.count ?? 0, s.files?.length ?? 0);
+}

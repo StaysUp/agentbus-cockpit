@@ -6,6 +6,7 @@ import { Level, QueuedJob, SavedAgent, SessionDetail, Started, Turn } from '../t
 import { useNow } from '../utils/useNow';
 import { formatCost, formatTokens, stateLabel, turnStateClass } from '../utils/format';
 import { Cost } from './Cost';
+import { folderLabel, sessionFolderRef, useFolders } from '../data/folders';
 import { LiveLine } from './LiveLine';
 import { PencilIcon, TitleEdit } from './TitleEdit';
 
@@ -198,6 +199,11 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
   onRename,
   onChanges,
 }) => {
+  // A turn's folder is shown when it is not the session's: by name when the
+  // service lists its reference.
+  const folders = useFolders();
+  const sessionFolder = folderLabel(session.folder, sessionFolderRef(session), folders);
+  const turnFolder = (t: Turn) => folderLabel(t.folder, t.folderRef, folders);
   const [draft, setDraft] = useState('');
   // The header's name is being edited.
   const [renaming, setRenaming] = useState(false);
@@ -499,9 +505,9 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
                       </span>
                     )}
                     <span className="tb-stat">
-                      {turn.folder && turn.folder !== session.folder ? (
+                      {turnFolder(turn) && turnFolder(turn) !== sessionFolder ? (
                         <>
-                          <code className="tb-folder">{turn.folder}</code> ·{' '}
+                          <code className="tb-folder">{turnFolder(turn)}</code> ·{' '}
                         </>
                       ) : null}
                       {turn.durationMs !== undefined ? `${Math.round(turn.durationMs / 1000)}s · ` : ''}

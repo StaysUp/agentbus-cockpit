@@ -132,10 +132,15 @@ describe('Changes', () => {
   });
 
   it('an apply still queued is read again until it ends', async () => {
+    // The first read is before the apply; later ones say queued until the
+    // test has seen it, then applied. A read that said none after the apply
+    // was asked for ended the wait at once, before the test looked.
     let calls = 0;
+    let ended = false;
     const loadDiff = vi.fn(async () => {
       calls++;
-      return calls < 3 ? diff : { ...diff, apply: { state: 'applied', files: ['a.txt'] } };
+      if (calls === 1) return diff;
+      return ended ? { ...diff, apply: { state: 'applied', files: ['a.txt'] } } : { ...diff, apply: { state: 'queued' } };
     });
     const apply = vi.fn(async () => ({ state: 'queued' }) as ApplyState);
     const r = await render(<ChangesDialog turnNumber={1} loadDiff={loadDiff} apply={apply} onClose={() => {}} pollMs={5} />);
@@ -144,6 +149,7 @@ describe('Changes', () => {
     await click(button);
     await flush();
     expect(r.container.textContent).toContain('Applying');
+    ended = true;
     for (let i = 0; i < 50 && !r.container.textContent!.includes('Applied to your folder'); i++) {
       await act(async () => {
         await new Promise((done) => setTimeout(done, 10));

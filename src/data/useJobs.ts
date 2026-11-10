@@ -53,6 +53,10 @@ export function jobsView(jobs: Job[], found: Record<string, TurnRef>, error: str
         else reviews.set(of, [j]);
       }
       if (j.session) add(j.session, j);
+    } else if (j.kind === 'apply') {
+      // An apply is a job of the session whose turns it applies.
+      const s = j.session ?? j.spec.session;
+      if (s) add(s, j);
     }
   }
   for (const l of reviews.values()) l.sort(byCreated);

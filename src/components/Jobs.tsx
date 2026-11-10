@@ -391,6 +391,8 @@ export const SessionJobs: React.FC<SessionJobsProps> = ({ jobs, turns, refOf, on
   const now = useJobClock(jobs);
   const byId = new Map(jobs.map((j) => [j.id, j]));
   const turnOf = (j: Job): Turn | undefined => {
+    // An apply names the turn it applies up to.
+    if (j.kind === 'apply') return turns.find((t) => t.id === j.links?.applies_turn);
     const turnJob = j.kind === 'review' ? byId.get(j.links?.reviews_job ?? '') : j;
     const ref = turnJob ? refOf(turnJob) : undefined;
     return ref ? turns.find((t) => t.id === ref.turn) : undefined;
