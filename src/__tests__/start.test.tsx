@@ -100,6 +100,8 @@ function fakeService(opts: {
   turnPage?: number;
   // PATCH /sessions/<id>: a rename. Without it the row's title changes.
   rename?: (id: string, body: unknown) => Response | Promise<Response>;
+  // GET /folders. Without it the service has no such path (404).
+  folders?: unknown[];
 }) {
   const reqs: Req[] = [];
   const enc = new TextEncoder();
@@ -121,6 +123,7 @@ function fakeService(opts: {
     const p = url.pathname;
     if (p === '/api/v0/sessions') return json({ store: 'st_1', seq, sessions: state.sessions });
     if (p === '/api/v0/harnesses') return json({ harnesses: opts.agents ?? [] });
+    if (p === '/api/v0/folders' && opts.folders) return json({ folders: opts.folders });
     if (p === '/api/v0/agents' && method === 'GET') return json({ agents: state.saved });
     if (p === '/api/v0/agents' && method === 'POST') {
       const f = body as Record<string, unknown>;
@@ -293,6 +296,46 @@ describe('New session', () => {
     await settle();
     expect(r.container.querySelector('#sessions .sess.on code')?.textContent).toBe('new1');
     expect(r.container.querySelector('.tb .bubble')?.textContent).toBe('read the README');
+    r.unmount();
+  });
+
+  it('on a service that lists folders, the first is picked and the turn names it by folder_ref and connector', async () => {
+    const folders = [
+      { ref: 'fld_00000000000000a1', name: 'app', connector: 'con_1', runner: 'run_1' },
+      { ref: 'fld_00000000000000b2', name: 'site', connector: 'con_2', runner: 'run_2' },
+    ];
+    localStorage.setItem('agentbus.folders', JSON.stringify(['/Users/ana/old']));
+    const svc = fakeService({ sessions: [row('s1')], events: { s1: oneTurn('s1', 'hi') }, agents: AGENTS, folders });
+    const r = await mount(svc);
+    await click(r.container.querySelector('#sessions button.new-session'));
+    await settle();
+    const dialog = r.container.querySelector('.new-dialog')!;
+    const picks = Array.from(dialog.querySelectorAll('.nd-recent button')) as HTMLButtonElement[];
+    expect(picks.map((b) => b.textContent)).toEqual(['app', 'site', '/Users/ana/old']);
+    expect(picks[0].className).toBe('on');
+    expect((dialog.querySelector('input[name="folder"]') as HTMLInputElement).value).toBe('');
+    await click(picks[1]);
+    await setValue(dialog.querySelector('textarea[name="prompt"]'), 'read the README');
+    await submitForm(dialog);
+    expect(sentBody(svc)).toEqual({ agent: 'claude', folder_ref: 'fld_00000000000000b2', connector: 'con_2', isolate: true, prompt: 'read the README' });
+    expect(r.container.querySelector('.new-dialog')).toBeNull();
+    // A folder by reference is not a path to remember.
+    expect(JSON.parse(localStorage.getItem('agentbus.folders') ?? '[]')).toEqual(['/Users/ana/old']);
+    r.unmount();
+  });
+
+  it('a path typed over a listed folder is sent as a path', async () => {
+    const folders = [{ ref: 'fld_00000000000000a1', name: 'app', connector: 'con_1' }];
+    const svc = fakeService({ sessions: [row('s1')], events: { s1: oneTurn('s1', 'hi') }, agents: AGENTS, folders });
+    const r = await mount(svc);
+    await click(r.container.querySelector('#sessions button.new-session'));
+    await settle();
+    const dialog = r.container.querySelector('.new-dialog')!;
+    await setValue(dialog.querySelector('input[name="folder"]'), '/Users/ana/x');
+    expect(dialog.querySelector('.nd-recent button.on')).toBeNull();
+    await setValue(dialog.querySelector('textarea[name="prompt"]'), 'x');
+    await submitForm(dialog);
+    expect(sentBody(svc)).toEqual({ agent: 'claude', folder: '/Users/ana/x', prompt: 'x' });
     r.unmount();
   });
 

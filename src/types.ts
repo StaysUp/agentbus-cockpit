@@ -240,10 +240,15 @@ export interface SavedAgent extends AgentFields {
 }
 
 // POST /api/v0/turns: a saved agent and a folder, with the first message.
-// The service gives the session its own copy of the folder.
+// The service gives the session its own copy of the folder. The folder is a
+// path (agentbus up), or a listed folder by folder_ref and connector (GET
+// /api/v0/folders), which agentbus server needs.
 export interface RunRequest {
   agent: string;
-  folder: string;
+  folder?: string;
+  folder_ref?: string;
+  connector?: string;
+  isolate?: boolean;
   prompt: string;
   model?: string;
   read_only?: boolean;

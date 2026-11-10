@@ -468,9 +468,11 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
   );
   // The folders the runners own, by reference: a turn built from a snapshot
   // on another machine names its folder by reference, and this gives its
-  // name. Read again when the list of sessions grows (a new folder).
+  // name. Read again when the list of sessions grows (a new folder), and
+  // when New session opens, which offers them.
   const [folders, setFolders] = useState<FolderInfo[]>([]);
   const sessionCount = sessions.length;
+  const picking = newSession !== null;
   useEffect(() => {
     if (!dataSource.listFolders) return;
     let active = true;
@@ -481,7 +483,7 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
     return () => {
       active = false;
     };
-  }, [dataSource, sessionCount]);
+  }, [dataSource, sessionCount, picking]);
   useEffect(() => {
     if (!dataSource.listAgents || agentsDialog !== null) return;
     let active = true;
@@ -511,10 +513,13 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
   };
   const startRun = async (req: RunRequest) => {
     const gen = nextSend();
+    // A listed folder goes by its reference, which agentbus server needs; a
+    // path only agentbus up takes.
+    const at = req.folder_ref ? { folder_ref: req.folder_ref, connector: req.connector, isolate: true } : { folder: req.folder };
     const started = jobs
-      ? await runAsJob({ agent: req.agent, folder: req.folder, isolate: true, prompt: req.prompt, model: req.model, read_only: req.read_only })
-      : await dataSource.startRun!(req);
-    rememberFolder(req.folder);
+      ? await runAsJob({ agent: req.agent, isolate: true, ...at, prompt: req.prompt, model: req.model, read_only: req.read_only })
+      : await dataSource.startRun!({ ...req, ...at });
+    if (req.folder) rememberFolder(req.folder);
     setNewSession(null);
     awaitTurn(gen, started);
   };
@@ -881,6 +886,7 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
           loadAgents={loadSaved}
           loadHarnesses={dataSource.getHarnesses ? loadHarnesses : undefined}
           onStart={startRun}
+          folders={folders}
           onClose={() => setNewSession(null)}
           initialAgent={newSession.agent}
           onAddAgent={

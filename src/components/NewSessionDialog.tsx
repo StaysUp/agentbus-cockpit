@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { recentFolders } from '../data/folders';
+import { FolderInfo, recentFolders } from '../data/folders';
 import { Harness, RunRequest, SavedAgent } from '../types';
 import { agentLine } from './AgentsDialog';
 
@@ -14,18 +14,39 @@ interface NewSessionDialogProps {
   initialAgent?: string;
   // Opens the agents dialog, to add one.
   onAddAgent?: () => void;
+  // The folders the service lists (GET /api/v0/folders), by reference. On
+  // agentbus server they are the only folders a session can start in.
+  folders?: FolderInfo[];
 }
+
+// The folder a new session starts in: a listed folder by its reference, or
+// a path on the machine where AgentBus runs (agentbus up).
+type Where = { ref: string; connector?: string } | { path: string };
 
 // A new session is a saved agent and a folder, with a first message. The
 // service isolates it: the conversation works on its own copy of the folder,
 // and nothing reaches the folder until a turn's changes are applied.
-export const NewSessionDialog: React.FC<NewSessionDialogProps> = ({ loadAgents, loadHarnesses, onStart, onClose, initialAgent, onAddAgent }) => {
+export const NewSessionDialog: React.FC<NewSessionDialogProps> = ({ loadAgents, loadHarnesses, onStart, onClose, initialAgent, onAddAgent, folders = [] }) => {
   const [agents, setAgents] = useState<SavedAgent[] | null>(null);
   const [harnesses, setHarnesses] = useState<Harness[] | undefined>(undefined);
   const [agentsError, setAgentsError] = useState<string | null>(null);
   const [agent, setAgent] = useState(initialAgent ?? '');
   const [recent] = useState(() => recentFolders());
-  const [folder, setFolder] = useState(() => recent[0] ?? '');
+  // A listed folder first, as the service knows it; else the last path.
+  // Picked once, when the list first has one, unless the person chose.
+  const [where, setWhere] = useState<Where | null>(() =>
+    folders[0] ? { ref: folders[0].ref, connector: folders[0].connector } : recent[0] ? { path: recent[0] } : null
+  );
+  const [touched, setTouched] = useState(false);
+  useEffect(() => {
+    if (touched || folders.length === 0) return;
+    setWhere((cur) => (cur && 'ref' in cur ? cur : { ref: folders[0].ref, connector: folders[0].connector }));
+  }, [folders, touched]);
+  const pick = (w: Where) => {
+    setTouched(true);
+    setWhere(w);
+  };
+  const path = where && 'path' in where ? where.path : '';
   const [prompt, setPrompt] = useState('');
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -58,7 +79,8 @@ export const NewSessionDialog: React.FC<NewSessionDialogProps> = ({ loadAgents, 
   }, [onClose]);
 
   const chosen = agents?.find((a) => a.id === agent);
-  const ready = agent !== '' && folder.trim() !== '' && prompt.trim() !== '' && !starting;
+  const hasWhere = !!where && ('ref' in where || where.path.trim() !== '');
+  const ready = agent !== '' && hasWhere && prompt.trim() !== '' && !starting;
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -66,7 +88,8 @@ export const NewSessionDialog: React.FC<NewSessionDialogProps> = ({ loadAgents, 
     setStarting(true);
     setError(null);
     try {
-      await onStart({ agent, folder: folder.trim(), prompt });
+      const at = 'ref' in where! ? { folder_ref: where!.ref, connector: where!.connector } : { folder: where!.path.trim() };
+      await onStart({ agent, ...at, prompt });
     } catch (err) {
       setError((err as Error).message);
       setStarting(false);
@@ -105,23 +128,39 @@ export const NewSessionDialog: React.FC<NewSessionDialogProps> = ({ loadAgents, 
           <input
             name="folder"
             type="text"
-            value={folder}
-            onChange={(e) => setFolder(e.target.value)}
-            placeholder="/Users/you/project"
+            value={path}
+            onChange={(e) => pick({ path: e.target.value })}
+            placeholder={folders.length > 0 ? 'or a path on this machine' : '/Users/you/project'}
             spellCheck={false}
             autoComplete="off"
           />
         </label>
-        {recent.length > 0 && (
+        {(folders.length > 0 || recent.length > 0) && (
           <div className="nd-recent">
+            {folders.map((f) => (
+              <button
+                type="button"
+                key={f.ref}
+                className={where && 'ref' in where && where.ref === f.ref ? 'on' : ''}
+                title={f.ref}
+                onClick={() => pick({ ref: f.ref, connector: f.connector })}
+              >
+                <code>{f.name || f.ref}</code>
+              </button>
+            ))}
             {recent.map((f) => (
-              <button type="button" key={f} className={f === folder ? 'on' : ''} onClick={() => setFolder(f)}>
+              <button type="button" key={f} className={f === path ? 'on' : ''} onClick={() => pick({ path: f })}>
                 <code>{f}</code>
               </button>
             ))}
           </div>
         )}
-        <div className="nd-note">A folder on the machine where AgentBus runs. The conversation works on its own copy of it, so your folder is not changed until you apply a turn's changes.</div>
+        <div className="nd-note">
+          {folders.length > 0
+            ? 'A folder the service lists, or a path on the machine where AgentBus runs. '
+            : 'A folder on the machine where AgentBus runs. '}
+          The conversation works on its own copy of it, so your folder is not changed until you apply a turn's changes.
+        </div>
         <label>
           <span>First message</span>
           <textarea name="prompt" rows={4} value={prompt} onChange={(e) => setPrompt(e.target.value)} />
