@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { AccessOption, AgentFields, Harness, SavedAgent } from "../types";
+import { ConnectStep, SubscriptionApi } from "./ConnectStep";
 
 // The "+ Agent" form, and the same form to edit a saved agent: Harness,
 // then Access (only what that harness offers), then Model (what that harness
@@ -17,6 +18,9 @@ interface AgentsDialogProps {
   edit?: SavedAgent;
   // Called after a save, so other screens can list the agents again.
   onChanged?: () => void;
+  // A control that adds the person's own subscription to their runners'
+  // calls: the Connect step of a subscription agent.
+  subscriptions?: SubscriptionApi;
 }
 
 // What a harness, an access and a model are called on screen.
@@ -95,6 +99,7 @@ export const AgentsDialog: React.FC<AgentsDialogProps> = ({
   onClose,
   edit,
   onChanged,
+  subscriptions,
 }) => {
   const [harnesses, setHarnesses] = useState<Harness[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -282,6 +287,9 @@ export const AgentsDialog: React.FC<AgentsDialogProps> = ({
                     : `Uses the ${access?.label ?? "harness sign-in"}.`}
                 </span>
               </label>
+              {subscriptions && form.access === "subscription" && form.harness && (
+                <ConnectStep key={form.harness} harness={form.harness} api={subscriptions} />
+              )}
               <label>
                 <span>Model</span>
                 {access?.any_model ? (

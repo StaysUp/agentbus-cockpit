@@ -3,6 +3,7 @@ import rawSessionsJsonl from '../testdata/sessions-v0.jsonl?raw';
 import { AgentsColumn } from './components/AgentsColumn';
 import { ConvoColumn, Pending, PendingUpdate } from './components/ConvoColumn';
 import { AgentsDialog } from './components/AgentsDialog';
+import { SubscriptionApi } from './components/ConnectStep';
 import { NewSessionDialog } from './components/NewSessionDialog';
 import { ChangesDialog } from './components/ChangesDialog';
 import { RightPanel } from './components/RightPanel';
@@ -449,6 +450,22 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
   const loadHarnesses = useCallback(() => dataSource.getHarnesses!(), [dataSource]);
   const loadSaved = useCallback(() => dataSource.listAgents!(), [dataSource]);
   const canKeepAgents = !!(dataSource.listAgents && dataSource.getHarnesses && dataSource.createAgent);
+  // The Connect step of a subscription agent, where control keeps the
+  // person's own subscriptions for their runners.
+  const subscriptionApi = useMemo<SubscriptionApi | undefined>(
+    () =>
+      dataSource.listSubscriptions && dataSource.connectSubscription && dataSource.getConnect &&
+      dataSource.connectInput && dataSource.subscriptionsOn
+        ? {
+            list: () => dataSource.listSubscriptions!(),
+            connect: (h) => dataSource.connectSubscription!(h),
+            get: (h) => dataSource.getConnect!(h),
+            input: (h, line) => dataSource.connectInput!(h, line),
+            turnOn: () => dataSource.subscriptionsOn!(),
+          }
+        : undefined,
+    [dataSource],
+  );
   // The folders the runners own, by reference: a turn built from a snapshot
   // on another machine names its folder by reference, and this gives its
   // name. Read again when the list of sessions grows (a new folder).
@@ -890,6 +907,7 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
           loadHarnesses={loadHarnesses}
           createAgent={(f) => dataSource.createAgent!(f)}
           updateAgent={(id, f) => dataSource.updateAgent!(id, f)}
+          subscriptions={subscriptionApi}
           edit={agentsDialog.edit}
           onClose={() => setAgentsDialog(null)}
         />

@@ -341,6 +341,28 @@ export interface CallContext {
   pieces: ContextPiece[];
 }
 
+// The person's own subscription for a harness, kept on control for their
+// runners (GET /api/v0/subscriptions). Never the token.
+export interface ConnectView {
+  harness: string;
+  state: 'running' | 'connected' | 'failed';
+  output: string[];
+  error?: string;
+}
+export interface SubscriptionState {
+  harness: string;
+  connected: boolean;
+  connected_at?: string;
+  expires_at?: string;
+  expired: boolean;
+  connect?: ConnectView;
+}
+export interface SubscriptionList {
+  // subscriptions_on_runners is "own" on control.
+  on: boolean;
+  subscriptions: SubscriptionState[];
+}
+
 export interface DataSource {
   getAgents(): Promise<AgentSummary[]>;
   getSessions(agentId?: string): Promise<SessionSummary[]>;
@@ -365,6 +387,15 @@ export interface DataSource {
   createAgent?(f: AgentFields): Promise<SavedAgent>;
   updateAgent?(id: string, f: AgentFields): Promise<SavedAgent>;
   removeAgent?(id: string): Promise<void>;
+  // A control that adds the person's own subscription to their runners'
+  // calls has these: the subscriptions (null when the service keeps none),
+  // a connect started with the harness's own login, its output with the
+  // token taken out, a line typed into it, and the switch turned on.
+  listSubscriptions?(): Promise<SubscriptionList | null>;
+  connectSubscription?(harness: string): Promise<ConnectView>;
+  getConnect?(harness: string): Promise<ConnectView>;
+  connectInput?(harness: string, line: string): Promise<void>;
+  subscriptionsOn?(): Promise<void>;
   // A source that can start and continue sessions has these two. Each
   // rejects with an Error whose message is the API's own words. Starting
   // resolves with the session id and, from the live API, the new turn's id.

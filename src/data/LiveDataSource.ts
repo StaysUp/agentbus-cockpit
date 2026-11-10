@@ -1,5 +1,7 @@
 import {
   QueuedJob,
+  ConnectView,
+  SubscriptionList,
   AgentSummary,
   CallContext,
   CockpitEvent,
@@ -97,6 +99,16 @@ function turnRow(t: ApiTurn, n: number): Turn {
     costUsd: t.cost_usd,
     costComplete: t.cost_complete,
     startedSeq: t.started_seq,
+  };
+}
+
+// A connect as the API answers it, its output always a list.
+export function connectView(data: Partial<ConnectView>): ConnectView {
+  return {
+    harness: data.harness ?? '',
+    state: data.state ?? 'failed',
+    output: Array.isArray(data.output) ? data.output : [],
+    error: data.error,
   };
 }
 
@@ -275,6 +287,60 @@ export class LiveDataSource implements DataSource {
       headers: this.headers(),
     });
     if (!res.ok) throw new Error(await apiError(res));
+  }
+
+  // GET /api/v0/subscriptions: null when the service connects none (404).
+  async listSubscriptions(): Promise<SubscriptionList | null> {
+    const res = await fetch(`${this.baseUrl}/api/v0/subscriptions`, { headers: this.headers() });
+    if (res.status === 404) return null;
+    if (!res.ok) throw new Error(await apiError(res));
+    const data = await res.json();
+    return { on: data.on === true, subscriptions: Array.isArray(data.subscriptions) ? data.subscriptions : [] };
+  }
+
+  // POST /api/v0/subscriptions/<harness>/connect: 202 with the login started
+  // on control, or the one already running.
+  async connectSubscription(harness: string): Promise<ConnectView> {
+    const res = await fetch(`${this.baseUrl}/api/v0/subscriptions/${encodeURIComponent(harness)}/connect`, {
+      method: 'POST',
+      headers: this.headers(),
+    });
+    if (!res.ok) throw new Error(await apiError(res));
+    return connectView(await res.json());
+  }
+
+  // GET /api/v0/subscriptions/<harness>/connect: the login as it is now.
+  async getConnect(harness: string): Promise<ConnectView> {
+    const res = await fetch(`${this.baseUrl}/api/v0/subscriptions/${encodeURIComponent(harness)}/connect`, {
+      headers: this.headers(),
+    });
+    if (!res.ok) throw new Error(await apiError(res));
+    return connectView(await res.json());
+  }
+
+  // POST /api/v0/subscriptions/<harness>/connect/input: one line for the
+  // login, such as the code the browser showed. 204.
+  async connectInput(harness: string, line: string): Promise<void> {
+    const res = await fetch(`${this.baseUrl}/api/v0/subscriptions/${encodeURIComponent(harness)}/connect/input`, {
+      method: 'POST',
+      headers: { ...this.headers(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ line }),
+    });
+    if (!res.ok) throw new Error(await apiError(res));
+  }
+
+  // subscriptions_on_runners = "own": the policy read, that one key
+  // changed, and written back with the version it was read at.
+  async subscriptionsOn(): Promise<void> {
+    const res = await fetch(`${this.baseUrl}/api/v0/settings/permissions`, { headers: this.headers() });
+    if (!res.ok) throw new Error(await apiError(res));
+    const policy = await res.json();
+    const put = await fetch(`${this.baseUrl}/api/v0/settings/permissions`, {
+      method: 'PUT',
+      headers: { ...this.headers(), 'Content-Type': 'application/json', 'If-Match': res.headers.get('ETag') ?? '*' },
+      body: JSON.stringify({ ...policy, subscriptions_on_runners: 'own' }),
+    });
+    if (!put.ok) throw new Error(await apiError(put));
   }
 
   // PATCH /api/v0/sessions/<id>: a new name for the session. It answers with
