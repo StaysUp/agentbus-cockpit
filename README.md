@@ -13,7 +13,7 @@
 [![Latest release](https://img.shields.io/github/v/release/staysup/agentbus-cockpit)](https://github.com/staysup/agentbus-cockpit/releases)
 [![CI](https://github.com/StaysUp/agentbus-cockpit/actions/workflows/ci.yml/badge.svg)](https://github.com/StaysUp/agentbus-cockpit/actions/workflows/ci.yml)
 
-[Run it](#run) &nbsp;&bull;&nbsp; [AgentBus](https://github.com/staysup/agentbus) &nbsp;&bull;&nbsp; [Releases](https://github.com/staysup/agentbus-cockpit/releases)
+[Run it](#run) &nbsp;&bull;&nbsp; [Demo](#demo) &nbsp;&bull;&nbsp; [AgentBus](https://github.com/staysup/agentbus) &nbsp;&bull;&nbsp; [Releases](https://github.com/staysup/agentbus-cockpit/releases)
 
 </div>
 
@@ -24,6 +24,12 @@ your agents' turns, every model call, its cost, and the full conversation.
 
 The cockpit is a client of the AgentBus API. It uses only the public client API, so
 anything it shows, your own program can read too.
+
+## Demo
+
+[![AgentBus cockpit demo](https://img.youtube.com/vi/si0HHQFcCD0/maxresdefault.jpg)](https://youtu.be/si0HHQFcCD0)
+
+Click to watch on YouTube.
 
 ## Prerequisites
 
