@@ -17,7 +17,7 @@
 
 </div>
 
-![AgentBus cockpit](docs/assets/cockpit-design.png)
+![AgentBus cockpit: a conversation, and one turn's model calls](docs/assets/cockpit-model-calls.png)
 
 A free, self-hosted browser cockpit for [AgentBus](https://github.com/staysup/agentbus). It shows
 your agents' turns, every model call, its cost, and the full conversation.
@@ -79,29 +79,47 @@ Click to watch on YouTube.
 
 **Use recorded data** opens the cockpit on a recorded sample, with no service needed.
 
-## Jobs
+## Talking to agents
 
-`agentbus up` keeps a job queue and runs a runner in the same process. The cockpit reads the jobs
-from the same address with the same token, so there is nothing more to connect.
+![A conversation: the model changes per message, and an asked agent's answer comes back as the next turn](docs/assets/cockpit-conversation.png)
 
 - **An agent is a saved setup**: a harness (Claude Code or Codex), how it reaches a model (its own
   subscription or an OpenRouter key, read from an environment variable on the service's machine),
-  the model and a name. "+ Agent" makes one; "Saved" lists them to edit or remove.
-- **New session is an agent and a folder**, with the first message. In a git repo the session gets
-  its own worktree at the folder's current commit, so the folder itself is not changed; any other
-  folder is used as it is.
-- **Each prompt runs as a job.** The runner takes it and runs it as a turn. A job no runner has
-  taken yet stays queued, and the message waits with it. A session's next message keeps the model
-  of its first one.
-- **Reviews and applies are asked for in the chat**, for example "have codex check it" or
-  "apply that turn to my folder", not with buttons.
+  the model and a name. "+ Agent" makes one. Select an agent in the left column to edit or remove it.
+- **New session is an agent and a folder**, with the first message. The session works on its own
+  copy of the folder. Your folder does not change until you apply.
+- **Any message may go to any agent.** Pick it beside Send. Each turn's header names the agent and
+  the model that ran it.
+- **Messages queue.** Send while a turn runs. The message waits and runs next.
+- **Other agents answer in the conversation.** Ask in the chat, for example "have codex check it".
+  The answer comes back as the next turn, marked as delivered by AgentBus. "open its session"
+  shows the other agent's own work.
+- **Reviews and applies are asked for in the chat**, for example "apply that turn to my folder",
+  not with buttons.
+- **Click a turn** to see its result, prompt, events, every model call with its cost, and its tools.
 
 The review screens (Review and Fix on a turn, the CI/CD tab, the session's job list) and a turn's
-Changes dialog ("Apply to my folder") are still in the code, off by default. To turn them on, start the cockpit with `VITE_REVIEW_UI=1`:
+Changes dialog ("Apply to my folder") are still in the code, off by default. To turn them on, start
+the cockpit with `VITE_REVIEW_UI=1`:
 
 ```sh
 VITE_REVIEW_UI=1 npm run dev
 ```
+
+## Runners on other machines
+
+Point the cockpit at the machine that runs control (`agentbus server`, or `agentbus up`). It shows
+turns that runners on other machines run, live, with their model calls. See the
+[AgentBus README](https://github.com/staysup/agentbus#three-roles-one-or-more-machines) for the
+setup.
+
+![The + Agent form, with the Connect step of a subscription agent](docs/assets/cockpit-new-agent.png)
+
+A runner holds no sign-in. For a subscription agent on your own runners, open the agent's form and
+use **Connect**. It runs the harness's own login on control (for Claude Code,
+`claude setup-token`). Open the link it shows, sign in, and type the code the browser gives you.
+The token stays on control and is never shown. **Turn on for my runners** sets
+`subscriptions_on_runners = "own"`. One machine (`agentbus up` alone) needs none of this.
 
 ## Build a static copy
 
