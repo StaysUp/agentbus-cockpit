@@ -352,6 +352,9 @@ export interface ConnectView {
   harness: string;
   state: 'running' | 'connected' | 'failed';
   output: string[];
+  // A one-time code to enter at the link (codex's device login): nothing is
+  // typed back here.
+  code?: string;
   error?: string;
 }
 export interface SubscriptionState {
@@ -359,7 +362,11 @@ export interface SubscriptionState {
   connected: boolean;
   connected_at?: string;
   expires_at?: string;
+  // Control renews the token itself before it expires (codex).
+  renews?: boolean;
   expired: boolean;
+  // Why it cannot be used, when it cannot.
+  error?: string;
   connect?: ConnectView;
 }
 export interface SubscriptionList {

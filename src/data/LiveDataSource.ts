@@ -108,6 +108,7 @@ export function connectView(data: Partial<ConnectView>): ConnectView {
     harness: data.harness ?? '',
     state: data.state ?? 'failed',
     output: Array.isArray(data.output) ? data.output : [],
+    code: data.code,
     error: data.error,
   };
 }

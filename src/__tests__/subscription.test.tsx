@@ -148,6 +148,9 @@ describe('connectView', () => {
   it('takes a login that printed nothing yet', () => {
     expect(connectView({ harness: 'claude', state: 'running', output: null as unknown as string[] }).output).toEqual([]);
   });
+  it('keeps the one-time code of a device login', () => {
+    expect(connectView({ harness: 'codex', state: 'running', output: [], code: 'ABCD-EFGH2' }).code).toBe('ABCD-EFGH2');
+  });
 });
 
 describe('ConnectStep on open', () => {
@@ -214,5 +217,53 @@ describe('ConnectStep in StrictMode', () => {
     );
     await flush();
     expect(container.textContent).toContain('not connected');
+  });
+
+  // codex's device login: control shows a link and a one-time code; the
+  // person enters the code at the link, and nothing is typed here.
+  it('shows a device login code and asks for nothing', async () => {
+    let list: SubscriptionList = { on: true, subscriptions: [{ harness: 'codex', connected: false, expired: false }] };
+    let view: ConnectView = {
+      harness: 'codex',
+      state: 'running',
+      output: ['https://auth.example/codex/device'],
+      code: 'ABCD-EFGH2',
+    };
+    const api: SubscriptionApi = {
+      list: vi.fn(async () => list),
+      connect: vi.fn(async () => view),
+      get: vi.fn(async () => view),
+      input: vi.fn(async () => {}),
+      turnOn: vi.fn(async () => {}),
+    };
+    const { container } = await render(<ConnectStep harness="codex" api={api} />);
+    await flush();
+    await click(container.querySelector('.cs-connect'));
+    await flush();
+    expect(container.querySelector('.cs-code')?.textContent).toBe('ABCD-EFGH2');
+    expect(container.querySelector('.cs-input')).toBeNull();
+    expect(container.textContent).toContain('enter the code there');
+    view = { ...view, state: 'connected' };
+    list = {
+      on: true,
+      subscriptions: [{ harness: 'codex', connected: true, renews: true, expired: false, expires_at: '2026-11-20T00:00:00Z' }],
+    };
+    await waitText(container, 'connected, renewed by control');
+    expect(api.input).not.toHaveBeenCalled();
+  });
+
+  it('says why a sign-in control could not renew needs connecting again', async () => {
+    const why = 'the vendor refused to renew the sign-in: connect again';
+    const api: SubscriptionApi = {
+      ...fakeApi(),
+      list: vi.fn(async () => ({
+        on: true,
+        subscriptions: [{ harness: 'codex', connected: true, renews: true, expired: true, error: why }],
+      })),
+    };
+    const { container } = await render(<ConnectStep harness="codex" api={api} />);
+    await flush();
+    expect(container.querySelector('.cs-status')?.textContent).toBe(why);
+    expect(container.querySelector('.cs-connect')?.textContent).toBe('Connect again');
   });
 });

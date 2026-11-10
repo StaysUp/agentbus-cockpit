@@ -127,12 +127,15 @@ export const ConnectStep: React.FC<{ harness: string; api: SubscriptionApi }> = 
       </div>
     );
   }
-  const until = sub.expires_at ? `, until ${day(sub.expires_at)}` : '';
+  // A sign-in control renews has no end date to show.
+  const until = sub.renews ? ', renewed by control' : sub.expires_at ? `, until ${day(sub.expires_at)}` : '';
   const status = sub.expired
-    ? 'expired: connect again'
+    ? sub.error ?? 'expired: connect again'
     : sub.connected
       ? `connected${until}`
       : 'not connected';
+  // A device login shows a code to enter at its link; nothing is typed here.
+  const device = !!view?.code;
   const connect = () => {
     if (connecting) return;
     setError(null);
@@ -216,12 +219,20 @@ export const ConnectStep: React.FC<{ harness: string; api: SubscriptionApi }> = 
           {(view.output ?? []).map((l, i) => (
             <Line key={i} text={l} />
           ))}
+          {view.code && (
+            <div className="cs-line">
+              Code: <strong className="cs-code">{view.code}</strong>
+            </div>
+          )}
           {view.state === 'failed' && <div className="form-error">{view.error}</div>}
           {view.state === 'connected' && <div className="cs-done">Connected.</div>}
         </div>
       )}
-      {running && <span className="nd-note">Sign in at the link, then type the code the browser shows.</span>}
-      {running && (
+      {running && device && (
+        <span className="nd-note">Open the link, sign in, and enter the code there. This ends by itself.</span>
+      )}
+      {running && !device && <span className="nd-note">Sign in at the link, then type the code the browser shows.</span>}
+      {running && !device && (
         // A nested form would submit the agent's form: this is a plain row.
         <div className="cs-input">
           <input
