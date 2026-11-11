@@ -15,6 +15,7 @@ import { addLiveEvent, LiveTurns, mergeLive, noteEventTime } from './data/liveSt
 import { refreshNow } from './utils/useNow';
 import { ApiTurn, QueueSource } from './data/jobs';
 import { useQueue } from './data/useJobs';
+import { addRun, shellRun } from './data/shell';
 import { addStreamedCost, addTurnEvents, buildAgents, createEmptyUsage, sessionGroup, turnDetail } from './data/turns';
 import {
   CockpitEvent,
@@ -26,6 +27,7 @@ import {
   SessionDetail,
   SessionList,
   SessionSummary,
+  ShellRun,
   Started,
   Turn,
   TurnDetail,
@@ -348,6 +350,8 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
           setLiveTurns(live.next);
         }
         if (live.backfill) backfillLive.current(event.session, event.turn!);
+        const ran = shellRun(event);
+        if (ran) addCommand(ran);
         // The shown session: an event of a loaded turn joins that turn, and
         // an event that changes the turn list (not yet counted in it) reads
         // the list again. While a session's turns load, its events wait.
@@ -562,6 +566,39 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
   // new one's turns load, so never the newly selected row.
   const shownId = shown?.session.id ?? null;
   const shownRow = shownId === null ? undefined : allSessions?.find((s) => s.id === shownId);
+  // Each session's "!" commands, oldest first: read when the session is
+  // shown, then added to from the stream and from each command run here.
+  const [commandsBySession, setCommandsBySession] = useState<Record<string, ShellRun[]>>({});
+  const addCommand = (run: ShellRun) =>
+    setCommandsBySession((m) => {
+      const next = addRun(m[run.sessionId], run);
+      return next === m[run.sessionId] ? m : { ...m, [run.sessionId]: next };
+    });
+  useEffect(() => {
+    if (selectedSessionId === null || !dataSource.getCommands) return;
+    let active = true;
+    const id = selectedSessionId;
+    dataSource
+      .getCommands(id)
+      .then((runs) => {
+        if (!active) return;
+        setCommandsBySession((m) => ({ ...m, [id]: runs.reduce((list, r) => addRun(list, r), m[id] ?? []) }));
+      })
+      .catch((err) => console.warn(`Reading the commands of ${id} failed:`, err));
+    return () => {
+      active = false;
+    };
+  }, [dataSource, selectedSessionId, reloadKey]);
+  // POST /api/v0/sessions/<id>/commands: the person's "!" command. It
+  // rejects with the API's words.
+  const runCommand = dataSource.runCommand
+    ? async (line: string): Promise<ShellRun> => {
+        if (shownId === null) throw new Error('no session is shown');
+        const run = await dataSource.runCommand!(shownId, line);
+        addCommand(run);
+        return run;
+      }
+    : undefined;
   // The messages sent from each session that are not turns yet, kept here so
   // they outlive a switch to another session and back.
   const [pendingBySession, setPendingBySession] = useState<Record<string, Pending[]>>({});
@@ -890,6 +927,8 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
           }}
           onRename={renameSession}
           onChanges={dataSource.getTurnDiff ? setChangesTurn : undefined}
+          commands={commandsBySession[sessionView.id]}
+          onCommand={runCommand}
         />
       ) : (
         <main id="convo">

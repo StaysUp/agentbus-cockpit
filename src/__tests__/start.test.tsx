@@ -1209,8 +1209,14 @@ describe('The turn list from the API', () => {
     // Turn 1 is open: its events were read, and only its.
     expect(eventReads(svc, 'T1-s1')).toBe(1);
     expect(eventReads(svc, 'T2-s1')).toBe(0);
-    // Every read of a session's events names one turn.
-    expect(svc.reqs.some((q) => /\/sessions\/[^/]+\/events$/.test(q.path) && !new URLSearchParams(q.query).has('turn'))).toBe(false);
+    // Every read of a session's events names one turn, or only its "!"
+    // commands (kind command.ran).
+    expect(
+      svc.reqs.some((q) => {
+        const p = new URLSearchParams(q.query);
+        return /\/sessions\/[^/]+\/events$/.test(q.path) && !p.has('turn') && p.get('kind') !== 'command.ran';
+      })
+    ).toBe(false);
     r.unmount();
   });
 

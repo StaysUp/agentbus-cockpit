@@ -37,6 +37,25 @@ export interface CockpitEvent {
   [key: string]: unknown;
 }
 
+// A shell command the person ran in a session's copy with "!", from its
+// command.ran event (POST /api/v0/sessions/<id>/commands). It sits between
+// turns and starts none.
+export interface ShellRun {
+  id: string;
+  sessionId: string;
+  // When it ended.
+  time: string;
+  line: string;
+  exitCode: number;
+  timedOut?: boolean;
+  stdout: string;
+  stderr: string;
+  // All it wrote; truncated says some of it was cut.
+  outputBytes: number;
+  truncated?: boolean;
+  durationMs: number;
+}
+
 export interface ModelCallPair {
   requested: CockpitEvent;
   responded?: CockpitEvent;
@@ -427,6 +446,11 @@ export interface DataSource {
     sessionId: string,
     req: { prompt: string; read_only?: boolean; model?: string; agent?: string; idempotency_key?: string }
   ): Promise<Started>;
+  // A source that runs the person's shell commands has these: one command
+  // run in the session's copy ("!"), and the commands run so far, oldest
+  // first. Each rejects with an Error in the API's own words.
+  runCommand?(sessionId: string, command: string): Promise<ShellRun>;
+  getCommands?(sessionId: string): Promise<ShellRun[]>;
   // A source that can name sessions has this: a new title for one. Rejects
   // with an Error in the API's own words.
   renameSession?(sessionId: string, title: string): Promise<void>;

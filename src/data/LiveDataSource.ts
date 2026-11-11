@@ -12,6 +12,7 @@ import {
   RunRequest,
   SessionList,
   SessionSummary,
+  ShellRun,
   Started,
   ApplyState,
   Turn,
@@ -20,6 +21,7 @@ import {
   TurnList,
 } from '../types';
 import { FolderInfo } from './folders';
+import { shellRun } from './shell';
 import { ApiTurn } from './jobs';
 import { buildAgents, extractCleanPrompt, sessionGroup, turnDetail, turnOrigin } from './turns';
 
@@ -346,6 +348,38 @@ export class LiveDataSource implements DataSource {
   // the session.renamed it stored; the list names the session by it.
   async renameSession(sessionId: string, title: string): Promise<void> {
     await this.send('PATCH', `/api/v0/sessions/${encodeURIComponent(sessionId)}`, { title });
+  }
+
+  // POST /api/v0/sessions/<id>/commands: the person's shell command, run in
+  // the session's copy. 200 once it ended, with its command.ran.
+  async runCommand(sessionId: string, command: string): Promise<ShellRun> {
+    const e = await this.send<CockpitEvent>('POST', `/api/v0/sessions/${encodeURIComponent(sessionId)}/commands`, { command });
+    return shellRun(e)!;
+  }
+
+  // GET /api/v0/sessions/<id>/events?kind=command.ran: the session's shell
+  // commands, oldest first, paged by next_after until it is null.
+  async getCommands(sessionId: string): Promise<ShellRun[]> {
+    const out: ShellRun[] = [];
+    let cursor: { store: string; after: number } | null = null;
+    for (;;) {
+      const params = new URLSearchParams({ kind: 'command.ran', limit: '1000' });
+      if (cursor) {
+        params.set('store', cursor.store);
+        params.set('after', String(cursor.after));
+      }
+      const res = await fetch(`${this.baseUrl}/api/v0/sessions/${encodeURIComponent(sessionId)}/events?${params}`, {
+        headers: this.headers(),
+      });
+      if (!res.ok) throw new Error(await apiError(res));
+      const data = await res.json();
+      for (const e of (data.events || []) as CockpitEvent[]) {
+        const r = shellRun(e);
+        if (r) out.push(r);
+      }
+      if (data.next_after === null || data.next_after === undefined) return out;
+      cursor = { store: data.store, after: data.next_after };
+    }
   }
 
   // POST /api/v0/turns: start an agent with a first prompt, in a new session.
