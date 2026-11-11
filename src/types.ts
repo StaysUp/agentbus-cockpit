@@ -96,6 +96,8 @@ export interface Turn {
   // asked for this one. Absent for a turn the person started.
   origin?: TurnOrigin;
   state: TurnState;
+  // Why the turn failed, in the service's own words, when it says.
+  error?: string;
   // True when the person stopped the turn (POST /api/v0/turns/<id>/stop).
   stopped?: boolean;
   outcome?: string;
@@ -168,6 +170,9 @@ export interface SessionSummary {
   // True when the service can take a next message for this session
   // (POST /api/v0/turns with session).
   resumable?: boolean;
+  // True when the session was closed (PATCH closed: true): it takes no more
+  // turns, so the cockpit offers no Send.
+  closed?: boolean;
 }
 
 // GET /api/v0/sessions: the rows and the cursor (store, seq) they were computed at.
@@ -383,6 +388,9 @@ export interface DataSource {
   // The sessions with the cursor they were taken at. A source without it is
   // read through getSessions, and its lists always replace the shown one.
   getSessionList?(): Promise<SessionList>;
+  // True when the service says this session is closed
+  // (GET /api/v0/sessions/<id>). A source without it has no closed sessions.
+  sessionClosed?(sessionId: string): Promise<boolean>;
   // Every turn of one session, oldest first, without their events.
   getTurns(sessionId: string): Promise<TurnList>;
   // One turn's events, paired. null when the turn has no events.

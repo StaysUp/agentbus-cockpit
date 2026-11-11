@@ -180,7 +180,13 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
   const [savedAgents, setSavedAgents] = useState<SavedAgent[] | undefined>(undefined);
   const [agentsKey, setAgentsKey] = useState(0);
   const agents = useMemo(() => buildAgents(allSessions ?? [], savedAgents), [allSessions, savedAgents]);
-  const sessions = useMemo(() => allSessions ?? [], [allSessions]);
+  // The sessions the service said are closed when one was opened
+  // (GET /api/v0/sessions/<id>), for a list that does not say it yet.
+  const [closedIds, setClosedIds] = useState<ReadonlySet<string>>(() => new Set());
+  const sessions = useMemo(
+    () => (allSessions ?? []).map((s) => (!s.closed && closedIds.has(s.id) ? { ...s, closed: true } : s)),
+    [allSessions, closedIds]
+  );
   const loading = allSessions === null;
   // Bumped on each snapshot the stream starts from: read the shown session again.
   const [reloadKey, setReloadKey] = useState(0);
@@ -686,7 +692,25 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
     for (const t of shown.session.turnsList) if (stopping.has(t.id) && t.state !== 'running') dropStopping(t.id);
   }, [shown, stopping]);
   // The session as the screens see it: its latest row and its turns.
-  const sessionView: SessionDetail | null = shown ? { ...(shownRow ?? shown.session), turnsList: turns } : null;
+  const sessionView: SessionDetail | null = shown
+    ? { ...(shownRow ?? shown.session), turnsList: turns, closed: !!shownRow?.closed || closedIds.has(shown.session.id) || undefined }
+    : null;
+
+  // Ask whether the selected session is closed, each time it is read.
+  useEffect(() => {
+    if (selectedSessionId === null || !dataSource.sessionClosed) return;
+    let active = true;
+    const id = selectedSessionId;
+    dataSource
+      .sessionClosed(id)
+      .then((closed) => {
+        if (active && closed) setClosedIds((set) => (set.has(id) ? set : new Set(set).add(id)));
+      })
+      .catch((err) => console.warn(`Reading whether session ${id} is closed failed:`, err));
+    return () => {
+      active = false;
+    };
+  }, [dataSource, selectedSessionId, reloadKey]);
 
   // Load the events of a selected turn that has none yet. Events streamed
   // while they load join them.
@@ -796,6 +820,7 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
           key={sessionView.id}
           session={sessionView}
           resumable={sessionView.resumable}
+          closed={sessionView.closed}
           open={sessionView.open}
           onSend={sendMessage}
           queuedTurn={queuedTurn}

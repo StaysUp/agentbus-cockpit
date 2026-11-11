@@ -286,7 +286,10 @@ const TurnPanel: React.FC<TurnPanelProps> = ({
             <div>
               <span>Status</span>
               <b>
-                <span className={turn.state === 'failed' && !turn.stopped ? 'bad' : ''}>{stateLabel(turn)}</span>
+                <span className={turn.state === 'failed' && !turn.stopped ? 'bad' : ''}>
+                  {stateLabel(turn)}
+                  {turn.state === 'failed' && turn.error ? `: ${turn.error}` : ''}
+                </span>
               </b>
             </div>
           )}

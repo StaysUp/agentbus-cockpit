@@ -25,6 +25,8 @@ interface ConvoColumnProps {
   // whether a run still holds the session open.
   resumable?: boolean;
   open?: boolean;
+  // The session was closed: it takes no more turns.
+  closed?: boolean;
   // Given only when the source can continue sessions. Rejects with the API's
   // message. agent is the saved agent picked beside Send, when it is not the
   // agent of the session's latest turn: the turn runs on it. key is the
@@ -184,6 +186,7 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
   agentName,
   resumable,
   open,
+  closed,
   onSend,
   onStop,
   stopping,
@@ -261,7 +264,11 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
   // never blocks Send. Only a session the service cannot continue does.
   const active = pending.filter((p) => p.state !== 'failed').length;
   const turnRunning = active > 0 || lastState === 'running' || !!open;
-  const why = !turnRunning && !resumable ? 'started in a terminal; continue it there' : null;
+  const why = closed
+    ? 'This conversation is closed; start a new one.'
+    : !turnRunning && !resumable
+      ? 'started in a terminal; continue it there'
+      : null;
   const canSend = !!onSend && why === null;
   // While the last turn runs, Send turns into Stop. Only a turn a run started
   // (it names its agent) can be stopped: the service refuses any other. A
@@ -398,6 +405,7 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
             >
               {session.title}
             </div>
+            {closed && <span className="c-closed dim">closed</span>}
             {onRename && (
               <button type="button" className="c-rename" aria-label="Rename" title="Rename" onClick={() => setRenaming(true)}>
                 <PencilIcon />
@@ -493,6 +501,7 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
                   )}
 
                   {/* An error stays on its turn, selected or not. */}
+                  {turn.state === 'failed' && turn.error && <div className="form-error turn-error">{turn.error}</div>}
                   {notes.replayErrors.map((msg, i) => (
                     <div key={i} className="form-error turn-error">
                       The earlier turns could not be replayed: {msg}

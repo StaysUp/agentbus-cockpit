@@ -90,6 +90,7 @@ export const SessionsColumn: React.FC<SessionsColumnProps> = ({
             </span>
           ) : (
             <span className="s-m" title={metaTitle}>
+              {s.closed ? 'closed · ' : ''}
               {formatCost(s.cost_usd) ? <Cost usd={s.cost_usd} complete={s.cost_complete} /> : `${formatTokens(s.usage)} tokens`}
               {ago ? ` · ${ago}` : ''}
             </span>

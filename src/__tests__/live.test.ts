@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { LiveDataSource } from '../data/LiveDataSource';
+import { isClosed, LiveDataSource, turnError } from '../data/LiveDataSource';
 import { CockpitEvent, SessionSummary } from '../types';
 import { ev } from './helpers';
 
@@ -381,5 +381,24 @@ describe('LiveDataSource', () => {
     expect(await src.queuedTurn('s1', 'refused')).toEqual({ ended: true, failed: true, why: 'the session is closed' });
     expect(await src.queuedTurn('s1', 'ran')).toEqual({ ended: true, failed: false, why: undefined });
     expect(await src.queuedTurn('s1', 'done')).toEqual({ ended: true, failed: false, why: undefined });
+  });
+});
+
+describe('closed and error fields, read before and after the service gives them', () => {
+  it('turnError takes a string or an object with a message, and nothing else', () => {
+    expect(turnError('the relay refused')).toBe('the relay refused');
+    expect(turnError({ message: 'quota reached', code: 429 })).toBe('quota reached');
+    expect(turnError(undefined)).toBeUndefined();
+    expect(turnError('   ')).toBeUndefined();
+    expect(turnError(42)).toBeUndefined();
+    expect(turnError(null)).toBeUndefined();
+  });
+
+  it('isClosed takes true or a time', () => {
+    expect(isClosed(true)).toBe(true);
+    expect(isClosed('2026-11-11T09:00:00Z')).toBe(true);
+    expect(isClosed(false)).toBe(false);
+    expect(isClosed('')).toBe(false);
+    expect(isClosed(undefined)).toBe(false);
   });
 });

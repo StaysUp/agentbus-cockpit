@@ -36,6 +36,18 @@ interface Snapshot {
   sessions: SessionSummary[];
 }
 
+// The service's words for why a turn failed: a string, or an object with a
+// message. Anything else, or only spaces, is no words.
+export function turnError(v: unknown): string | undefined {
+  const msg = typeof v === 'string' ? v : (v as { message?: unknown } | null)?.message;
+  return typeof msg === 'string' && msg.trim() !== '' ? msg.trim() : undefined;
+}
+
+// A session's closed field: true, or the time it was closed.
+export function isClosed(v: unknown): boolean {
+  return v === true || (typeof v === 'string' && v !== '');
+}
+
 // A listed turn as the screens read it. n is its place, oldest first; the
 // turn's own number is used when the service gives it.
 function turnRow(t: ApiTurn, n: number): Turn {
@@ -61,6 +73,7 @@ function turnRow(t: ApiTurn, n: number): Turn {
     folderRef: t.folder_ref || undefined,
     origin: turnOrigin(t.origin),
     state: t.state,
+    error: turnError((t as { error?: unknown }).error),
     stopped: t.stopped === true || t.state === 'stopped' || undefined,
     outcome: t.outcome,
     usage: t.usage ?? null,
@@ -109,8 +122,18 @@ export class LiveDataSource implements DataSource {
     const sessions: SessionSummary[] = (data.sessions || []).map((s: SessionSummary) => ({
       ...s,
       title: s.title || s.id,
+      closed: isClosed((s as { closed?: unknown }).closed) || undefined,
     }));
     return { store: data.store, seq: data.seq, sessions };
+  }
+
+  // GET /api/v0/sessions/<id>: closed on the session, or on its copy (where
+  // the service says it before the list does). A failed read is not closed.
+  async sessionClosed(sessionId: string): Promise<boolean> {
+    const res = await fetch(`${this.baseUrl}/api/v0/sessions/${encodeURIComponent(sessionId)}`, { headers: this.headers() });
+    if (!res.ok) return false;
+    const data = await res.json().catch(() => null);
+    return isClosed(data?.session?.closed) || isClosed(data?.copy?.closed);
   }
 
   async getAgents(): Promise<AgentSummary[]> {

@@ -103,6 +103,10 @@ function fakeService(opts: {
   rename?: (id: string, body: unknown) => Response | Promise<Response>;
   // GET /folders. Without it the service has no such path (404).
   folders?: unknown[];
+  // GET /sessions/<id>. Without it the service answers 404.
+  oneSession?: (id: string) => Response;
+  // Fields added to a turn's GET /turns row, by turn id.
+  turnFields?: Record<string, Record<string, unknown>>;
 }) {
   const reqs: Req[] = [];
   const enc = new TextEncoder();
@@ -145,6 +149,7 @@ function fakeService(opts: {
       return new Response(null, { status: 204 });
     }
     const sm = p.match(/^\/api\/v0\/sessions\/([^/]+)$/);
+    if (sm && method === 'GET' && opts.oneSession) return opts.oneSession(sm[1]);
     if (sm && method === 'PATCH') {
       if (opts.rename) return opts.rename(sm[1], body);
       const title = (body as { title: string }).title;
@@ -162,7 +167,7 @@ function fakeService(opts: {
       return opts.runs ? opts.runs(body) : json({ session: 'new1', turn: 'Tn', state: 'running', base_url: `${BASE}/s/new1/t/Tn` }, 202);
     if (p === '/api/v0/turns' && method === 'GET') {
       // Newest first, opts.turnPage turns a page, paged by before.
-      const all = apiTurns(state.events[url.searchParams.get('session') ?? ''] ?? []);
+      const all = apiTurns(state.events[url.searchParams.get('session') ?? ''] ?? []).map((t) => ({ ...t, ...opts.turnFields?.[t.id] }));
       const before = Number(url.searchParams.get('before') ?? Infinity);
       const older = all.filter((t) => t.started_seq < before);
       const page = older.slice(0, opts.turnPage ?? 100);
@@ -582,6 +587,66 @@ describe('The prompt box', () => {
     const r = await mount(svc);
     expect((r.container.querySelector('#c-reply textarea') as HTMLTextAreaElement).disabled).toBe(true);
     expect(r.container.querySelector('#c-reply .reply-why')?.textContent).toBe('started in a terminal; continue it there');
+    r.unmount();
+  });
+
+  it('is disabled for a closed session, which the list and the header mark', async () => {
+    const svc = fakeService({ sessions: [row('s1', { resumable: true, closed: '2026-11-11T09:00:00Z' })], events: { s1: oneTurn('s1', 'first') } });
+    const r = await mount(svc);
+    expect((r.container.querySelector('#c-reply textarea') as HTMLTextAreaElement).disabled).toBe(true);
+    expect(r.container.querySelector('#c-reply .reply-why')?.textContent).toBe('This conversation is closed; start a new one.');
+    expect(r.container.querySelector('#c-head .c-closed')?.textContent).toBe('closed');
+    expect(r.container.querySelector('#sessions [data-session="s1"] .s-m')?.textContent).toMatch(/^closed · /);
+    r.unmount();
+  });
+
+  it('marks a session closed when only GET /sessions/<id> says so, on its copy', async () => {
+    const svc = fakeService({
+      sessions: [row('s1', { resumable: true })],
+      events: { s1: oneTurn('s1', 'first') },
+      oneSession: (id) => json({ store: 'st_1', seq: 1, session: row(id), copy: { runner: 'run_1', kind: 'copy', name: id, closed: '2026-11-11T09:00:00Z' } }),
+    });
+    const r = await mount(svc);
+    expect(svc.reqs.some((q) => q.method === 'GET' && q.path === '/api/v0/sessions/s1')).toBe(true);
+    expect((r.container.querySelector('#c-reply textarea') as HTMLTextAreaElement).disabled).toBe(true);
+    expect(r.container.querySelector('#c-reply .reply-why')?.textContent).toBe('This conversation is closed; start a new one.');
+    expect(r.container.querySelector('#sessions [data-session="s1"] .s-m')?.textContent).toMatch(/^closed · /);
+    r.unmount();
+  });
+
+  it('keeps Send for a session whose copy is not closed', async () => {
+    const svc = fakeService({
+      sessions: [row('s1', { resumable: true })],
+      events: { s1: oneTurn('s1', 'first') },
+      oneSession: (id) => json({ store: 'st_1', seq: 1, session: row(id), copy: { runner: 'run_1', kind: 'copy', name: id } }),
+    });
+    const r = await mount(svc);
+    expect((r.container.querySelector('#c-reply textarea') as HTMLTextAreaElement).disabled).toBe(false);
+    expect(r.container.querySelector('#c-head .c-closed')).toBeNull();
+    r.unmount();
+  });
+
+  it("shows a failed turn's error text on the turn", async () => {
+    const svc = fakeService({
+      sessions: [row('s1', { resumable: true })],
+      events: { s1: oneTurn('s1', 'first') },
+      turnFields: { 'T1-s1': { state: 'failed', error: 'the relay refused: quota reached' } },
+    });
+    const r = await mount(svc);
+    expect(r.container.querySelector('.tb .turn-error')?.textContent).toBe('the relay refused: quota reached');
+    expect(r.container.querySelector('.tb .tb-state')?.textContent).toBe('failed');
+    r.unmount();
+  });
+
+  it('shows a failed turn with no error as failed alone', async () => {
+    const svc = fakeService({
+      sessions: [row('s1', { resumable: true })],
+      events: { s1: oneTurn('s1', 'first') },
+      turnFields: { 'T1-s1': { state: 'failed', error: '  ' } },
+    });
+    const r = await mount(svc);
+    expect(r.container.querySelector('.tb .turn-error')).toBeNull();
+    expect(r.container.querySelector('.tb .tb-state')?.textContent).toBe('failed');
     r.unmount();
   });
 
