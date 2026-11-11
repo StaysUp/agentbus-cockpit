@@ -74,10 +74,9 @@ interface ConvoColumnProps {
   // The session's "!" commands, oldest first, shown between its turns.
   commands?: ShellRun[];
   // Given when the source runs the person's shell commands: a message that
-  // starts with "!" runs the rest in the session's copy instead of going to
-  // the agent. Rejects with the API's words, such as "wait for the turn to
-  // end" while a turn runs.
-  onCommand?: (line: string) => Promise<ShellRun>;
+  // starts with "!" queues the rest in the session's copy instead of going
+  // to the agent. It resolves once queued, and rejects with the API's words.
+  onCommand?: (line: string) => Promise<void>;
 }
 
 // The harnesses' own names, for a turn no saved agent names.
@@ -236,7 +235,8 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
   const pending = keptPending ?? localPending;
   const setPending = onPending ?? setLocalPending;
   const [sendError, setSendError] = useState<string | null>(null);
-  // "!" commands sent and not ended yet, or refused with the API's words.
+  // "!" commands being sent, or refused with the API's words. A queued one
+  // is one of the session's commands.
   const [shellPending, setShellPending] = useState<{ key: string; line: string; error?: string }[]>([]);
   useEffect(() => setShellPending([]), [session.id]);
 
@@ -340,9 +340,8 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
   // agent no longer saved (the session's own, removed since) is not named:
   // the service would refuse it, and the session keeps it.
   const nameable = (id?: string) => !!id && (id === 'claude' || id === 'codex' || !!agents?.some((a) => a.id === id));
-  // Runs a "!" command. It shows at once as running; its result comes back
-  // as one of the session's commands. A refusal stays, with the API's words
-  // and Edit.
+  // Sends a "!" command. It shows at once as sending, then as one of the
+  // session's commands. A refusal stays, with the API's words and Edit.
   const runShell = async (line: string) => {
     const key = messageKey();
     setShellPending((list) => [...list, { key, line }]);
@@ -617,7 +616,7 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
             <ShellEntry
               key={p.key}
               line={p.line}
-              running={!p.error}
+              sending={!p.error}
               error={p.error}
               onEdit={() => {
                 setShellPending((list) => list.filter((x) => x.key !== p.key));

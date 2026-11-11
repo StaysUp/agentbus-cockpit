@@ -1214,7 +1214,7 @@ describe('The turn list from the API', () => {
     expect(
       svc.reqs.some((q) => {
         const p = new URLSearchParams(q.query);
-        return /\/sessions\/[^/]+\/events$/.test(q.path) && !p.has('turn') && p.get('kind') !== 'command.ran';
+        return /\/sessions\/[^/]+\/events$/.test(q.path) && !p.has('turn') && !(p.get('kind') ?? '').startsWith('command.');
       })
     ).toBe(false);
     r.unmount();

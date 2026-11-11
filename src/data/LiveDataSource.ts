@@ -13,6 +13,7 @@ import {
   SessionList,
   SessionSummary,
   ShellRun,
+  CommandQueued,
   Started,
   ApplyState,
   Turn,
@@ -21,7 +22,7 @@ import {
   TurnList,
 } from '../types';
 import { FolderInfo } from './folders';
-import { shellRun } from './shell';
+import { COMMAND_KINDS, shellRun } from './shell';
 import { ApiTurn } from './jobs';
 import { buildAgents, extractCleanPrompt, sessionGroup, turnDetail, turnOrigin } from './turns';
 
@@ -350,20 +351,19 @@ export class LiveDataSource implements DataSource {
     await this.send('PATCH', `/api/v0/sessions/${encodeURIComponent(sessionId)}`, { title });
   }
 
-  // POST /api/v0/sessions/<id>/commands: the person's shell command, run in
-  // the session's copy. 200 once it ended, with its command.ran.
-  async runCommand(sessionId: string, command: string): Promise<ShellRun> {
-    const e = await this.send<CockpitEvent>('POST', `/api/v0/sessions/${encodeURIComponent(sessionId)}/commands`, { command });
-    return shellRun(e)!;
+  // POST /api/v0/sessions/<id>/commands: the person's shell command, queued
+  // in the session's copy. 202 at once with its id; its events say the rest.
+  async runCommand(sessionId: string, command: string): Promise<CommandQueued> {
+    return this.send('POST', `/api/v0/sessions/${encodeURIComponent(sessionId)}/commands`, { command });
   }
 
-  // GET /api/v0/sessions/<id>/events?kind=command.ran: the session's shell
-  // commands, oldest first, paged by next_after until it is null.
+  // GET /api/v0/sessions/<id>/events?kind=<the command kinds>: the session's
+  // command events, oldest first, paged by next_after until it is null.
   async getCommands(sessionId: string): Promise<ShellRun[]> {
     const out: ShellRun[] = [];
     let cursor: { store: string; after: number } | null = null;
     for (;;) {
-      const params = new URLSearchParams({ kind: 'command.ran', limit: '1000' });
+      const params = new URLSearchParams({ kind: COMMAND_KINDS.join(','), limit: '1000' });
       if (cursor) {
         params.set('store', cursor.store);
         params.set('after', String(cursor.after));

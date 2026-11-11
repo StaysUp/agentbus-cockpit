@@ -14,48 +14,52 @@ function seconds(ms: number): string {
   return ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`;
 }
 
-// One "!" command in the conversation: the line, how it ended, its output
-// (folded when long) and when. running: sent, not ended yet. error: the
-// API's words when it did not run.
-export const ShellEntry: React.FC<{ run?: ShellRun; line?: string; running?: boolean; error?: string; onEdit?: () => void }> = ({
+// One "!" command in the conversation: the line, then its state. sending:
+// not answered yet. queued and running: from its events. ran: how it ended,
+// its output (folded when long) and when. failed, or error: why, in the
+// API's words; Edit (onEdit) puts a refused one back in the box.
+export const ShellEntry: React.FC<{ run?: ShellRun; line?: string; sending?: boolean; error?: string; onEdit?: () => void }> = ({
   run,
   line,
-  running,
+  sending,
   error,
   onEdit,
 }) => {
   const [open, setOpen] = useState(false);
+  const done = run?.state === 'ran' ? run : undefined;
   // stdout, then stderr, on lines of their own.
-  const out = run ? (run.stdout && run.stderr && !run.stdout.endsWith('\n') ? `${run.stdout}\n${run.stderr}` : run.stdout + run.stderr) : '';
+  const out = done ? (done.stdout && done.stderr && !done.stdout.endsWith('\n') ? `${done.stdout}\n${done.stderr}` : done.stdout + done.stderr) : '';
   const text = out.replace(/\n$/, '');
   const lines = text.split('\n');
   const long = lines.length > SHELL_FOLD_LINES;
   const shown = long && !open ? lines.slice(0, SHELL_FOLD_LINES).join('\n') : text;
-  const ok = run && run.exitCode === 0 && !run.timedOut;
+  const ok = done && done.exitCode === 0 && !done.timedOut;
+  const why = error ?? (run?.state === 'failed' ? run.error ?? 'the command did not run' : undefined);
   return (
-    <div className={`shell${error ? ' failed' : ''}`} data-shell={run?.id ?? 'pending'}>
+    <div className={`shell${why ? ' failed' : ''}`} data-shell={run?.id ?? 'pending'} data-state={run?.state ?? (error ? 'refused' : 'sending')}>
       <div className="sh-h">
         <code className="sh-line">$ {run?.line ?? line}</code>
-        {run && (
-          <span className={`sh-exit ${ok ? 'ok' : 'bad'}`}>{run.timedOut ? 'timed out' : `exit ${run.exitCode}`}</span>
-        )}
-        {running && <span className="sh-exit run">running…</span>}
-        {run && (
+        {done && <span className={`sh-exit ${ok ? 'ok' : 'bad'}`}>{done.timedOut ? 'timed out' : `exit ${done.exitCode}`}</span>}
+        {sending && <span className="sh-exit run">sending</span>}
+        {run?.state === 'queued' && <span className="sh-exit run">queued</span>}
+        {run?.state === 'running' && <span className="sh-exit run">running…</span>}
+        {run?.state === 'failed' && <span className="sh-exit bad">did not run</span>}
+        {done && (
           <span className="sh-meta dim">
-            {seconds(run.durationMs)} · {clock(run.time)}
+            {seconds(done.durationMs)} · {clock(done.time)}
           </span>
         )}
       </div>
-      {run && text !== '' && <pre className="sh-out">{shown}</pre>}
-      {run && long && (
+      {done && text !== '' && <pre className="sh-out">{shown}</pre>}
+      {done && long && (
         <button type="button" className="sh-fold" onClick={() => setOpen(!open)}>
           {open ? 'Show less' : `Show all ${lines.length} lines`}
         </button>
       )}
-      {run?.truncated && <div className="sh-note dim">Output cut at 64 KiB of {run.outputBytes} bytes.</div>}
-      {error && (
+      {done?.truncated && <div className="sh-note dim">Output cut at 64 KiB of {done.outputBytes} bytes.</div>}
+      {why && (
         <div className="tb-foot">
-          <span className="form-error">{error}</span>
+          <span className="form-error">{why}</span>
           {onEdit && (
             <button type="button" className="pend-back" onClick={onEdit}>
               Edit

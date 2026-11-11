@@ -589,14 +589,15 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
       active = false;
     };
   }, [dataSource, selectedSessionId, reloadKey]);
-  // POST /api/v0/sessions/<id>/commands: the person's "!" command. It
-  // rejects with the API's words.
+  // POST /api/v0/sessions/<id>/commands: the person's "!" command. It is
+  // shown queued at once; its events move it on. It rejects with the API's
+  // words.
   const runCommand = dataSource.runCommand
-    ? async (line: string): Promise<ShellRun> => {
+    ? async (line: string): Promise<void> => {
         if (shownId === null) throw new Error('no session is shown');
-        const run = await dataSource.runCommand!(shownId, line);
-        addCommand(run);
-        return run;
+        const q = await dataSource.runCommand!(shownId, line);
+        addCommand({ id: q.command, sessionId: q.session, state: 'queued', time: new Date().toISOString(), line,
+          exitCode: 0, stdout: '', stderr: '', outputBytes: 0, durationMs: 0 });
       }
     : undefined;
   // The messages sent from each session that are not turns yet, kept here so

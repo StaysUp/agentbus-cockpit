@@ -42,11 +42,12 @@ function finishedTurn(): CockpitEvent[] {
   ];
 }
 
-function ran(line: string, fields: Record<string, unknown> = {}): CockpitEvent {
-  return ev({
-    kind: 'command.ran',
-    command: { line, exit_code: 0, stdout: '', stderr: '', output_bytes: 0, duration_ms: 12, ...fields },
-  });
+// A command event of id, kind queued, started, ran or failed.
+function cmdEvent(kind: string, id: string, line: string, fields: Record<string, unknown> = {}, extra: Record<string, unknown> = {}): CockpitEvent {
+  return ev({ kind: `command.${kind}`, command: { id, line, ...fields }, ...extra });
+}
+function ran(line: string, fields: Record<string, unknown> = {}, id = `cmd_${line.replace(/\W/g, '')}`): CockpitEvent {
+  return cmdEvent('ran', id, line, { duration_ms: 12, ...fields });
 }
 
 function apiTurns(events: CockpitEvent[]) {
@@ -69,6 +70,7 @@ function apiTurns(events: CockpitEvent[]) {
 }
 
 function fakeService(opts: { events: CockpitEvent[]; command?: (line: string) => Response }) {
+  let nextID = 0;
   const reqs: { method: string; path: string; body?: string }[] = [];
   const enc = new TextEncoder();
   const streams: ReadableStreamDefaultController<Uint8Array>[] = [];
@@ -83,12 +85,12 @@ function fakeService(opts: { events: CockpitEvent[]; command?: (line: string) =>
     if (p === '/api/v0/turns' && method === 'GET') return json({ store: 'st_1', seq, turns: apiTurns(opts.events), next_before: null });
     if (p === '/api/v0/sessions/s1/commands' && method === 'POST') {
       const { command } = JSON.parse(init!.body as string);
-      return opts.command ? opts.command(command) : json(ran(command, { stdout: 'a\nb\n' }));
+      return opts.command ? opts.command(command) : json({ session: 's1', command: `cmd_${++nextID}`, state: 'queued' }, 202);
     }
     if (p === '/api/v0/sessions/s1/events') {
-      const kind = url.searchParams.get('kind');
+      const kinds = url.searchParams.get('kind')?.split(',');
       const turn = url.searchParams.get('turn');
-      const list = opts.events.filter((e) => (kind ? e.kind === kind : turn ? e.turn === turn : true));
+      const list = opts.events.filter((e) => (kinds ? kinds.includes(e.kind) : turn ? e.turn === turn : true));
       return json({ store: 'st_1', events: list, next_after: null });
     }
     if (p === '/api/v0/events') {
@@ -140,8 +142,10 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+const state = (el: Element) => el.getAttribute('data-state');
+
 describe('A "!" message', () => {
-  it('reads Run, runs as a command instead of a message, and shows its result after the turn', async () => {
+  it('reads Run, is queued as a command instead of a message, then shows running and its result from events', async () => {
     const svc = fakeService({ events: finishedTurn() });
     const r = await mount(svc);
     expect(goBtn(r).textContent).toBe('Send');
@@ -156,27 +160,42 @@ describe('A "!" message', () => {
     const sent = posts(svc, '/api/v0/sessions/s1/commands');
     expect(sent).toHaveLength(1);
     expect(JSON.parse(sent[0].body!)).toEqual({ command: 'ls -la' });
-    const [entry] = shells(r);
+    let [entry] = shells(r);
     expect(entry.querySelector('.sh-line')?.textContent).toBe('$ ls -la');
-    expect(entry.querySelector('.sh-exit')?.textContent).toBe('exit 0');
-    expect(entry.querySelector('.sh-exit')?.classList.contains('ok')).toBe(true);
-    expect(entry.querySelector('.sh-out')?.textContent).toBe('a\nb');
+    expect(state(entry)).toBe('queued');
+    expect(entry.querySelector('.sh-exit')?.textContent).toBe('queued');
     // After the turn's block, in the conversation.
     expect(entry.previousElementSibling?.classList.contains('tb')).toBe(true);
     expect((r.container.querySelector('#input') as HTMLTextAreaElement).value).toBe('');
-    expect(goBtn(r).textContent).toBe('Send');
+
+    await svc.push(cmdEvent('queued', 'cmd_1', 'ls -la'));
+    await svc.push(cmdEvent('started', 'cmd_1', 'ls -la'));
+    await settle();
+    [entry] = shells(r);
+    expect(shells(r)).toHaveLength(1);
+    expect(entry.querySelector('.sh-exit')?.textContent).toBe('running…');
+    await svc.push(ran('ls -la', { stdout: 'a\nb\n' }, 'cmd_1'));
+    await settle();
+    [entry] = shells(r);
+    expect(state(entry)).toBe('ran');
+    expect(entry.querySelector('.sh-exit')?.textContent).toBe('exit 0');
+    expect(entry.querySelector('.sh-exit')?.classList.contains('ok')).toBe(true);
+    expect(entry.querySelector('.sh-out')?.textContent).toBe('a\nb');
+    // A late started event does not take it back.
+    await svc.push(cmdEvent('started', 'cmd_1', 'ls -la'));
+    await settle();
+    expect(state(shells(r)[0])).toBe('ran');
     r.unmount();
   });
 
   it('shows a failed exit, stderr after stdout, and folds long output', async () => {
     const out = Array.from({ length: SHELL_FOLD_LINES + 8 }, (_, i) => `line ${i + 1}`).join('\n') + '\n';
-    const svc = fakeService({
-      events: finishedTurn(),
-      command: (line) => json(ran(line, { exit_code: 2, stdout: out, stderr: 'oops\n', output_bytes: 300000, truncated: true })),
-    });
+    const svc = fakeService({ events: finishedTurn() });
     const r = await mount(svc);
     await type(r, '!make');
     await click(goBtn(r));
+    await settle();
+    await svc.push(ran('make', { exit_code: 2, stdout: out, stderr: 'oops\n', output_bytes: 300000, truncated: true }, 'cmd_1'));
     await settle();
     const [entry] = shells(r);
     expect(entry.querySelector('.sh-exit')?.textContent).toBe('exit 2');
@@ -191,10 +210,25 @@ describe('A "!" message', () => {
     r.unmount();
   });
 
+  it('shows why a command did not run', async () => {
+    const svc = fakeService({ events: finishedTurn() });
+    const r = await mount(svc);
+    await type(r, '!ls');
+    await click(goBtn(r));
+    await settle();
+    await svc.push(cmdEvent('failed', 'cmd_1', 'ls', {}, { error: "the session's runner stopped answering while the command ran" }));
+    await settle();
+    const [entry] = shells(r);
+    expect(state(entry)).toBe('failed');
+    expect(entry.querySelector('.sh-exit')?.textContent).toBe('did not run');
+    expect(entry.querySelector('.form-error')?.textContent).toBe("the session's runner stopped answering while the command ran");
+    r.unmount();
+  });
+
   it('shows the API words when refused, and Edit puts the command back', async () => {
     const svc = fakeService({
       events: finishedTurn(),
-      command: () => json({ error: 'a turn is running in this session; wait for the turn to end' }, 409),
+      command: () => json({ error: 'this session is closed; it runs no more commands' }, 409),
     });
     const r = await mount(svc);
     await type(r, '!ls');
@@ -202,7 +236,7 @@ describe('A "!" message', () => {
     await settle();
     const [entry] = shells(r);
     expect(entry.classList.contains('failed')).toBe(true);
-    expect(entry.querySelector('.form-error')?.textContent).toBe('a turn is running in this session; wait for the turn to end');
+    expect(entry.querySelector('.form-error')?.textContent).toBe('this session is closed; it runs no more commands');
     await click(entry.querySelector('.pend-back'));
     expect((r.container.querySelector('#input') as HTMLTextAreaElement).value).toBe('!ls');
     expect(shells(r)).toHaveLength(0);
@@ -220,19 +254,19 @@ describe('A "!" message', () => {
 });
 
 describe('Commands already run', () => {
-  it('are read on load, placed between turns, and a streamed one shows once', async () => {
+  it('are read on load by their four kinds, placed between turns, one entry each', async () => {
     const events = finishedTurn();
-    events.push(ran('git status', { stdout: 'clean\n' }));
+    events.push(cmdEvent('queued', 'cmd_9', 'git status'), cmdEvent('started', 'cmd_9', 'git status'), ran('git status', { stdout: 'clean\n' }, 'cmd_9'));
+    events.push(cmdEvent('queued', 'cmd_10', 'sleep 9'));
     const svc = fakeService({ events });
     const r = await mount(svc);
-    expect(svc.reqs.some((q) => q.path === '/api/v0/sessions/s1/events?kind=command.ran&limit=1000')).toBe(true);
-    expect(shells(r).map((s) => s.querySelector('.sh-line')?.textContent)).toEqual(['$ git status']);
-    const next = ran('ls');
-    await svc.push(next);
-    await settle();
-    await svc.push({ ...next });
-    await settle();
-    expect(shells(r).map((s) => s.querySelector('.sh-line')?.textContent)).toEqual(['$ git status', '$ ls']);
+    expect(
+      svc.reqs.some((q) => q.path === '/api/v0/sessions/s1/events?kind=command.queued%2Ccommand.started%2Ccommand.ran%2Ccommand.failed&limit=1000')
+    ).toBe(true);
+    expect(shells(r).map((s) => [s.querySelector('.sh-line')?.textContent, state(s)])).toEqual([
+      ['$ git status', 'ran'],
+      ['$ sleep 9', 'queued'],
+    ]);
     r.unmount();
   });
 
@@ -254,18 +288,20 @@ describe('shell helpers', () => {
     expect(bangCommand('!')).toBe('');
   });
 
-  it('shellRun reads command.ran and nothing else', () => {
+  it('shellRun reads the command kinds and nothing else', () => {
     expect(shellRun(ev({ kind: 'turn.started' }))).toBeNull();
-    const r = shellRun(ran('ls', { exit_code: 1, timed_out: true }))!;
-    expect(r.line).toBe('ls');
+    const r = shellRun(ran('ls', { exit_code: 1, timed_out: true }, 'cmd_1'))!;
+    expect(r.id).toBe('cmd_1');
+    expect(r.state).toBe('ran');
     expect(r.exitCode).toBe(1);
     expect(r.timedOut).toBe(true);
+    expect(shellRun(cmdEvent('started', 'cmd_1', 'ls'))!.state).toBe('running');
   });
 
   it('commandsAfter places each command after the last turn that started before it, by time', () => {
     const t = (id: string, startedAt: string) => ({ id, startedAt }) as Turn;
     const turns = [t('T1', '2026-11-05T09:00:00Z'), t('T2', '2026-11-05T09:00:10Z')];
-    const at = (time: string) => ({ ...shellRun(ran('x'))!, time });
+    const at = (time: string) => ({ ...shellRun(ran('x'))!, time, queuedAt: time });
     const placed = commandsAfter(turns, [at('2026-11-05T08:59:59Z'), at('2026-11-05T09:00:05.5Z'), at('2026-11-05T09:00:10.25Z')]);
     expect(placed.get(-1)).toHaveLength(1);
     expect(placed.get(0)).toHaveLength(1);

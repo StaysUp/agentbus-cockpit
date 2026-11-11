@@ -165,7 +165,7 @@ describe('Connect screen', () => {
     // whole session's.
     const eventReads = svc.calls.map((c) => new URL(c.url)).filter((u) => u.pathname === '/api/v0/sessions/live-abc/events');
     expect(eventReads.length).toBeGreaterThan(0);
-    expect(eventReads.every((u) => u.searchParams.get('turn') === 'T1' || u.searchParams.get('kind') === 'command.ran')).toBe(true);
+    expect(eventReads.every((u) => u.searchParams.get('turn') === 'T1' || (u.searchParams.get('kind') ?? '').startsWith('command.'))).toBe(true);
     expect(svc.calls.every((c) => c.auth === `Bearer ${TOKEN}`)).toBe(true);
     r.unmount();
   });

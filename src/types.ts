@@ -37,15 +37,20 @@ export interface CockpitEvent {
   [key: string]: unknown;
 }
 
-// A shell command the person ran in a session's copy with "!", from its
-// command.ran event (POST /api/v0/sessions/<id>/commands). It sits between
-// turns and starts none.
+// A shell command the person ran in a session's copy with "!"
+// (POST /api/v0/sessions/<id>/commands), from its events: command.queued,
+// command.started, then command.ran or command.failed. It sits between turns
+// and starts none.
 export interface ShellRun {
+  // The command's id (cmd_…), as its events carry it.
   id: string;
   sessionId: string;
-  // When it ended.
+  state: 'queued' | 'running' | 'ran' | 'failed';
+  // When its latest event happened, and when it was queued.
   time: string;
+  queuedAt?: string;
   line: string;
+  // With state ran:
   exitCode: number;
   timedOut?: boolean;
   stdout: string;
@@ -54,6 +59,15 @@ export interface ShellRun {
   outputBytes: number;
   truncated?: boolean;
   durationMs: number;
+  // With state failed: why, in the API's words.
+  error?: string;
+}
+
+// The answer to POST /api/v0/sessions/<id>/commands: the command's id.
+export interface CommandQueued {
+  session: string;
+  command: string;
+  state: string;
 }
 
 export interface ModelCallPair {
@@ -447,9 +461,11 @@ export interface DataSource {
     req: { prompt: string; read_only?: boolean; model?: string; agent?: string; idempotency_key?: string }
   ): Promise<Started>;
   // A source that runs the person's shell commands has these: one command
-  // run in the session's copy ("!"), and the commands run so far, oldest
-  // first. Each rejects with an Error in the API's own words.
-  runCommand?(sessionId: string, command: string): Promise<ShellRun>;
+  // queued in the session's copy ("!"), answered at once with its id, and
+  // the session's command events so far, oldest first, each as a ShellRun in
+  // the state that event says. Each rejects with an Error in the API's own
+  // words.
+  runCommand?(sessionId: string, command: string): Promise<CommandQueued>;
   getCommands?(sessionId: string): Promise<ShellRun[]>;
   // A source that can name sessions has this: a new title for one. Rejects
   // with an Error in the API's own words.
