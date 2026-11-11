@@ -311,7 +311,7 @@ describe('the turn panel', () => {
       '2 tool calls · click a card to open it',
     ]);
     expect(sums[5]).toMatch(/^Coming next · /);
-    expect(sums[6]).toMatch(/^Coming next · /);
+    expect(sums[6]).toBe('Off · no AgentBus tools in this turn');
     a.r.unmount();
   });
 

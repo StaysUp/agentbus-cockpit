@@ -603,6 +603,12 @@ label.nd-check > span { font-size: max(11px, 0.75rem); color: var(--ink); }
 
 /* How the turn continued, under the turn strip: the chat leaves it out. */
 .turn-cont { margin-top: 0.6rem; font-size: 0.775rem; color: var(--ink2); }
+.turn-tools { display: block; background: none; border: 0; padding: 0; font: inherit; font-size: 0.775rem; color: var(--ink2); cursor: pointer; text-align: left; }
+.turn-tools:hover { text-decoration: underline; }
+.mcp .sub-h { margin-top: 0.875rem; }
+.mcp .sub-h:first-child { margin-top: 0.25rem; }
+.mcp-t td:first-child { width: 40%; white-space: nowrap; }
+.mcp-note { margin: 0 0 0.25rem; font-size: 0.75rem; }
 
 /* Live status of a running turn (agentbus-notes/plans/LIVE_STATUS.md). The
    running blue and its spinner are the mockup's. One line, fixed height: it

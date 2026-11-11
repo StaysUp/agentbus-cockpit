@@ -24,6 +24,8 @@ import { QueueView } from '../data/useJobs';
 import { ReviewBar, TurnTab } from './Jobs';
 import { reviewUI } from '../features';
 import { folderLabel, useFolders } from '../data/folders';
+import { Toolbox, toolboxSummary, turnToolbox } from '../data/toolbox';
+import { McpTab } from './McpTab';
 
 interface RightPanelProps {
   turn: Turn | null;
@@ -235,6 +237,9 @@ const TurnPanel: React.FC<TurnPanelProps> = ({
   // How the turn continued, from its turn.started: the chat no longer shows it.
   const continued = continuedLine(turn.detail, session?.turnsList ?? []);
 
+  // The turn's MCP tools, from its record: the header's line and the MCP tab.
+  const box = turn.detail ? turnToolbox(turn.detail) : null;
+
   // The turn's row in the turn list, and its reviews, with the queue.
   const row = queue?.turnOf(turn.sessionId, turn.id);
   const reviews = queue ? queue.reviewsOf(turn.id) : [];
@@ -309,6 +314,11 @@ const TurnPanel: React.FC<TurnPanelProps> = ({
           )}
         </div>
         {continued && <div className="turn-cont">{continued}</div>}
+        {box && (
+          <button className="turn-cont turn-tools" onClick={() => setActiveTab('mcp')} title="Open the MCP tab">
+            {toolboxSummary(box)}
+          </button>
+        )}
         {showJobs && onReview && (
           <ReviewBar
             key={turn.id}
@@ -572,7 +582,7 @@ const TurnPanel: React.FC<TurnPanelProps> = ({
       </div>
 
       <div id="d-body">
-        {tab !== 'cicd' && <TabSum tab={tab} turn={turn} detail={detail} />}
+        {tab !== 'cicd' && <TabSum tab={tab} turn={turn} detail={detail} box={box} />}
 
         {tab === 'cicd' && <TurnTab turn={turn} row={row} reviews={reviews} onStop={onStopQueued} />}
 
@@ -714,6 +724,8 @@ const TurnPanel: React.FC<TurnPanelProps> = ({
           />
         )}
 
+        {tab === 'mcp' && <McpTab box={box} running={!!live && turn.state === 'running'} />}
+
         {tab === 'prompt' && (
           <div>
             <textarea
@@ -778,9 +790,14 @@ const TURN_TABS: [TabKey, string][] = [
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
 // Every turn tab opens with one summary line in one style: a count or a
-// state in bold, then plain facts. Skills and MCP say what they will show:
-// the API does not offer that data yet.
-export const TabSum: React.FC<{ tab: TabKey; turn: Turn; detail: TurnDetail }> = ({ tab, turn, detail }) => {
+// state in bold, then plain facts. Skills says what it will show: the API
+// does not offer that data yet.
+export const TabSum: React.FC<{ tab: TabKey; turn: Turn; detail: TurnDetail; box?: Toolbox | null }> = ({
+  tab,
+  turn,
+  detail,
+  box,
+}) => {
   const facts: React.ReactNode[] = [];
   let head: React.ReactNode;
   switch (tab) {
@@ -816,10 +833,19 @@ export const TabSum: React.FC<{ tab: TabKey; turn: Turn; detail: TurnDetail }> =
       head = 'Coming next';
       facts.push('the skills this agent can use, and which ones this turn loaded');
       break;
-    case 'mcp':
-      head = 'Coming next';
-      facts.push('the MCP servers this agent connects to, and the calls this turn made to each');
+    case 'mcp': {
+      if (!box) {
+        head = 'Off';
+        facts.push('no AgentBus tools in this turn');
+        break;
+      }
+      head = plural(box.agentbus.length, 'AgentBus tool');
+      facts.push(`${box.agentbus.filter((t) => t.uses > 0).length} used`);
+      if (box.hidden.length) facts.push(`${box.hidden.length} hidden`);
+      if (box.other.length) facts.push(plural(box.other.length, 'other server'));
+      facts.push('what the turn could call; the Tools tab shows each call');
       break;
+    }
     case 'cicd':
       return null;
   }
