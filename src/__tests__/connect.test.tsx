@@ -161,10 +161,11 @@ describe('Connect screen', () => {
     const paths = svc.calls.map((c) => new URL(c.url).pathname);
     expect(paths).toContain('/api/v0/events');
     expect(paths).toContain('/api/v0/turns');
-    // One turn's events, never the whole session's.
+    // One turn's events, or only the session's "!" commands, never the
+    // whole session's.
     const eventReads = svc.calls.map((c) => new URL(c.url)).filter((u) => u.pathname === '/api/v0/sessions/live-abc/events');
     expect(eventReads.length).toBeGreaterThan(0);
-    expect(eventReads.every((u) => u.searchParams.get('turn') === 'T1')).toBe(true);
+    expect(eventReads.every((u) => u.searchParams.get('turn') === 'T1' || (u.searchParams.get('kind') ?? '').startsWith('command.'))).toBe(true);
     expect(svc.calls.every((c) => c.auth === `Bearer ${TOKEN}`)).toBe(true);
     r.unmount();
   });

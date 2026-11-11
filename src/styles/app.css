@@ -432,16 +432,27 @@ tr.ev-open > td { background: #FBFBFA; border-bottom: 1px solid var(--line); pad
 /* The Connect step of a subscription agent: the person's own subscription,
    kept on control for their runners. */
 .connect-step { display: flex; flex-direction: column; gap: 0.375rem; padding: 0.5rem 0.625rem; border: 1px solid var(--line); border-radius: 0.375rem; }
-.cs-head { display: flex; align-items: center; gap: 0.5rem; font-size: max(11px, 0.6875rem); color: var(--ink3); }
+.cs-head { display: flex; flex-wrap: wrap; align-items: center; gap: 0.375rem 0.5rem; font-size: max(11px, 0.6875rem); color: var(--ink3); }
 .cs-status { padding: 0 0.375rem; border-radius: 0.25rem; }
 .cs-status.ok { color: var(--green); background: var(--green-bg); }
 .cs-status.off { color: var(--amber); background: var(--amber-bg); }
+.cs-head > span { white-space: nowrap; }
+.cs-until { color: var(--ink3); }
+.connect-step > .nd-note { margin-top: 0; }
+.cs-btn { display: inline-flex; align-items: center; height: 1.5rem; padding: 0 0.5rem; border-radius: 0.3125rem; border: 1px solid var(--line2); background: var(--panel); color: var(--ink2); font-size: max(11px, 0.6875rem); font-weight: 600; text-decoration: none; white-space: nowrap; }
+.cs-btn:hover:not(:disabled) { color: var(--ink); border-color: var(--ink3); }
+.cs-btn:disabled { opacity: 0.55; cursor: default; }
 .cs-head .cs-connect { margin-left: auto; }
 .cs-on { align-self: flex-start; }
-.cs-login { font-family: var(--mono); font-size: max(11px, 0.6875rem); max-height: 10rem; overflow-y: auto; white-space: pre-wrap; word-break: break-all; color: var(--ink2); }
-.cs-done { color: var(--green); }
+.cs-login { display: flex; flex-direction: column; align-items: flex-start; gap: 0.5rem; font-size: max(11px, 0.75rem); color: var(--ink2); }
+.cs-open { color: #fff; background: var(--ink); border-color: var(--ink); }
+.connect-step .cs-btn.cs-open:hover { color: #fff; border-color: var(--ink); }
+.cs-step { display: flex; flex-direction: column; gap: 0.25rem; align-self: stretch; }
+.cs-step .nd-note { margin-top: 0; }
+.cs-code { font-family: var(--mono); font-size: 0.875rem; letter-spacing: 0.04em; color: var(--ink); }
 .cs-input { display: flex; gap: 0.375rem; }
 .cs-input input { flex: 1; font-family: var(--mono); }
+.cs-input input:disabled { opacity: 0.6; }
 .nd-link { padding: 0; color: var(--ink2); text-decoration: underline; font-size: inherit; }
 .modal-back { position: fixed; inset: 0; background: rgba(20,20,20,.18); display: flex; align-items: center; justify-content: center; z-index: 50; }
 .new-dialog { width: 24rem; max-width: calc(100vw - 1.5rem); background: var(--panel); border: 1px solid var(--line2); border-radius: 0.625rem; padding: 1rem 1rem; display: flex; flex-direction: column; gap: 0.625rem; box-shadow: 0 0.5rem 2rem rgba(20,20,20,.12); }
@@ -774,3 +785,33 @@ label.nd-check > span { font-size: max(11px, 0.75rem); color: var(--ink); }
 .ch-diff, .ch-cmds pre { margin: 0.1875rem 0 0; padding: 0.375rem 0.5rem; background: #F6F6F3; border-radius: 0.3125rem; font-size: max(11px, 0.6875rem); line-height: 1rem; overflow-x: auto; white-space: pre; }
 .ch-cmds summary { font-size: max(11px, 0.6875rem); color: var(--ink3); cursor: pointer; }
 .ch-conflicts { margin: 0.25rem 0 0; padding-left: 1rem; }
+
+/* The runners at the foot of the Agents column: a dot, the name, when last seen, the harnesses. */
+.runners { display: flex; flex-direction: column; gap: 0.25rem; }
+.runners .col-lab { padding: 0.5rem 0 0.125rem; }
+.runner { display: flex; align-items: flex-start; gap: 0.5rem; padding: 0.25rem 0; }
+.runner .live, .runner .gone { margin-top: 0.4rem; width: 0.4375rem; height: 0.4375rem; }
+.gone { border-radius: 50%; background: var(--ink3); opacity: .45; display: inline-block; flex: none; }
+.runner .ag-t b { font-size: 0.8125rem; display: flex; align-items: baseline; gap: 0.375rem; }
+.runner .rn-role { font-size: max(11px, 0.6875rem); font-weight: 500; color: var(--ink3); }
+.runner .rn-h { white-space: normal; overflow-wrap: anywhere; }
+.runners-err, .runners-none { font-size: max(11px, 0.75rem); margin: 0; }
+
+/* What AgentBus added to a turn, and the request blocks that hold it. */
+.ctx-tag.ab { background: var(--amber-bg); color: var(--amber); }
+.ctx-added-note { margin: 0 0 0.375rem; }
+.ctx-added-note .ctx-tag { margin-left: 0; }
+
+/* ---------- "!" shell commands ---------- */
+.shell { margin: 0 -0.625rem 1rem; padding: 0.375rem 0.75rem 0.5rem; border-left: 3px solid var(--line2); background: var(--gray-bg); border-radius: 0 0.5rem 0.5rem 0; font-size: 0.875rem; cursor: default; }
+.shell.failed { border-left-color: var(--amber); }
+.sh-h { display: flex; align-items: baseline; gap: 0.625rem; flex-wrap: wrap; }
+.sh-line { font-family: var(--mono); font-weight: 600; overflow-wrap: anywhere; }
+.sh-exit { font-size: max(11px, 0.7188rem); font-weight: 650; white-space: nowrap; }
+.sh-exit.ok { color: var(--green); }
+.sh-exit.bad { color: var(--bad); }
+.sh-exit.run { color: var(--blue); }
+.sh-meta { font-size: max(11px, 0.7188rem); margin-left: auto; white-space: nowrap; }
+.sh-out { margin: 0.375rem 0 0; font-family: var(--mono); font-size: 0.8125rem; line-height: 1.4; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 24rem; overflow: auto; color: var(--ink2); }
+.sh-fold { margin-top: 0.25rem; font-size: max(11px, 0.75rem); color: var(--blue); }
+.sh-note { font-size: max(11px, 0.7188rem); margin-top: 0.25rem; }

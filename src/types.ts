@@ -37,6 +37,39 @@ export interface CockpitEvent {
   [key: string]: unknown;
 }
 
+// A shell command the person ran in a session's copy with "!"
+// (POST /api/v0/sessions/<id>/commands), from its events: command.queued,
+// command.started, then command.ran or command.failed. It sits between turns
+// and starts none.
+export interface ShellRun {
+  // The command's id (cmd_…), as its events carry it.
+  id: string;
+  sessionId: string;
+  state: 'queued' | 'running' | 'ran' | 'failed';
+  // When its latest event happened, and when it was queued.
+  time: string;
+  queuedAt?: string;
+  line: string;
+  // With state ran:
+  exitCode: number;
+  timedOut?: boolean;
+  stdout: string;
+  stderr: string;
+  // All it wrote; truncated says some of it was cut.
+  outputBytes: number;
+  truncated?: boolean;
+  durationMs: number;
+  // With state failed: why, in the API's words.
+  error?: string;
+}
+
+// The answer to POST /api/v0/sessions/<id>/commands: the command's id.
+export interface CommandQueued {
+  session: string;
+  command: string;
+  state: string;
+}
+
 export interface ModelCallPair {
   requested: CockpitEvent;
   responded?: CockpitEvent;
@@ -227,6 +260,27 @@ export interface Harness {
   access?: AccessOption[];
 }
 
+// One harness as one runner last probed it (GET /api/v0/runners).
+export interface RunnerHarness {
+  name: string;
+  found: boolean;
+  version?: string;
+  signed_in?: boolean;
+}
+
+// One runner or connector control knows, from GET /api/v0/runners.
+export interface RunnerInfo {
+  id: string;
+  name: string;
+  // runner runs turns; connector owns folders.
+  role: string;
+  // It asked control for work in the last minute.
+  online: boolean;
+  last_seen: string;
+  labels: string[];
+  harnesses: RunnerHarness[];
+}
+
 // What a person sets on a saved agent (POST and PUT /api/v0/agents).
 export interface AgentFields {
   name: string;
@@ -257,6 +311,7 @@ export interface RunRequest {
   prompt: string;
   model?: string;
   read_only?: boolean;
+  idempotency_key?: string;
 }
 
 // GET /api/v0/turns/<id>/diff, as the cockpit reads it: what one turn
@@ -358,10 +413,14 @@ export interface CallContext {
 export interface ConnectView {
   harness: string;
   state: 'running' | 'connected' | 'failed';
+  // While it runs: the links the login printed. Empty once it ended.
   output: string[];
-  // A one-time code to enter at the link (codex's device login): nothing is
-  // typed back here.
+  // While it runs: a one-time code to enter at the link (codex's device
+  // login); nothing is typed back here.
   code?: string;
+  // While it runs: the login waits for the code the sign-in page shows
+  // (claude, agy).
+  paste: boolean;
   error?: string;
 }
 export interface SubscriptionState {
@@ -402,6 +461,9 @@ export interface DataSource {
   // The folders the runners own (GET /api/v0/folders), each by its
   // reference and name.
   listFolders?(): Promise<FolderInfo[]>;
+  // The runners and connectors control knows (GET /api/v0/runners). null
+  // when the service has no such route.
+  listRunners?(): Promise<RunnerInfo[] | null>;
   listAgents?(): Promise<SavedAgent[]>;
   // Where a queued message's turn stands, by the session and turn
   // POST /api/v0/turns answered with.
@@ -427,6 +489,13 @@ export interface DataSource {
     sessionId: string,
     req: { prompt: string; read_only?: boolean; model?: string; agent?: string; idempotency_key?: string }
   ): Promise<Started>;
+  // A source that runs the person's shell commands has these: one command
+  // queued in the session's copy ("!"), answered at once with its id, and
+  // the session's command events so far, oldest first, each as a ShellRun in
+  // the state that event says. Each rejects with an Error in the API's own
+  // words.
+  runCommand?(sessionId: string, command: string): Promise<CommandQueued>;
+  getCommands?(sessionId: string): Promise<ShellRun[]>;
   // A source that can name sessions has this: a new title for one. Rejects
   // with an Error in the API's own words.
   renameSession?(sessionId: string, title: string): Promise<void>;
