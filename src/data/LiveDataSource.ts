@@ -2,6 +2,7 @@ import {
   QueuedTurn,
   ConnectView,
   SubscriptionList,
+  SubscriptionState,
   AgentSummary,
   CallContext,
   CockpitEvent,
@@ -90,6 +91,7 @@ export function connectView(data: Partial<ConnectView>): ConnectView {
     state: data.state ?? 'failed',
     output: Array.isArray(data.output) ? data.output : [],
     code: data.code,
+    paste: data.paste === true,
     error: data.error,
   };
 }
@@ -294,7 +296,8 @@ export class LiveDataSource implements DataSource {
     if (res.status === 404) return null;
     if (!res.ok) throw new Error(await apiError(res));
     const data = await res.json();
-    return { on: data.on === true, subscriptions: Array.isArray(data.subscriptions) ? data.subscriptions : [] };
+    const subs: SubscriptionState[] = Array.isArray(data.subscriptions) ? data.subscriptions : [];
+    return { on: data.on === true, subscriptions: subs.map((s) => (s.connect ? { ...s, connect: connectView(s.connect) } : s)) };
   }
 
   // POST /api/v0/subscriptions/<harness>/connect: 202 with the login started

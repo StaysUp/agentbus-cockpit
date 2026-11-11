@@ -358,10 +358,14 @@ export interface CallContext {
 export interface ConnectView {
   harness: string;
   state: 'running' | 'connected' | 'failed';
+  // While it runs: the links the login printed. Empty once it ended.
   output: string[];
-  // A one-time code to enter at the link (codex's device login): nothing is
-  // typed back here.
+  // While it runs: a one-time code to enter at the link (codex's device
+  // login); nothing is typed back here.
   code?: string;
+  // While it runs: the login waits for the code the sign-in page shows
+  // (claude, agy).
+  paste: boolean;
   error?: string;
 }
 export interface SubscriptionState {
