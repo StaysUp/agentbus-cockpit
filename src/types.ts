@@ -278,6 +278,7 @@ export interface RunRequest {
   prompt: string;
   model?: string;
   read_only?: boolean;
+  idempotency_key?: string;
 }
 
 // GET /api/v0/turns/<id>/diff, as the cockpit reads it: what one turn
