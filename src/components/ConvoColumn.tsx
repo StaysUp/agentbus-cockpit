@@ -2,13 +2,15 @@ import React, { useEffect, useRef, useState } from 'react';
 import { reviewUI } from '../features';
 import { liveStatus, LiveTurn } from '../data/liveStatus';
 import { turnNotes } from '../data/turns';
-import { Level, QueuedTurn, SavedAgent, SessionDetail, Started, Turn } from '../types';
+import { Level, QueuedTurn, SavedAgent, SessionDetail, ShellRun, Started, Turn } from '../types';
 import { useNow } from '../utils/useNow';
 import { formatCost, formatTokens, stateLabel, turnStateClass } from '../utils/format';
 import { Cost } from './Cost';
 import { folderLabel, sessionFolderRef, useFolders } from '../data/folders';
 import { LiveLine } from './LiveLine';
 import { PencilIcon, TitleEdit } from './TitleEdit';
+import { ShellEntry } from './ShellEntry';
+import { bangCommand, commandsAfter } from '../data/shell';
 
 interface ConvoColumnProps {
   session: SessionDetail;
@@ -71,6 +73,12 @@ interface ConvoColumnProps {
   onRename?: (sessionId: string, title: string) => Promise<void>;
   // Given when the source keeps each turn's diff: opens a turn's changes.
   onChanges?: (turn: Turn) => void;
+  // The session's "!" commands, oldest first, shown between its turns.
+  commands?: ShellRun[];
+  // Given when the source runs the person's shell commands: a message that
+  // starts with "!" queues the rest in the session's copy instead of going
+  // to the agent. It resolves once queued, and rejects with the API's words.
+  onCommand?: (line: string) => Promise<void>;
 }
 
 // The harnesses' own names, for a turn no saved agent names.
@@ -216,6 +224,8 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
   onPending,
   onRename,
   onChanges,
+  commands,
+  onCommand,
 }) => {
   // A turn's folder is shown when it is not the session's: by name when the
   // service lists its reference.
@@ -240,6 +250,10 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
   const pending = keptPending ?? localPending;
   const setPending = onPending ?? setLocalPending;
   const [sendError, setSendError] = useState<string | null>(null);
+  // "!" commands being sent, or refused with the API's words. A queued one
+  // is one of the session's commands.
+  const [shellPending, setShellPending] = useState<{ key: string; line: string; error?: string }[]>([]);
+  useEffect(() => setShellPending([]), [session.id]);
 
   // A pending copy goes once its turn is listed: the turn that carries its
   // key, or, from a source that keeps no keys, any turn newer than the send.
@@ -288,7 +302,9 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
   const lastStopping = !!lastTurn && lastState === 'running' && !!stopping?.has(lastTurn.id);
   // While the last turn runs, an empty box shows Stop; typing turns it into
   // Queue, which sends the message to wait behind the running turn.
-  const sendLabel = active > 0 || lastState === 'running' ? 'Queue' : 'Send';
+  // A message that starts with "!" is a shell command: Send reads Run.
+  const bang = bangCommand(draft);
+  const sendLabel = bang !== null ? 'Run' : active > 0 || lastState === 'running' ? 'Queue' : 'Send';
   const canStop = !!onStop && !!lastTurn?.agent && lastState === 'running' && (lastStopping || !finishing);
   const showStop = canStop && draft.trim() === '';
 
@@ -335,8 +351,26 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
   // agent no longer saved (the session's own, removed since) is not named:
   // the service would refuse it, and the session keeps it.
   const nameable = (id?: string) => !!id && (id === 'claude' || id === 'codex' || !!agents?.some((a) => a.id === id));
+  // Sends a "!" command. It shows at once as sending, then as one of the
+  // session's commands. A refusal stays, with the API's words and Edit.
+  const runShell = async (line: string) => {
+    const key = messageKey();
+    setShellPending((list) => [...list, { key, line }]);
+    setSendError(null);
+    setDraft('');
+    try {
+      await onCommand!(line);
+      setShellPending((list) => list.filter((x) => x.key !== key));
+    } catch (err) {
+      setShellPending((list) => list.map((x) => (x.key === key ? { ...x, error: (err as Error).message } : x)));
+    }
+  };
   const send = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (bang !== null) {
+      if (canSend && onCommand && bang !== '') await runShell(bang);
+      return;
+    }
     const prompt = draft;
     if (!canSend || prompt.trim() === '') return;
     const p: Pending = {
@@ -393,6 +427,9 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
     };
   }, [waiting, queuedTurn, sessionId]);
 
+  // Each "!" command goes after the turn that started before it.
+  const placed = commandsAfter(session.turnsList, commands ?? []);
+
   // The chat is prompts and replies, under one header line per turn. A turn's
   // calls and how it continued are in the panel, so opening a turn never
   // makes the chat move. An error line is the exception: it stays on its turn.
@@ -428,6 +465,7 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
 
       <div id="c-msgs">
         <div className="c-in">
+          {placed.get(-1)?.map((r) => <ShellEntry key={r.id} run={r} />)}
           {session.turnsList.map((turn, ti) => {
             const isSelected = selectedTurn?.id === turn.id;
             // The selected turn carries the mark at the turn and call levels.
@@ -553,6 +591,7 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
                     )}
                   </div>
                 </div>
+                {placed.get(ti)?.map((r) => <ShellEntry key={r.id} run={r} />)}
               </React.Fragment>
             );
           })}
@@ -584,6 +623,19 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
               )}
             </div>
           ))}
+          {shellPending.map((p) => (
+            <ShellEntry
+              key={p.key}
+              line={p.line}
+              sending={!p.error}
+              error={p.error}
+              onEdit={() => {
+                setShellPending((list) => list.filter((x) => x.key !== p.key));
+                setDraft(`!${p.line}`);
+                inputRef.current?.focus();
+              }}
+            />
+          ))}
         </div>
       </div>
 
@@ -593,7 +645,7 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
             id="input"
             ref={inputRef}
             rows={Math.min(8, draft.split('\n').length)}
-            placeholder={`Message ${nextName || agentName || 'the agent'}…`}
+            placeholder={`Message ${nextName || agentName || 'the agent'}…${onCommand ? ' Start with ! to run a command.' : ''}`}
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => {
@@ -627,7 +679,7 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
             </button>
           ) : (
             <span className="go-split">
-              <button type="submit" className="go" disabled={!canSend || draft.trim() === ''}>
+              <button type="submit" className="go" disabled={!canSend || draft.trim() === '' || (bang !== null && (!onCommand || bang === ''))}>
                 {sendLabel}
               </button>
               {/* How to send. Fork (run in parallel from the same point) is
@@ -640,7 +692,7 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
                 disabled={!canSend}
                 onChange={() => undefined}
               >
-                <option value="send">{sendLabel === 'Queue' ? 'Queue: run after the running turn' : 'Send'}</option>
+                <option value="send">{sendLabel === 'Queue' ? 'Queue: run after the running turn' : sendLabel === 'Run' ? 'Run in the session folder' : 'Send'}</option>
                 <option value="fork" disabled>
                   Fork: run in parallel from here (coming soon)
                 </option>
