@@ -540,6 +540,8 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
   }, [dataSource, agentsDialog, agentsKey]);
   // Removes a saved agent from its row, then lists the agents again. A
   // refusal throws the API's words for the row to show.
+  // The runners, for the list at the foot of the Agents column.
+  const loadRunners = useMemo(() => (dataSource.listRunners ? () => dataSource.listRunners!() : undefined), [dataSource]);
   const removeAgent = async (id: string) => {
     await dataSource.removeAgent!(id);
     setAgentsKey((k) => k + 1);
@@ -834,6 +836,7 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
         onAddAgent={canKeepAgents ? () => setAgentsDialog({}) : undefined}
         onEditAgent={canKeepAgents && dataSource.updateAgent ? (a) => a.saved && setAgentsDialog({ edit: a.saved }) : undefined}
         onRemoveAgent={canKeepAgents && dataSource.removeAgent ? removeAgent : undefined}
+        loadRunners={loadRunners}
       />
 
       <SessionsColumn
