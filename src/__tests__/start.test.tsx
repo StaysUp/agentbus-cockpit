@@ -271,8 +271,8 @@ describe('New session', () => {
     expect(options[0].disabled).toBe(false);
     expect(options[1].disabled).toBe(true);
     expect(options[1].textContent).toContain('not installed');
-    // An agent and a folder, and the first message; nothing else to choose.
-    expect(Array.from(dialog.querySelectorAll('input, select, textarea')).map((e) => e.getAttribute('name'))).toEqual(['agent', 'folder', 'prompt']);
+    // An agent and a folder, then an optional name and first message.
+    expect(Array.from(dialog.querySelectorAll('input, select, textarea')).map((e) => e.getAttribute('name'))).toEqual(['agent', 'folder', 'name', 'prompt']);
     expect(dialog.textContent).toContain('Claude Code · default model · subscription');
     r.unmount();
   });
@@ -350,7 +350,7 @@ describe('New session', () => {
       sessions: [row('s1')],
       events: { s1: oneTurn('s1', 'hi') },
       agents: AGENTS,
-      runs: () => json({ error: 'folder is not an existing directory' }, 400),
+      runs: () => json({ error: 'no saved agent named claude' }, 400),
     });
     const r = await mount(svc);
     await click(r.container.querySelector('#sessions button.new-session'));
@@ -359,7 +359,7 @@ describe('New session', () => {
     await setValue(dialog.querySelector('input[name="folder"]'), '/nope');
     await setValue(dialog.querySelector('textarea[name="prompt"]'), 'x');
     await submitForm(dialog);
-    expect(r.container.querySelector('.new-dialog .form-error')?.textContent).toBe('folder is not an existing directory');
+    expect(r.container.querySelector('.new-dialog .form-error')?.textContent).toBe('no saved agent named claude');
     expect(localStorage.getItem('agentbus.folders')).toBeNull();
     r.unmount();
   });
@@ -546,6 +546,146 @@ describe('The started turn', () => {
     const states = Array.from(r.container.querySelectorAll('#convo .tb')).map((t) => t.querySelector('.tb-state')?.textContent ?? '');
     expect(states).toEqual(['', 'failed']);
     expect((r.container.querySelector('#c-reply textarea') as HTMLTextAreaElement).disabled).toBe(false);
+    r.unmount();
+  });
+});
+
+describe('New session: name, no first message, folders', () => {
+  const patches = (svc: { reqs: Req[] }) => svc.reqs.filter((q) => q.method === 'PATCH');
+  const posts = (svc: { reqs: Req[] }) => svc.reqs.filter((q) => q.method === 'POST' && q.path === '/api/v0/turns');
+  async function openDialog(svc: ReturnType<typeof fakeService>) {
+    const r = await mount(svc);
+    await click(r.container.querySelector('#sessions button.new-session'));
+    await settle();
+    return { r, dialog: r.container.querySelector('.new-dialog')! };
+  }
+
+  it('a name given with a first message names the session right after it starts', async () => {
+    const svc = fakeService({ sessions: [row('s1')], events: { s1: oneTurn('s1', 'hi') }, agents: AGENTS });
+    const { r, dialog } = await openDialog(svc);
+    await setValue(dialog.querySelector('input[name="folder"]'), '/Users/ana/x');
+    await setValue(dialog.querySelector('input[name="name"]'), '  Login fix ');
+    await setValue(dialog.querySelector('textarea[name="prompt"]'), 'read the README');
+    await submitForm(dialog);
+    await settle();
+    expect(sentBody(svc)).toEqual({ agent: 'claude', folder: '/Users/ana/x', prompt: 'read the README' });
+    expect(patches(svc).map((q) => [q.path, q.body])).toEqual([['/api/v0/sessions/new1', { title: 'Login fix' }]]);
+    r.unmount();
+  });
+
+  it('with no name, nothing renames the session', async () => {
+    const svc = fakeService({ sessions: [row('s1')], events: { s1: oneTurn('s1', 'hi') }, agents: AGENTS });
+    const { r, dialog } = await openDialog(svc);
+    await setValue(dialog.querySelector('input[name="folder"]'), '/Users/ana/x');
+    await setValue(dialog.querySelector('textarea[name="prompt"]'), 'read the README');
+    await submitForm(dialog);
+    await settle();
+    expect(patches(svc)).toEqual([]);
+    r.unmount();
+  });
+
+  it('with no first message, the conversation opens empty and its first message starts the session', async () => {
+    const svc = fakeService({ sessions: [row('s1')], events: { s1: oneTurn('s1', 'hi') }, agents: AGENTS });
+    const { r, dialog } = await openDialog(svc);
+    await setValue(dialog.querySelector('input[name="folder"]'), '/Users/ana/x');
+    await setValue(dialog.querySelector('input[name="name"]'), 'Login fix');
+    const start = dialog.querySelector('button[type="submit"]') as HTMLButtonElement;
+    expect(start.disabled).toBe(false);
+    await submitForm(dialog);
+    await settle();
+    // Nothing is sent yet: a session starts with its first turn.
+    expect(posts(svc)).toEqual([]);
+    expect(r.container.querySelector('.new-dialog')).toBeNull();
+    expect(r.container.querySelector('#c-head .colhead-title')?.textContent).toBe('Login fix');
+    expect(r.container.querySelectorAll('#c-msgs .tb').length).toBe(0);
+    expect(r.container.querySelector('#sessions .sess.on')).toBeNull();
+    const input = r.container.querySelector('#c-reply textarea') as HTMLTextAreaElement;
+    expect(input.disabled).toBe(false);
+    expect((r.container.querySelector('#c-reply select.next-agent') as HTMLSelectElement).value).toBe('claude');
+
+    await setValue(input, 'read the README');
+    await submitForm(r.container.querySelector('#c-reply form'));
+    await settle();
+    expect(sentBody(svc)).toEqual({
+      agent: 'claude',
+      folder: '/Users/ana/x',
+      prompt: 'read the README',
+      read_only: false,
+      idempotency_key: expect.stringMatching(/^cockpit-msg-/),
+    });
+    expect(patches(svc).map((q) => [q.path, q.body])).toEqual([['/api/v0/sessions/new1', { title: 'Login fix' }]]);
+    expect(r.container.querySelector('.tb.pending .bubble')?.textContent).toBe('read the README');
+    expect(JSON.parse(localStorage.getItem('agentbus.folders') ?? '[]')).toEqual(['/Users/ana/x']);
+
+    // A second message goes to the session the first one opened.
+    await setValue(r.container.querySelector('#c-reply textarea'), 'and the tests');
+    await submitForm(r.container.querySelector('#c-reply form'));
+    await settle();
+    expect(posts(svc).length).toBe(2);
+    expect(sentBody(svc)).toMatchObject({ session: 'new1', prompt: 'and the tests' });
+
+    // The session arrives: it replaces the draft.
+    svc.state.sessions = [row('new1', { open: true, last: '2026-11-05T10:00:00Z', title: 'Login fix' }), row('s1')];
+    await svc.push(ev({ session: 'new1', kind: 'session.registered', agent: 'claude', folder: '/Users/ana/x' }));
+    await svc.push(ev({ session: 'new1', kind: 'turn.started', turn: 'Tn', exchange: 'xn', text: 'read the README' }));
+    await settle();
+    expect(r.container.querySelector('#sessions .sess.on code')?.textContent).toBe('new1');
+    expect(r.container.querySelector('.tb .bubble')?.textContent).toBe('read the README');
+    r.unmount();
+  });
+
+  it('picking a session drops the draft', async () => {
+    const svc = fakeService({ sessions: [row('s1')], events: { s1: oneTurn('s1', 'hi') }, agents: AGENTS });
+    const { r, dialog } = await openDialog(svc);
+    await setValue(dialog.querySelector('input[name="folder"]'), '/Users/ana/x');
+    await submitForm(dialog);
+    await settle();
+    expect(r.container.querySelector('#c-head .colhead-title')?.textContent).toBe('New session');
+    await click(r.container.querySelector('#sessions .sess'));
+    await settle();
+    expect(r.container.querySelector('#convo')?.getAttribute('data-session')).toBe('s1');
+    expect(posts(svc)).toEqual([]);
+    r.unmount();
+  });
+
+  it('shows at most five recent folders, newest first', async () => {
+    localStorage.setItem('agentbus.folders', JSON.stringify(['/a1', '/a2', '/a3', '/a4', '/a5', '/a6', '/a7']));
+    const svc = fakeService({ sessions: [row('s1')], events: { s1: oneTurn('s1', 'hi') }, agents: AGENTS });
+    const { r, dialog } = await openDialog(svc);
+    expect(Array.from(dialog.querySelectorAll('.nd-recent button')).map((b) => b.textContent)).toEqual(['/a1', '/a2', '/a3', '/a4', '/a5']);
+    await setValue(dialog.querySelector('input[name="folder"]'), '/b');
+    await setValue(dialog.querySelector('textarea[name="prompt"]'), 'x');
+    await submitForm(dialog);
+    expect(JSON.parse(localStorage.getItem('agentbus.folders') ?? '[]')).toEqual(['/b', '/a1', '/a2', '/a3', '/a4']);
+    r.unmount();
+  });
+
+  it('a refused typed folder shows plain words, never the service text, and the field stays', async () => {
+    const folders = [{ ref: 'fld_00000000000000a1', name: 'app', connector: 'con_1' }];
+    const answers = [
+      'folder must be an absolute path to an existing directory, at most 4096 bytes',
+      'this server has no folders of its own: name folder_ref and connector from GET /api/v0/folders, which lists the folders its runners own',
+    ];
+    const svc = fakeService({
+      sessions: [row('s1')],
+      events: { s1: oneTurn('s1', 'hi') },
+      agents: AGENTS,
+      folders,
+      runs: () => json({ error: answers.shift() }, 400),
+    });
+    const { r, dialog } = await openDialog(svc);
+    await setValue(dialog.querySelector('input[name="folder"]'), '/config/Sites/');
+    await setValue(dialog.querySelector('textarea[name="prompt"]'), 'x');
+    await submitForm(dialog);
+    await settle();
+    expect(dialog.querySelector('.form-error')?.textContent).toBe('That folder does not exist.');
+    await submitForm(dialog);
+    await settle();
+    expect(dialog.querySelector('.form-error')?.textContent).toBe('This service cannot use that folder. Pick one of the folders listed under the field.');
+    // One field: a typed path, with the listed folders under it.
+    expect((dialog.querySelector('input[name="folder"]') as HTMLInputElement).value).toBe('/config/Sites/');
+    expect(Array.from(dialog.querySelectorAll('.nd-recent button')).map((b) => b.textContent)).toEqual(['app']);
+    expect(dialog.textContent).not.toContain('-folder');
     r.unmount();
   });
 });

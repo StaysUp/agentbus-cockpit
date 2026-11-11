@@ -544,8 +544,9 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
     await dataSource.removeAgent!(id);
     setAgentsKey((k) => k + 1);
   };
-  const startRun = async (req: RunRequest) => {
-    const gen = nextSend();
+  // A session's first turn: POST /api/v0/turns with no session. A name the
+  // person gave is set right after, with PATCH /api/v0/sessions/<id>.
+  const launch = async (req: RunRequest, title: string | undefined, gen: number): Promise<Started> => {
     // A listed folder goes by its reference, which agentbus server needs; a
     // path only agentbus up takes.
     const at = req.folder_ref ? { folder_ref: req.folder_ref, connector: req.connector, isolate: true } : { folder: req.folder };
@@ -554,9 +555,73 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
     const started = await dataSource.startRun!(queue ? { ...req, ...at, isolate: true } : { ...req, ...at });
     refreshQueue?.();
     if (req.folder) rememberFolder(req.folder);
-    setNewSession(null);
+    if (title && dataSource.renameSession) {
+      // The session runs either way; a refused name leaves the first message as its title.
+      dataSource
+        .renameSession(started.session, title)
+        .then(() => setListKey((k) => k + 1))
+        .catch((err) => console.warn(`Naming session ${started.session} failed:`, err));
+    }
     awaitTurn(gen, started);
+    return started;
   };
+  // A session with no first message is a draft here: an empty conversation
+  // with the agent, folder and name. A session in AgentBus starts with its
+  // first turn, so the draft becomes one when its first message is sent.
+  const [draft, setDraft] = useState<{ id: number; req: RunRequest; title?: string; session?: string } | null>(null);
+  const draftSeq = useRef(0);
+  const startRun = async (req: RunRequest, title?: string) => {
+    const gen = nextSend();
+    if (req.prompt.trim() === '') {
+      setAwaitedTurn(null);
+      setAwaitedSession(null);
+      setPanelOpen(false);
+      setDraft({ id: ++draftSeq.current, req, title });
+      setNewSession(null);
+      return;
+    }
+    await launch(req, title, gen);
+    setDraft(null);
+    setNewSession(null);
+  };
+  // The draft's first message, once sent. A message sent after it goes to
+  // the session that one opens, never to a second new session.
+  const draftRun = useRef<{ id: number; started: Promise<Started> } | null>(null);
+  const sendDraft = draft
+    ? async (prompt: string, readOnly: boolean, agent: string | undefined, key: string): Promise<Started> => {
+        const gen = nextSend();
+        const id = draft.id;
+        const first = draftRun.current?.id === id ? draftRun.current.started : null;
+        if (first && dataSource.sendMessage) {
+          const { session } = await first;
+          const next = await dataSource.sendMessage(session, { prompt, read_only: readOnly, agent, idempotency_key: key });
+          refreshQueue?.();
+          return next;
+        }
+        const run = launch(
+          { ...draft.req, agent: agent ?? draft.req.agent, prompt, read_only: readOnly, idempotency_key: key },
+          draft.title,
+          gen
+        );
+        draftRun.current = { id, started: run };
+        let started: Started;
+        try {
+          started = await run;
+        } catch (err) {
+          // Refused: the next message tries a new session again.
+          if (draftRun.current?.started === run) draftRun.current = null;
+          throw err;
+        }
+        // The draft stays on screen, with its message, until its session is shown.
+        setDraft((d) => (d && d.id === id ? { ...d, session: started.session } : d));
+        return started;
+      }
+    : undefined;
+  // The draft's session is on screen: the draft is done.
+  useEffect(() => {
+    if (draft?.session && shown?.session.id === draft.session) setDraft(null);
+  }, [draft, shown]);
+
   // Everything the conversation and the panel show comes from the session on
   // screen. While switching, that is still the previous session until the
   // new one's turns load, so never the newly selected row.
@@ -839,8 +904,9 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
       <SessionsColumn
         sessions={sessions}
         live={dataSource.subscribe ? liveTurns : undefined}
-        selectedSessionId={selectedSessionId}
+        selectedSessionId={draft ? null : selectedSessionId}
         onSelectSession={(sessId) => {
+          setDraft(null);
           nextSend();
           setAwaitedTurn(null);
           setAwaitedSession(null);
@@ -852,7 +918,30 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
         empty={sessions.length === 0}
       />
 
-      {sessionView ? (
+      {draft ? (
+        <ConvoColumn
+          key={`draft-${draft.id}`}
+          session={{
+            ...emptyRow(`draft-${draft.id}`),
+            agent: draft.req.agent,
+            title: draft.title || 'New session',
+            folder: draft.req.folder,
+            folder_ref: draft.req.folder_ref,
+            resumable: true,
+            turnsList: [],
+          }}
+          resumable
+          onSend={sendDraft}
+          selectedTurn={null}
+          onSelectTurn={() => undefined}
+          level="session"
+          panelOpen={false}
+          agentName={agents.find((x) => x.id === draft.req.agent)?.name}
+          agents={savedAgents}
+          defaultAgent={draft.req.agent}
+          onRename={async (_id, t) => setDraft((d) => (d ? { ...d, title: t.trim() } : d))}
+        />
+      ) : sessionView ? (
         <ConvoColumn
           key={sessionView.id}
           session={sessionView}

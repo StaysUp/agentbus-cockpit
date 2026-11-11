@@ -47,6 +47,8 @@ interface ConvoColumnProps {
   // The saved agents. With onSend, a picker beside Send: any message may go
   // to any of them. Each turn's header names the agent that ran it.
   agents?: SavedAgent[];
+  // The agent the picker shows while the session has no turn yet.
+  defaultAgent?: string;
   // Given only when the source can stop a turn. Rejects with the API's message.
   onStop?: (turn: Turn) => Promise<void>;
   // The turns the person asked to stop that have not ended yet.
@@ -194,6 +196,7 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
   prefill,
   onPrefillTaken,
   agents,
+  defaultAgent,
   onOpenSession,
   queuedTurn,
   keyed,
@@ -293,7 +296,7 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
 
   // The picker: the saved agents, and the session's own agent when it is not
   // one of them (removed since, or a harness with no saved agent).
-  const current = currentAgent(session.turnsList);
+  const current = currentAgent(session.turnsList) || defaultAgent || '';
   const showPick = !!onSend && !!agents && agents.length > 0;
   const pickList = !showPick
     ? []

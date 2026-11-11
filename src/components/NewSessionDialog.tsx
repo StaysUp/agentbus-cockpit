@@ -8,8 +8,10 @@ interface NewSessionDialogProps {
   loadAgents: () => Promise<SavedAgent[]>;
   // The harnesses, to say which agents cannot start here. Optional.
   loadHarnesses?: () => Promise<Harness[]>;
-  // Rejects with the API's message when the run is refused.
-  onStart: (req: RunRequest) => Promise<void>;
+  // Starts the session, with its name when one is given. An empty prompt
+  // opens the conversation empty, for its first message. Rejects with the
+  // API's message when the run is refused.
+  onStart: (req: RunRequest, title?: string) => Promise<void>;
   onClose: () => void;
   initialAgent?: string;
   // Opens the agents dialog, to add one.
@@ -19,18 +21,37 @@ interface NewSessionDialogProps {
   folders?: FolderInfo[];
 }
 
+// A refused typed folder, in plain words. The service's own text is written
+// for programs (it names fields and endpoints), so the dialog says what the
+// person can do instead. Any other refusal shows the service's words.
+export function folderRefusal(message: string): string | null {
+  if (/not an existing directory|absolute path|no such file|does not exist/i.test(message)) return 'That folder does not exist.';
+  if (/has no folders of its own|folder_ref|connector is not connected/i.test(message))
+    return 'This service cannot use that folder. Pick one of the folders listed under the field.';
+  return null;
+}
+
 // The folder a new session starts in: a listed folder by its reference, or
 // a path on the machine where AgentBus runs (agentbus up).
 type Where = { ref: string; connector?: string } | { path: string };
 
-// A new session is a saved agent and a folder, with a first message. The
-// service isolates it: the conversation works on its own copy of the folder,
+// A new session is a saved agent and a folder, with an optional name and an
+// optional first message. The service isolates it: the conversation works on its own copy of the folder,
 // and nothing reaches the folder until a turn's changes are applied.
-export const NewSessionDialog: React.FC<NewSessionDialogProps> = ({ loadAgents, loadHarnesses, onStart, onClose, initialAgent, onAddAgent, folders = [] }) => {
+export const NewSessionDialog: React.FC<NewSessionDialogProps> = ({
+  loadAgents,
+  loadHarnesses,
+  onStart,
+  onClose,
+  initialAgent,
+  onAddAgent,
+  folders = [],
+}) => {
   const [agents, setAgents] = useState<SavedAgent[] | null>(null);
   const [harnesses, setHarnesses] = useState<Harness[] | undefined>(undefined);
   const [agentsError, setAgentsError] = useState<string | null>(null);
   const [agent, setAgent] = useState(initialAgent ?? '');
+  // At most five, newest first (recentFolders keeps no more).
   const [recent] = useState(() => recentFolders());
   // A listed folder first, as the service knows it; else the last path.
   // Picked once, when the list first has one, unless the person chose.
@@ -48,6 +69,7 @@ export const NewSessionDialog: React.FC<NewSessionDialogProps> = ({ loadAgents, 
   };
   const path = where && 'path' in where ? where.path : '';
   const [prompt, setPrompt] = useState('');
+  const [name, setName] = useState('');
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -80,7 +102,7 @@ export const NewSessionDialog: React.FC<NewSessionDialogProps> = ({ loadAgents, 
 
   const chosen = agents?.find((a) => a.id === agent);
   const hasWhere = !!where && ('ref' in where || where.path.trim() !== '');
-  const ready = agent !== '' && hasWhere && prompt.trim() !== '' && !starting;
+  const ready = agent !== '' && hasWhere && !starting;
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -89,9 +111,10 @@ export const NewSessionDialog: React.FC<NewSessionDialogProps> = ({ loadAgents, 
     setError(null);
     try {
       const at = 'ref' in where! ? { folder_ref: where!.ref, connector: where!.connector } : { folder: where!.path.trim() };
-      await onStart({ agent, ...at, prompt });
+      await onStart({ agent, ...at, prompt: prompt.trim() === '' ? '' : prompt }, name.trim() || undefined);
     } catch (err) {
-      setError((err as Error).message);
+      const msg = (err as Error).message;
+      setError(('path' in where! && folderRefusal(msg)) || msg);
       setStarting(false);
     }
   };
@@ -130,7 +153,7 @@ export const NewSessionDialog: React.FC<NewSessionDialogProps> = ({ loadAgents, 
             type="text"
             value={path}
             onChange={(e) => pick({ path: e.target.value })}
-            placeholder={folders.length > 0 ? 'or a path on this machine' : '/Users/you/project'}
+            placeholder={folders.length > 0 ? 'or type a path' : '/Users/you/project'}
             spellCheck={false}
             autoComplete="off"
           />
@@ -162,9 +185,22 @@ export const NewSessionDialog: React.FC<NewSessionDialogProps> = ({ loadAgents, 
           The conversation works on its own copy of it, so your folder is not changed until you apply a turn's changes.
         </div>
         <label>
-          <span>First message</span>
+          <span>Name (optional)</span>
+          <input
+            name="name"
+            type="text"
+            value={name}
+            maxLength={120}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="From the first message"
+            autoComplete="off"
+          />
+        </label>
+        <label>
+          <span>First message (optional)</span>
           <textarea name="prompt" rows={4} value={prompt} onChange={(e) => setPrompt(e.target.value)} />
         </label>
+        {prompt.trim() === '' && <div className="nd-note">Leave it empty to write it in the conversation.</div>}
         {error && <div className="form-error">{error}</div>}
         <div className="nd-actions">
           <button type="submit" className="connect-go" disabled={!ready}>
