@@ -11,6 +11,7 @@ import {
   Harness,
   SavedAgent,
   RunRequest,
+  RunnerInfo,
   SessionList,
   SessionSummary,
   Started,
@@ -427,6 +428,16 @@ export class LiveDataSource implements DataSource {
     if (!res.ok) throw new Error(await apiError(res));
     const body = await res.json();
     return Array.isArray(body?.folders) ? body.folders : [];
+  }
+
+  // GET /api/v0/runners: the runners and connectors control knows. null
+  // on a service that has no such route (404).
+  async listRunners(): Promise<RunnerInfo[] | null> {
+    const res = await fetch(`${this.baseUrl}/api/v0/runners`, { headers: this.headers() });
+    if (res.status === 404) return null;
+    if (!res.ok) throw new Error(await apiError(res));
+    const body = await res.json();
+    return Array.isArray(body?.runners) ? body.runners : [];
   }
 
   private async post(path: string, body: unknown): Promise<Started> {

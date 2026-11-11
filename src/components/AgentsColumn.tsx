@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { AgentSummary } from '../types';
+import { AgentSummary, RunnerInfo } from '../types';
 import { PlusIcon } from './Icons';
+import { RunnersList } from './RunnersList';
 
 interface AgentsColumnProps {
   agents: AgentSummary[];
@@ -15,6 +16,8 @@ interface AgentsColumnProps {
   onAddAgent?: () => void;
   onEditAgent?: (agent: AgentSummary) => void;
   onRemoveAgent?: (agentId: string) => Promise<void>;
+  // Given only when the source lists runners (GET /api/v0/runners).
+  loadRunners?: () => Promise<RunnerInfo[] | null>;
 }
 
 // The Agents column: every saved agent, even one with no session yet, with
@@ -32,6 +35,7 @@ export const AgentsColumn: React.FC<AgentsColumnProps> = ({
   onAddAgent,
   onEditAgent,
   onRemoveAgent,
+  loadRunners,
 }) => {
   // The row asking "Remove?", and a remove in flight or refused.
   const [confirming, setConfirming] = useState<string | null>(null);
@@ -144,6 +148,7 @@ export const AgentsColumn: React.FC<AgentsColumnProps> = ({
         {/* The AgentBus this cockpit reads, as one card at the foot: its name, a
             live dot and where the data comes from. */}
         <div className="brand-foot">
+          {loadRunners && <RunnersList load={loadRunners} />}
           <div className="bus-card">
             <span className="bc-t">
               <b className="brand">AgentBus</b>

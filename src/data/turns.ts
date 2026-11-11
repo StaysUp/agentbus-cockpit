@@ -547,6 +547,44 @@ export function turnNotes(detail?: TurnDetail): TurnNotes {
   return notes;
 }
 
+// One piece of what AgentBus gave a turn besides the person's words, from
+// the turn's context.added.
+export interface AddedPiece {
+  kind: string;
+  bytes: number;
+  text: string;
+}
+
+// What AgentBus added to the turn (context.added), in the order the agent got
+// it. Empty when the record has none, as for a turn before 0.4.
+export function addedContext(detail?: TurnDetail): AddedPiece[] {
+  const e = detail?.events.find((x) => x.kind === 'context.added');
+  if (!e || !Array.isArray(e.added)) return [];
+  const out: AddedPiece[] = [];
+  for (const p of e.added as unknown[]) {
+    const r = p as { kind?: unknown; bytes?: unknown; text?: unknown };
+    if (typeof r?.kind !== 'string' || typeof r.text !== 'string' || r.text === '') continue;
+    out.push({ kind: r.kind, bytes: typeof r.bytes === 'number' ? r.bytes : new TextEncoder().encode(r.text).length, text: r.text });
+  }
+  return out;
+}
+
+// A piece's kind in a few words, for a screen.
+export function addedLabel(kind: string): string {
+  switch (kind) {
+    case 'instructions':
+      return 'Instructions (instructions.md)';
+    case 'agents_md':
+      return "The folder's AGENTS.md";
+    case 'asked_by':
+      return 'Who asked for this work';
+    case 'mcp_instructions':
+      return 'Tool server instructions (MCP)';
+    default:
+      return kind;
+  }
+}
+
 // The quiet line for a turn header: how it continued. A turn number is shown
 // when the named turn is in the session's list; an unknown id is left out.
 export function continuityLabel(notes: TurnNotes, turns: { id: string; turnNumber: number }[]): string | null {

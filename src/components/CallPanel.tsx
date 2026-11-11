@@ -1,5 +1,5 @@
 import React from 'react';
-import { CallGroup, callFailed, turnNotes } from '../data/turns';
+import { addedContext, CallGroup, callFailed, turnNotes } from '../data/turns';
 import { Level, Turn, TurnDetail } from '../types';
 import { formatDuration, formatTime, toolInputSummary } from '../utils/format';
 import { ContextTab, LoadContext } from './ContextTab';
@@ -172,6 +172,7 @@ export const CallPanel: React.FC<CallPanelProps> = ({ turn, call, tab, onTab, on
             turns={turns}
             loadTurn={loadTurn ? (id) => loadTurn(turn.sessionId, id) : undefined}
             recovered={!!notes.recovered && notes.recovered.turn === notes.replayFrom}
+            added={addedContext(turn.detail)}
           />
         )}
 

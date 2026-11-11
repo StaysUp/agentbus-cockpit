@@ -177,6 +177,18 @@ function messageKey(): string {
   return `cockpit-msg-${rand}`;
 }
 
+// Why a session that is not running takes no next message. Only a session
+// no run started (no turn names an agent) came from a terminal. One whose
+// only turn failed never started, and says why.
+export function cannotContinue(turns: Turn[]): string {
+  if (turns.length > 0 && turns.every((t) => !t.agent)) return 'Started in a terminal. Continue it there.';
+  if (turns.length === 1 && turns[0].state === 'failed') {
+    const err = turns[0].error?.trim().replace(/\.$/, '');
+    return `The first turn did not start${err ? `: ${err}` : ''}. Start a new conversation.`;
+  }
+  return 'This conversation cannot take another message. Start a new one.';
+}
+
 export const ConvoColumn: React.FC<ConvoColumnProps> = ({
   session,
   selectedTurn,
@@ -264,11 +276,7 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
   // never blocks Send. Only a session the service cannot continue does.
   const active = pending.filter((p) => p.state !== 'failed').length;
   const turnRunning = active > 0 || lastState === 'running' || !!open;
-  const why = closed
-    ? 'This conversation is closed; start a new one.'
-    : !turnRunning && !resumable
-      ? 'started in a terminal; continue it there'
-      : null;
+  const why = closed ? 'This conversation is closed; start a new one.' : !turnRunning && !resumable ? cannotContinue(session.turnsList) : null;
   const canSend = !!onSend && why === null;
   // While the last turn runs, Send turns into Stop. Only a turn a run started
   // (it names its agent) can be stopped: the service refuses any other. A

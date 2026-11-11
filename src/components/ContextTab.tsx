@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Block, blocksOf, layoutContext, leafTools, MessageRow, PieceRow, ReplayGroup, splitReplayed, sum, Sum, toolCount, turnInfo } from '../data/context';
+import { AddedPiece, addedLabel } from '../data/turns';
 import { CallContext, ContextPiece, TurnDetail } from '../types';
 
 export type LoadContext = (turn: string, exchange: string, full: boolean) => Promise<CallContext>;
@@ -24,6 +25,8 @@ interface ContextTabProps {
   loadTurn?: (turnId: string) => Promise<TurnDetail | null>;
   // Set when that turn did not finish (recovered_from on turn.started).
   recovered?: boolean;
+  // What AgentBus gave the turn besides the person's words (context.added).
+  added?: AddedPiece[];
 }
 
 // A request at or under this size is read whole right after its outline.
@@ -210,7 +213,30 @@ const ToolsItemBody: React.FC<BodyProps> = ({ piece, need, full, ask, callSize }
   );
 };
 
-export const ContextTab: React.FC<ContextTabProps> = ({ turn, exchange, load, replayed, continuity, replayFrom, turns, loadTurn, recovered }) => {
+// Whether a piece of the request holds one of the added texts. Read from the
+// piece's JSON, so a text is looked for as JSON escapes it.
+export function holdsAdded(json: unknown, added: AddedPiece[]): boolean {
+  if (json === undefined || added.length === 0) return false;
+  const hay = JSON.stringify(json) ?? '';
+  return added.some((a) => hay.includes(JSON.stringify(a.text).slice(1, -1)));
+}
+
+// The pieces AgentBus added, each folded, above the request.
+const AddedSection: React.FC<{ added: AddedPiece[] }> = ({ added }) => (
+  <>
+    <div className="sub-h first">Added by AgentBus</div>
+    <p className="note ctx-added-note">
+      AgentBus gave the turn these, besides your words. A block below marked <span className="ctx-tag ab">AgentBus</span> holds them.
+    </p>
+    {added.map((a, i) => (
+      <Fold key={`${a.kind}-${i}`} className="ctx-added" title={addedLabel(a.kind)} meta={<span>{bytes(a.bytes)}</span>}>
+        {() => <LongText text={a.text} />}
+      </Fold>
+    ))}
+  </>
+);
+
+export const ContextTab: React.FC<ContextTabProps> = ({ turn, exchange, load, replayed, continuity, replayFrom, turns, loadTurn, recovered, added = [] }) => {
   const [light, setLight] = useState<Read>({ loading: true });
   const [full, setFull] = useState<Read>({});
 
@@ -328,9 +354,11 @@ export const ContextTab: React.FC<ContextTabProps> = ({ turn, exchange, load, re
         : [];
   const otherFields = shown.request ? Object.keys(shown.request) : [];
 
+  const abTag = (i: number) => (holdsAdded(piece(i)?.json, added) ? <span className="ctx-tag ab">AgentBus</span> : null);
   const msgTitle = (m: MessageRow) => (
     <>
       <span className="ctx-idx">#{m.index}</span> {m.role}
+      {abTag(m.pieceIndex)}
       {m.part === 'new' && <span className="ctx-tag new">new message</span>}
       {m.claudeCode && <span className="ctx-tag cc">Claude Code</span>}
       {m.item === 'context' && <span className="ctx-tag cc">Codex context</span>}
@@ -349,7 +377,16 @@ export const ContextTab: React.FC<ContextTabProps> = ({ turn, exchange, load, re
     </Fold>
   );
   const pieceRow = (r: PieceRow) => (
-    <Fold key={r.pieceIndex} title={r.item ? (r.item.item === 'tools' ? 'Tools item' : 'Base instructions') : r.piece.label || r.piece.kind} meta={msgMeta(r.piece)}>
+    <Fold
+      key={r.pieceIndex}
+      title={
+        <>
+          {r.item ? (r.item.item === 'tools' ? 'Tools item' : 'Base instructions') : r.piece.label || r.piece.kind}
+          {abTag(r.pieceIndex)}
+        </>
+      }
+      meta={msgMeta(r.piece)}
+    >
       {(byUser) =>
         r.item?.item === 'tools' ? (
           <ToolsItemBody piece={piece(r.pieceIndex)} {...bodyProps(byUser)} />
@@ -384,9 +421,18 @@ export const ContextTab: React.FC<ContextTabProps> = ({ turn, exchange, load, re
         <p className="note">Continued by the vendor's resume. Earlier turns are inside these messages, and nothing marks where they end.</p>
       )}
 
-      <div className="sub-h first">Request</div>
+      {added.length > 0 && <AddedSection added={added} />}
+      <div className={`sub-h ${added.length > 0 ? '' : 'first'}`}>Request</div>
       {layout.system.length > 0 && (
-        <Fold title="System" meta={<SumMeta s={sum(layout.system.map((r) => r.piece))} noun={layout.system.length === 1 ? 'block' : 'blocks'} />}>
+        <Fold
+          title={
+            <>
+              System
+              {layout.system.some((r) => holdsAdded(piece(r.pieceIndex)?.json, added)) && <span className="ctx-tag ab">AgentBus</span>}
+            </>
+          }
+          meta={<SumMeta s={sum(layout.system.map((r) => r.piece))} noun={layout.system.length === 1 ? 'block' : 'blocks'} />}
+        >
           {() => layout.system.map(pieceRow)}
         </Fold>
       )}

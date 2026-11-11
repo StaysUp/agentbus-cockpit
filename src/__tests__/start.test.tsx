@@ -586,7 +586,32 @@ describe('The prompt box', () => {
     const svc = fakeService({ sessions: [row('s1', { resumable: false })], events: { s1: oneTurn('s1', 'first') } });
     const r = await mount(svc);
     expect((r.container.querySelector('#c-reply textarea') as HTMLTextAreaElement).disabled).toBe(true);
-    expect(r.container.querySelector('#c-reply .reply-why')?.textContent).toBe('started in a terminal; continue it there');
+    expect(r.container.querySelector('#c-reply .reply-why')?.textContent).toBe('Started in a terminal. Continue it there.');
+    r.unmount();
+  });
+
+  it('says why when a cockpit session’s first turn did not start', async () => {
+    const svc = fakeService({
+      sessions: [row('s1', { resumable: false })],
+      events: { s1: oneTurn('s1', 'first') },
+      turnFields: { 'T1-s1': { agent: 'claude', state: 'failed', error: 'the agent could not be started.' } },
+    });
+    const r = await mount(svc);
+    expect((r.container.querySelector('#c-reply textarea') as HTMLTextAreaElement).disabled).toBe(true);
+    expect(r.container.querySelector('#c-reply .reply-why')?.textContent).toBe(
+      'The first turn did not start: the agent could not be started. Start a new conversation.'
+    );
+    r.unmount();
+  });
+
+  it('never says terminal for a cockpit session that cannot continue', async () => {
+    const svc = fakeService({
+      sessions: [row('s1', { resumable: false })],
+      events: { s1: oneTurn('s1', 'first') },
+      turnFields: { 'T1-s1': { agent: 'claude' } },
+    });
+    const r = await mount(svc);
+    expect(r.container.querySelector('#c-reply .reply-why')?.textContent).toBe('This conversation cannot take another message. Start a new one.');
     r.unmount();
   });
 

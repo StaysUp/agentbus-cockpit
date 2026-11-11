@@ -227,6 +227,27 @@ export interface Harness {
   access?: AccessOption[];
 }
 
+// One harness as one runner last probed it (GET /api/v0/runners).
+export interface RunnerHarness {
+  name: string;
+  found: boolean;
+  version?: string;
+  signed_in?: boolean;
+}
+
+// One runner or connector control knows, from GET /api/v0/runners.
+export interface RunnerInfo {
+  id: string;
+  name: string;
+  // runner runs turns; connector owns folders.
+  role: string;
+  // It asked control for work in the last minute.
+  online: boolean;
+  last_seen: string;
+  labels: string[];
+  harnesses: RunnerHarness[];
+}
+
 // What a person sets on a saved agent (POST and PUT /api/v0/agents).
 export interface AgentFields {
   name: string;
@@ -406,6 +427,9 @@ export interface DataSource {
   // The folders the runners own (GET /api/v0/folders), each by its
   // reference and name.
   listFolders?(): Promise<FolderInfo[]>;
+  // The runners and connectors control knows (GET /api/v0/runners). null
+  // when the service has no such route.
+  listRunners?(): Promise<RunnerInfo[] | null>;
   listAgents?(): Promise<SavedAgent[]>;
   // Where a queued message's turn stands, by the session and turn
   // POST /api/v0/turns answered with.
