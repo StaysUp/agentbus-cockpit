@@ -37,6 +37,9 @@ const NO_PENDING: Pending[] = [];
 // The longest wait before the sessions are fetched again after an event.
 const LIST_REFRESH_MS = 500;
 
+// How often a running turn of the shown session is read, to see it end.
+export const TURN_END_POLL_MS = 2000;
+
 // Kinds that change a session's summary (agent, folder, open) as the service
 // computes it; on these, fetch the sessions again at once.
 const SUMMARY_KINDS = new Set(['session.registered', 'session.opened', 'session.closed', 'session.renamed', 'events.dropped']);
@@ -255,6 +258,40 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
         if (again) refreshTurns.current(sessionId);
       });
   };
+
+  // A turn reads running until its job has ended, a moment after its last
+  // event (session.closed). No event says the job ended, so the stream never
+  // asks for the list again. While the shown session has a running turn,
+  // read each such turn alone every TURN_END_POLL_MS, and read the list once
+  // one has ended.
+  const shownSession = shown?.session.id;
+  const runningTurns = shown ? shown.session.turnsList.filter((t) => t.state === 'running').map((t) => t.id).join(',') : '';
+  useEffect(() => {
+    if (!shownSession || runningTurns === '' || !dataSource.queuedTurn || !dataSource.subscribe) return;
+    let active = true;
+    let reading = false;
+    const check = async () => {
+      if (reading) return;
+      reading = true;
+      try {
+        for (const turn of runningTurns.split(',')) {
+          const st = await dataSource.queuedTurn!(shownSession, turn).catch(() => null);
+          if (!active) return;
+          if (st?.ended) {
+            refreshTurns.current(shownSession);
+            return;
+          }
+        }
+      } finally {
+        reading = false;
+      }
+    };
+    const id = setInterval(check, TURN_END_POLL_MS);
+    return () => {
+      active = false;
+      clearInterval(id);
+    };
+  }, [dataSource, shownSession, runningTurns]);
 
   // The latest turn of each session with its events, from the stream, for the
   // live status on the session cards and in the chat. Only a source that

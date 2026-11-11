@@ -5,9 +5,9 @@
 import { act } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import raw from '../../testdata/live-turns-2026-11-07.jsonl?raw';
-import { App } from '../App';
+import { App, TURN_END_POLL_MS } from '../App';
 import { ReplayDataSource } from '../data/ReplayDataSource';
-import { CockpitEvent } from '../types';
+import { CockpitEvent, DataSource } from '../types';
 import { click, flush, jsonl, liveReplay, render } from './helpers';
 
 const TURN = 't_b230d16a85658ec2';
@@ -98,6 +98,56 @@ describe('live status on screen', () => {
     expect(q(r, '#sessions .sess .s-live')).toBeNull();
     expect(text(r, '#sessions .sess .s-m')).toMatch(/^\$0\.28 · /);
     expect(q(r, '#d-head .cost-live .plus')).toBeNull();
+    r.unmount();
+  });
+
+  // The service holds a turn at running until its job has ended, a moment
+  // after session.closed, and no event says so. The cockpit reads the turn
+  // until the service says it ended, then shows it finished.
+  it('a turn whose reply is in reads finished once its job has ended, with no event after session.closed', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    let jobEnded = false;
+    const reads: string[] = [];
+    const extra: Partial<DataSource> = {
+      getTurns: async (id) => {
+        const list = await live.replay().getTurns(id);
+        return jobEnded ? list : { ...list, turns: list.turns.map((t) => ({ ...t, state: 'running', endedAt: undefined })) };
+      },
+      queuedTurn: async (_session, turn) => {
+        reads.push(turn);
+        return { ended: jobEnded, failed: false };
+      },
+    };
+    const live = liveReplay(events.slice(0, cut), extra);
+    const r = await render(<App dataSource={live.source} />);
+    await flush();
+    for (const e of events.slice(cut)) await act(async () => live.push(e));
+    await flush();
+    await flush();
+    expect(text(r, '#convo .tb .tb-state')).toBe('finishing');
+
+    // While the job runs, the turn is read alone and stays finishing.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(TURN_END_POLL_MS + 100);
+    });
+    expect(reads).toContain(TURN);
+    expect(text(r, '#convo .tb .tb-state')).toBe('finishing');
+
+    // The job ends: the next read sees it, and the list read after it shows finished.
+    jobEnded = true;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(TURN_END_POLL_MS + 100);
+    });
+    await flush();
+    expect(q(r, '#convo .tb .tb-state')).toBeNull();
+    expect(text(r, '#convo .tb .m-agent')).toContain('hi world');
+
+    // Nothing runs now: the reads stop.
+    const n = reads.length;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3 * TURN_END_POLL_MS);
+    });
+    expect(reads).toHaveLength(n);
     r.unmount();
   });
 

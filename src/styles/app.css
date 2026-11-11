@@ -640,9 +640,11 @@ label.nd-check > span { font-size: max(11px, 0.75rem); color: var(--ink); }
 .tcard.running { box-shadow: inset 3px 0 0 var(--run); }
 .tcard.failed { box-shadow: inset 3px 0 0 var(--bad); }
 .tcard.sel { border-color: var(--line2); }
-.tcard-h { display: grid; grid-template-columns: 3.25rem 1fr auto; gap: 0.625rem; align-items: baseline; cursor: pointer; }
-.tcard .k { font-family: var(--mono); font-size: max(11px, 0.75rem); color: var(--ink2); }
-.tcard .t { min-width: 0; overflow-wrap: anywhere; font-size: 0.8125rem; }
+/* The name keeps its own width (at least the short names' column); the
+   argument takes the rest of the row and ends in an ellipsis. */
+.tcard-h { display: grid; grid-template-columns: minmax(3.25rem, max-content) minmax(0, 1fr) auto; gap: 0.625rem; align-items: baseline; cursor: pointer; }
+.tcard .k { font-family: var(--mono); font-size: max(11px, 0.75rem); color: var(--ink2); white-space: nowrap; }
+.tcard .t { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 0.8125rem; }
 .tcard .t code { color: var(--ink); font-size: max(11px, 0.75rem); }
 .tcard .d { font-family: var(--mono); font-size: max(11px, 0.7188rem); color: var(--ink3); white-space: nowrap; display: inline-flex; gap: 0.375rem; align-items: center; }
 .tcard .d.run { color: var(--run); }

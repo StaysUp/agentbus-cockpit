@@ -106,7 +106,7 @@ const Card: React.FC<CardProps> = ({ card, grouped, now, running, isOpen, onTogg
     <div className={cls} data-tool={card.pair.requested.tool_name}>
       <div className="tcard-h" onClick={() => onToggle(card.pair.requested.id, isOpen)}>
         <span className="k">{card.label}</span>
-        <span className="t">{card.target ? <code>{card.target}</code> : null}</span>
+        <span className="t" title={card.target || undefined}>{card.target ? <code>{card.target}</code> : null}</span>
         {right}
       </div>
       {card.diff && <Diff del={card.diff.del} add={card.diff.add} />}
