@@ -48,10 +48,11 @@ export interface ToolCallPair {
 }
 
 // A turn's state as GET /api/v0/turns gives it (CLIENT_API.md). A turn
-// started through POST /turns is running until its agent exits, then finished
-// on exit code 0, else failed. Any other turn is finished once it has a
+// started through POST /turns is queued until a runner starts it, running
+// until its agent exits, then finished on exit code 0, stopped when someone
+// stopped it, else failed. Any other turn is finished once it has a
 // turn.completed, else running.
-export type TurnState = 'running' | 'finished' | 'failed';
+export type TurnState = 'queued' | 'running' | 'finished' | 'failed' | 'stopped';
 
 // One row of the turn list: what GET /api/v0/turns says about a turn.
 export interface Turn {
@@ -107,7 +108,7 @@ export interface Turn {
   // The seq of the turn's turn.started, when the source has seq.
   startedSeq?: number;
   // The turn's own events, paired, once they are loaded
-  // (GET /api/v0/turns/{id}/events). Only loaded turns have it.
+  // (GET /api/v0/sessions/{id}/events?turn=). Only loaded turns have it.
   detail?: TurnDetail;
 }
 
@@ -118,9 +119,8 @@ export interface TurnOrigin {
   // work ran in.
   session?: string;
   turn?: string;
-  // result: the job whose result it is, turn or review, and the agent.
-  job?: string;
-  jobKind?: string;
+  // result: the kind of the work's turn, turn or review, and the agent.
+  turnKind?: string;
   agent?: string;
 }
 
@@ -254,8 +254,6 @@ export interface RunRequest {
   read_only?: boolean;
 }
 
-// The reply to POST /api/v0/turns: the session, and the turn it started.
-// Every event of that turn carries the turn id.
 // GET /api/v0/turns/<id>/diff, as the cockpit reads it: what one turn
 // changed, ran and called.
 export interface TurnDiffFile {
@@ -300,26 +298,30 @@ export interface TurnDiff {
   apply: ApplyState;
 }
 
+// The reply to POST /api/v0/turns: the session, and the turn it started.
+// Every event of that turn carries the turn id.
 export interface Started {
-  id: string;
-  turn?: string;
-  // The turn waits in the queue: behind the session's earlier turns (ahead
-  // says how many), or for a runner. turn is then absent.
-  queued?: boolean;
+  session: string;
+  // The turn's id: there from the answer on, even while it waits.
+  turn: string;
+  // running, or queued: it waits behind the session's earlier turns (ahead
+  // says how many), or for a runner.
+  state: 'running' | 'queued';
   ahead?: number;
-  // The turn job that runs it.
-  job?: string;
+  // The idempotency key had made this turn already.
+  existing?: boolean;
+  base_url?: string;
 }
 
-// Where a queued message's turn job stands (GET /api/v0/jobs/<id>): ended,
-// and why it ended without a turn when it did.
-export interface QueuedJob {
+// Where a queued message's turn stands (GET /api/v0/turns/<id>): ended, and
+// why it ended without running when it did.
+export interface QueuedTurn {
   ended: boolean;
   failed: boolean;
   why?: string;
 }
 
-// GET /api/v0/calls/<exchange>/context: what one model call sent, split into
+// GET /api/v0/turns/<turn>/calls/<exchange>: what one model call sent, split into
 // pieces in the request's order, and the reply kept for it. With full=false
 // every json is left out: kinds, labels and sizes only. size is the piece's
 // exact byte count; approx_tokens is the service's estimate (size / 2.66),
@@ -393,9 +395,9 @@ export interface DataSource {
   // reference and name.
   listFolders?(): Promise<FolderInfo[]>;
   listAgents?(): Promise<SavedAgent[]>;
-  // Where a queued message's turn job stands, by the job id
+  // Where a queued message's turn stands, by the session and turn
   // POST /api/v0/turns answered with.
-  queuedJob?(job: string): Promise<QueuedJob>;
+  queuedTurn?(session: string, turn: string): Promise<QueuedTurn>;
   createAgent?(f: AgentFields): Promise<SavedAgent>;
   updateAgent?(id: string, f: AgentFields): Promise<SavedAgent>;
   removeAgent?(id: string): Promise<void>;
@@ -431,8 +433,9 @@ export interface DataSource {
   getTurnDiff?(sessionId: string, turnId: string): Promise<TurnDiff>;
   applyTurn?(turnId: string): Promise<ApplyState>;
   // A source that keeps request bodies has this: one model call's request
-  // and reply by its exchange. Rejects with an Error in the API's own words.
-  getCallContext?(exchange: string, full: boolean): Promise<CallContext>;
+  // and reply by its turn and exchange. Rejects with an Error in the API's
+  // own words.
+  getCallContext?(turn: string, exchange: string, full: boolean): Promise<CallContext>;
   // Calls onEvent for each new event, and onSnapshot with the sessions of the
   // snapshot the stream starts from: once at the start, and again whenever it
   // starts over (the store changed). Show that list, so the list and the

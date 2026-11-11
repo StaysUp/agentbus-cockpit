@@ -13,8 +13,8 @@ import { ReplayDataSource } from './data/ReplayDataSource';
 import { applyList, countedIn, isNewerList, ListCursor, StreamedCost, streamedCost } from './data/sessionList';
 import { addLiveEvent, LiveTurns, mergeLive, noteEventTime } from './data/liveStatus';
 import { refreshNow } from './utils/useNow';
-import { Job, JobsSource, JobSpec, startTurnJob } from './data/jobs';
-import { useJobs } from './data/useJobs';
+import { ApiTurn, QueueSource } from './data/jobs';
+import { useQueue } from './data/useJobs';
 import { addStreamedCost, addTurnEvents, buildAgents, createEmptyUsage, sessionGroup, turnDetail } from './data/turns';
 import {
   CockpitEvent,
@@ -92,18 +92,18 @@ interface AppProps {
   sourceLabel?: string;
   onDisconnect?: () => void;
   disconnectLabel?: string;
-  // The service's job queue, when it keeps one: each prompt then runs as a
-  // turn job on a runner, and a turn that ran as a job can be reviewed.
-  jobs?: JobsSource;
+  // The service's turn queue, when it keeps one: a turn that ended can be
+  // reviewed, and a queued or running review stopped.
+  queue?: QueueSource;
 }
 
-export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabel, onDisconnect, disconnectLabel, jobs }) => {
+export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabel, onDisconnect, disconnectLabel, queue }) => {
   const [dataSource] = useState<DataSource>(
     () => propDataSource || new ReplayDataSource(rawSessionsJsonl)
   );
-  // The jobs, read again every few seconds while the service keeps a queue.
-  const jobsView = useJobs(jobs);
-  const refreshJobs = jobsView?.refresh;
+  // The turn list, read again every few seconds while the service keeps a queue.
+  const queueView = useQueue(queue);
+  const refreshQueue = queueView?.refresh;
 
   // Every session from one snapshot, newest activity first. The Sessions
   // column lists all of them, whatever agent is selected: a session can use
@@ -421,8 +421,8 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
   const awaitTurn = (gen: number, started: Started, from?: string) => {
     if (gen !== sendGenRef.current) return;
     if (from !== undefined && shownRef.current?.session.id !== from) return;
-    if (from === undefined) setAwaitedSession(started.id);
-    setAwaitedTurn(started.turn ? { session: started.id, turn: started.turn } : null);
+    if (from === undefined) setAwaitedSession(started.session);
+    setAwaitedTurn(started.turn ? { session: started.session, turn: started.turn } : null);
   };
   useEffect(() => {
     if (awaitedSession === null) return;
@@ -441,7 +441,7 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
     [dataSource, changesTurn]
   );
   const loadContext = useMemo(
-    () => (dataSource.getCallContext ? (x: string, full: boolean) => dataSource.getCallContext!(x, full) : undefined),
+    () => (dataSource.getCallContext ? (t: string, x: string, full: boolean) => dataSource.getCallContext!(t, x, full) : undefined),
     [dataSource]
   );
   const loadTurn = useCallback((sessionId: string, turnId: string) => dataSource.getTurn(sessionId, turnId), [dataSource]);
@@ -501,24 +501,15 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
     await dataSource.removeAgent!(id);
     setAgentsKey((k) => k + 1);
   };
-  // With the job queue, a prompt is a turn job: a runner runs it, and the
-  // turn shows here once the runner has started it. Without the jobs API,
-  // POST /api/v0/turns starts it, which also runs it as a job.
-  const runAsJob = async (spec: JobSpec): Promise<Started> => {
-    // A job no runner has taken stays queued, and the wait goes on: the job
-    // list shows it, and the turn shows here once a runner starts it.
-    const { ref } = await startTurnJob(jobs!, spec, { onWaiting: () => refreshJobs?.() });
-    refreshJobs?.();
-    return { id: ref.session, turn: ref.turn };
-  };
   const startRun = async (req: RunRequest) => {
     const gen = nextSend();
     // A listed folder goes by its reference, which agentbus server needs; a
     // path only agentbus up takes.
     const at = req.folder_ref ? { folder_ref: req.folder_ref, connector: req.connector, isolate: true } : { folder: req.folder };
-    const started = jobs
-      ? await runAsJob({ agent: req.agent, isolate: true, ...at, prompt: req.prompt, model: req.model, read_only: req.read_only })
-      : await dataSource.startRun!({ ...req, ...at });
+    // POST /api/v0/turns names the turn at once, even while it waits for a
+    // runner. With the queue, the session gets its own copy of the folder.
+    const started = await dataSource.startRun!(queue ? { ...req, ...at, isolate: true } : { ...req, ...at });
+    refreshQueue?.();
     if (req.folder) rememberFolder(req.folder);
     setNewSession(null);
     awaitTurn(gen, started);
@@ -539,9 +530,12 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
     },
     [shownSessionId]
   );
-  // Reads a queued message's job; the same function across renders, so the
-  // poll that uses it is not restarted by every job-list refresh.
-  const queuedJob = useMemo(() => (dataSource.queuedJob ? (job: string) => dataSource.queuedJob!(job) : undefined), [dataSource]);
+  // Reads a queued message's turn; the same function across renders, so the
+  // poll that uses it is not restarted by every turn-list refresh.
+  const queuedTurn = useMemo(
+    () => (dataSource.queuedTurn ? (session: string, turn: string) => dataSource.queuedTurn!(session, turn) : undefined),
+    [dataSource]
+  );
   // A message is always POST /api/v0/turns, which queues it behind the
   // session's running turn: it never waits for that turn to end. key matches
   // the queued message to the turn that runs it.
@@ -551,7 +545,7 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
         const gen = nextSend();
         const from = shownId;
         const started = await dataSource.sendMessage!(from, { prompt, read_only: readOnly, agent, idempotency_key: key });
-        refreshJobs?.();
+        refreshQueue?.();
         awaitTurn(gen, started, from);
         return started;
       }
@@ -569,23 +563,23 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
       }
     : undefined;
 
-  // A review of a turn job, and a cancel of any job. Each rejects with the
-  // API's words.
-  const reviewJob = jobs
-    ? async (job: Job, agent: string, model: string) => {
-        await jobs.review(job.id, { agent, model: model || undefined });
-        refreshJobs?.();
+  // A review of a turn, asked by its id. It rejects with the API's words.
+  const reviewTurn = queue
+    ? async (turn: Turn, agent: string, model: string) => {
+        await queue.review(turn.id, { agent, model: model || undefined });
+        refreshQueue?.();
       }
     : undefined;
   // Fix on a failed review fills the message box of the session on screen.
   // The person edits it and sends it, so it runs as the session's next turn
-  // job in the same workspace.
+  // turn, in its own copy of the folder.
   const [prefill, setPrefill] = useState<{ session: string; text: string } | null>(null);
-  const fixFindings = jobs && sendMessage ? (text: string) => shownId !== null && setPrefill({ session: shownId, text }) : undefined;
-  const cancelJob = jobs
-    ? async (job: Job) => {
-        await jobs.cancel(job.id);
-        refreshJobs?.();
+  const fixFindings = queue && sendMessage ? (text: string) => shownId !== null && setPrefill({ session: shownId, text }) : undefined;
+  // Stops a queued or running turn from the CI/CD tab, such as a review.
+  const stopQueued = queue
+    ? async (t: ApiTurn) => {
+        await queue.stop(t.id);
+        refreshQueue?.();
       }
     : undefined;
 
@@ -804,8 +798,8 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
           resumable={sessionView.resumable}
           open={sessionView.open}
           onSend={sendMessage}
-          queuedJob={queuedJob}
-          keyed={!!dataSource.queuedJob}
+          queuedTurn={queuedTurn}
+          keyed={!!dataSource.queuedTurn}
           pending={pendingBySession[sessionView.id] ?? NO_PENDING}
           onPending={onPending}
           onStop={stopTurn}
@@ -870,9 +864,9 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
         onOpenEvent={openEvent}
         loadContext={loadContext}
         loadTurn={loadTurn}
-        jobs={jobsView}
-        onReview={reviewJob}
-        onCancelJob={cancelJob}
+        queue={queueView}
+        onReview={reviewTurn}
+        onStopQueued={stopQueued}
         onFix={fixFindings}
         loadAgents={dataSource.getHarnesses ? loadHarnesses : undefined}
         live={!!dataSource.subscribe}

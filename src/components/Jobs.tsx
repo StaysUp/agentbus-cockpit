@@ -1,5 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
+  agentLabel,
+  ApiTurn,
   clock,
   defaultModel,
   defaultReviewer,
@@ -7,13 +9,9 @@ import {
   Finding,
   findingPlace,
   fixPrompt,
-  Job,
-  jobTimes,
   modelHints,
   outcome,
-  reviewerLabel,
-  shortRunner,
-  currentAttempt,
+  turnTimes,
 } from '../data/jobs';
 import { Turn } from '../types';
 import { formatCost } from '../utils/format';
@@ -21,37 +19,40 @@ import { useNow } from '../utils/useNow';
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
-// Ticks once a second while any of the jobs has not ended.
-function useJobClock(jobs: Job[]): number {
-  useNow(jobs.some((j) => !ended(j)));
+// Ticks once a second while any of the turns has not ended.
+function useQueueClock(turns: ApiTurn[]): number {
+  useNow(turns.some((t) => !ended(t)));
   return Date.now();
 }
 
+// Whether a turn has ended: its listed row says, else the cockpit's own.
+function turnEnded(turn: Turn, row?: ApiTurn): boolean {
+  if (row) return ended(row);
+  return turn.state !== 'running' && turn.state !== 'queued';
+}
+
 // One line for a review: who checked, and what came of it.
-function reviewLine(job: Job, n: number, now: number): React.ReactNode {
-  const o = outcome(job);
-  const who = reviewerLabel(job);
-  const at = currentAttempt(job);
-  if (!ended(job)) {
-    const { ranMs, waitedMs } = jobTimes(job, now);
-    const where = at?.runner ? ` on ${shortRunner(at.runner)}` : '';
-    const time = job.state === 'queued' ? ` ${clock(waitedMs ?? 0)}` : ranMs !== undefined ? ` ${clock(ranMs)}` : '';
+function reviewLine(r: ApiTurn, n: number, now: number): React.ReactNode {
+  const o = outcome(r);
+  const who = agentLabel(r);
+  if (!ended(r)) {
+    const { ranMs, waitedMs } = turnTimes(r, now);
+    const time = r.state === 'queued' ? ` ${clock(waitedMs ?? 0)}` : ranMs !== undefined ? ` ${clock(ranMs)}` : '';
     return (
       <>
         <span className="spin" aria-hidden="true" />
         Review {n} · {who} · <span className="run">{o.label.toLowerCase()}{time}</span>
-        {where}
       </>
     );
   }
-  if (job.state === 'finished') {
-    const f = job.findings?.length ?? 0;
+  if (r.state === 'finished') {
+    const f = r.findings?.length ?? 0;
     return (
       <>
         Checked by {who}:{' '}
         <span className={o.cls}>
           {o.label.toLowerCase()}
-          {job.verdict === 'unknown' ? '' : `, ${plural(f, 'finding')}`}
+          {r.verdict === 'pass' || r.verdict === 'fail' ? `, ${plural(f, 'finding')}` : ''}
         </span>
       </>
     );
@@ -65,13 +66,13 @@ function reviewLine(job: Job, n: number, now: number): React.ReactNode {
 
 interface ReviewBarProps {
   turn: Turn;
-  // The turn job that ran this turn.
-  job: Job;
-  reviews: Job[];
+  // The turn's row in the turn list, when the last read had it.
+  row?: ApiTurn;
+  reviews: ApiTurn[];
   // The agents the framework can run, to pick a reviewer from.
   loadAgents?: () => Promise<{ name: string; found: boolean }[]>;
   onReview: (agent: string, model: string) => Promise<void>;
-  onShowJobs: () => void;
+  onShowTurns: () => void;
   // Puts a prompt in the message box, for the person to edit and send. Given
   // only where the source can send a next message; the box stays disabled
   // while a turn runs.
@@ -79,15 +80,15 @@ interface ReviewBarProps {
 }
 
 // Checked by, the Review button, and the newest review under them (mockup
-// v5). Each press makes a review job; several may run at once.
-export const ReviewBar: React.FC<ReviewBarProps> = ({ turn, job, reviews, loadAgents, onReview, onShowJobs, onFix }) => {
+// v5). Each press asks for a review turn; several may run at once.
+export const ReviewBar: React.FC<ReviewBarProps> = ({ turn, row, reviews, loadAgents, onReview, onShowTurns, onFix }) => {
   const [agents, setAgents] = useState<string[]>(['claude', 'codex']);
   const [agent, setAgent] = useState(() => defaultReviewer(turn.agent, ['claude', 'codex']));
   const [model, setModel] = useState(() => defaultModel(defaultReviewer(turn.agent, ['claude', 'codex'])));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showEarlier, setShowEarlier] = useState(false);
-  const now = useJobClock(reviews);
+  const now = useQueueClock(reviews);
   const agentRef = useRef(agent);
   agentRef.current = agent;
 
@@ -112,7 +113,7 @@ export const ReviewBar: React.FC<ReviewBarProps> = ({ turn, job, reviews, loadAg
     };
   }, [loadAgents, turn.agent]);
 
-  const canReview = ended(job);
+  const canReview = turnEnded(turn, row);
   const press = async () => {
     if (!canReview || busy || !agent) return;
     setBusy(true);
@@ -194,7 +195,7 @@ export const ReviewBar: React.FC<ReviewBarProps> = ({ turn, job, reviews, loadAg
               Fix
             </button>
           )}
-          <button type="button" className="lnk" onClick={onShowJobs}>
+          <button type="button" className="lnk" onClick={onShowTurns}>
             CI/CD
           </button>
         </div>
@@ -219,22 +220,16 @@ export const ReviewBar: React.FC<ReviewBarProps> = ({ turn, job, reviews, loadAg
   );
 };
 
-// The facts under a job: who, where, how long, what it cost.
-const JobFacts: React.FC<{ job: Job; now: number }> = ({ job, now }) => {
-  const at = currentAttempt(job);
-  const { waitedMs, ranMs } = jobTimes(job, now);
+// The facts under a turn: how long it waited and ran, what it cost.
+const TurnFacts: React.FC<{ row: ApiTurn; now: number }> = ({ row, now }) => {
+  const { waitedMs, ranMs } = turnTimes(row, now);
   const facts: React.ReactNode[] = [];
-  if (at?.runner) facts.push(<span title={at.runner}>on {shortRunner(at.runner)}</span>);
-  else if (job.state === 'queued') facts.push('no runner yet');
-  if (at) facts.push(`attempt ${at.number}`);
+  if (row.state === 'queued') facts.push(row.ahead ? `${plural(row.ahead, 'turn')} ahead` : 'waiting for a runner');
   if (waitedMs !== undefined) facts.push(`waited ${clock(waitedMs)}`);
   if (ranMs !== undefined) facts.push(`ran ${clock(ranMs)}`);
-  const cost = formatCost(job.result?.cost_usd);
+  const cost = formatCost(row.cost_usd);
   if (cost) facts.push(cost);
-  if (job.kind === 'turn' && typeof job.result?.changes?.count === 'number') {
-    facts.push(plural(job.result.changes.count, 'file') + ' changed');
-  }
-  if (job.kind === 'review' && ended(job)) facts.push('read-only: no commit');
+  if (row.kind === 'review' && ended(row)) facts.push('read-only: no commit');
   return (
     <div className="job-facts">
       {facts.map((f, i) => (
@@ -259,39 +254,31 @@ const FindingList: React.FC<{ findings: Finding[] }> = ({ findings }) => (
   </ul>
 );
 
-interface JobsTabProps {
-  // The turn job that ran this turn, or undefined for a turn no job ran.
-  job?: Job;
-  reviews: Job[];
-  onCancel?: (job: Job) => Promise<void>;
+interface TurnTabProps {
+  turn: Turn;
+  // The turn's row in the turn list, when the last read had it.
+  row?: ApiTurn;
+  reviews: ApiTurn[];
+  onStop?: (t: ApiTurn) => Promise<void>;
 }
 
-// The turn's CI/CD tab: the turn itself as a job, then each review of it,
-// newest last, with its state, runner, verdict and findings.
-export const JobsTab: React.FC<JobsTabProps> = ({ job, reviews, onCancel }) => {
-  const now = useJobClock(job ? [job, ...reviews] : reviews);
+// The turn's CI/CD tab: the turn itself, then each review of it, newest
+// last, with its state, verdict and findings.
+export const TurnTab: React.FC<TurnTabProps> = ({ turn, row, reviews, onStop }) => {
+  const now = useQueueClock(row ? [row, ...reviews] : reviews);
   const [open, setOpen] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  if (!job) {
-    return (
-      <p className="dim">
-        This turn has no job, so it has no CI/CD jobs: it ran before the job queue, or outside it. Turns sent from here
-        run as jobs, and can be reviewed.
-      </p>
-    );
-  }
-  const counts = { passed: 0, failed: 0, running: 0, other: 0 };
+  const counts = { passed: 0, failed: 0, running: 0 };
   for (const r of reviews) {
     if (!ended(r)) counts.running++;
     else if (r.state === 'finished' && r.verdict === 'pass') counts.passed++;
     else if (r.state === 'finished' && r.verdict === 'fail') counts.failed++;
-    else counts.other++;
   }
-  const t = outcome(job);
+  const t = row ? outcome(row) : null;
   return (
     <div className="jobs">
       <div className="tab-sum">
-        <b>{plural(reviews.length + 1, 'job')} on this turn</b>
+        <b>{reviews.length === 0 ? 'No reviews of this turn' : `${plural(reviews.length, 'review')} of this turn`}</b>
         {counts.passed > 0 && (
           <>
             <span className="sep"> · </span>
@@ -312,41 +299,40 @@ export const JobsTab: React.FC<JobsTabProps> = ({ job, reviews, onCancel }) => {
         )}
       </div>
       {error && <div className="form-error">{error}</div>}
-      <div className={`job-row turn-job s-${t.cls}`}>
+      <div className={`job-row turn-job s-${t?.cls ?? ''}`}>
         <div className="job-h">
           <b>The turn</b>
-          <code>{job.id}</code>
-          <span className={`job-st ${t.cls}`}>{t.label}</span>
+          <code>{turn.id}</code>
+          {t && <span className={`job-st ${t.cls}`}>{t.label}</span>}
         </div>
         <div className="job-sub">
-          {job.spec.agent ?? 'session'}
-          {job.spec.model ? ` · ${job.spec.model}` : ''}
-          {job.workspace ? ` · ${job.workspace.kind}` : job.spec.repo ? ' · worktree' : ''}
+          {turn.agentId ?? turn.agent ?? 'session'}
+          {turn.model ? ` · ${turn.model}` : ''}
         </div>
-        <JobFacts job={job} now={now} />
+        {row && <TurnFacts row={row} now={now} />}
       </div>
       {reviews.map((r, i) => {
         const o = outcome(r);
         const isOpen = open === r.id;
-        const reply = r.result?.reply_text;
+        const reply = r.reply;
         return (
           <div key={r.id} className={`job-row s-${o.cls}`}>
             <div className="job-h">
               {!ended(r) && <span className="spin" aria-hidden="true" />}
               <b>
-                Review {i + 1} · Checked by {reviewerLabel(r)}
+                Review {i + 1} · Checked by {agentLabel(r)}
               </b>
               <code>{r.id}</code>
               <span className={`job-st ${o.cls}`}>{o.label}</span>
             </div>
             {r.state === 'finished' && (
               <div className="job-sub">
-                {r.verdict === 'unknown'
-                  ? 'The reply had no verdict block. No verdict is never a pass.'
-                  : plural(r.findings?.length ?? 0, 'finding')}
+                {r.verdict === 'pass' || r.verdict === 'fail'
+                  ? plural(r.findings?.length ?? 0, 'finding')
+                  : 'The reply had no verdict block. No verdict is never a pass.'}
               </div>
             )}
-            <JobFacts job={r} now={now} />
+            <TurnFacts row={r} now={now} />
             {r.findings && r.findings.length > 0 && <FindingList findings={r.findings} />}
             <div className="job-acts">
               {reply && (
@@ -354,90 +340,88 @@ export const JobsTab: React.FC<JobsTabProps> = ({ job, reviews, onCancel }) => {
                   {isOpen ? 'Hide the reply' : 'Show the reply'}
                 </button>
               )}
-              {!ended(r) && onCancel && (
+              {!ended(r) && onStop && (
                 <button
                   type="button"
                   className="lnk"
                   onClick={() => {
                     setError(null);
-                    onCancel(r).catch((err: Error) => setError(err.message));
+                    onStop(r).catch((err: Error) => setError(err.message));
                   }}
                 >
-                  Cancel
+                  Stop
                 </button>
               )}
             </div>
-            {isOpen && reply && <pre className="term job-reply">{reply}</pre>}
+            {isOpen && reply && (
+              <pre className="term job-reply">
+                {reply}
+                {r.reply_truncated ? '…' : ''}
+              </pre>
+            )}
           </div>
         );
       })}
-      <p className="dim job-foot">A review runs read-only in the turn's workspace, in a session of its own.</p>
+      <p className="dim job-foot">A review runs read-only on the turn's changes, in a session of its own.</p>
     </div>
   );
 };
 
-interface SessionJobsProps {
-  jobs: Job[];
+interface SessionTurnsProps {
+  // The session's turns from the turn list, and the reviews of them.
+  rows: ApiTurn[];
   turns: Turn[];
-  // The framework turn a turn job ran, once known.
-  refOf: (job: Job) => { session: string; turn: string } | undefined;
   onSelectTurn: (turn: Turn) => void;
   error?: string | null;
 }
 
-// The session's jobs, live: each turn and review, its state, runner and
-// verdict. A row opens the turn it ran or reviewed.
-export const SessionJobs: React.FC<SessionJobsProps> = ({ jobs, turns, refOf, onSelectTurn, error }) => {
-  const now = useJobClock(jobs);
-  const byId = new Map(jobs.map((j) => [j.id, j]));
-  const turnOf = (j: Job): Turn | undefined => {
-    // An apply names the turn it applies up to.
-    if (j.kind === 'apply') return turns.find((t) => t.id === j.links?.applies_turn);
-    const turnJob = j.kind === 'review' ? byId.get(j.links?.reviews_job ?? '') : j;
-    const ref = turnJob ? refOf(turnJob) : undefined;
-    return ref ? turns.find((t) => t.id === ref.turn) : undefined;
-  };
+// The session's turns, live: each turn and review, queued, running or
+// ended, with its verdict. A row opens the turn it ran or reviewed.
+export const SessionTurns: React.FC<SessionTurnsProps> = ({ rows, turns, onSelectTurn, error }) => {
+  const now = useQueueClock(rows);
+  const turnOf = (r: ApiTurn): Turn | undefined => turns.find((t) => t.id === (r.kind === 'review' ? r.reviews : r.id));
   return (
     <>
       <div className="sub-h">CI/CD</div>
       {error && <div className="form-error">{error}</div>}
-      {jobs.length === 0 ? (
-        <p className="dim">No jobs in this session.</p>
+      {rows.length === 0 ? (
+        <p className="dim">No turns in this session.</p>
       ) : (
         <table className="grid events jobs-table">
           <thead>
             <tr>
-              <th>Job</th>
+              <th>Kind</th>
               <th>Turn</th>
               <th>Agent</th>
               <th>State</th>
-              <th>Runner</th>
+              <th className="r">Waited</th>
               <th className="r">Ran</th>
             </tr>
           </thead>
           <tbody>
-            {jobs.map((j) => {
-              const turn = turnOf(j);
-              const o = outcome(j);
-              const { ranMs } = jobTimes(j, now);
-              const at = currentAttempt(j);
+            {rows.map((r) => {
+              const turn = turnOf(r);
+              const o = outcome(r);
+              const { waitedMs, ranMs } = turnTimes(r, now);
+              const n = turn?.turnNumber ?? (r.kind === 'review' ? undefined : r.number);
               return (
-                <tr key={j.id} className="ev" onClick={() => turn && onSelectTurn(turn)}>
+                <tr key={r.id} className="ev" onClick={() => turn && onSelectTurn(turn)}>
                   <td>
-                    {j.kind}
+                    {r.kind === 'review' ? 'review' : 'turn'}
                     <div className="note">
-                      <code>{j.id}</code>
+                      <code>{r.id}</code>
                     </div>
                   </td>
-                  <td>{turn ? turn.turnNumber : '—'}</td>
-                  <td>{j.kind === 'review' ? reviewerLabel(j) : (j.spec.agent ?? '—')}</td>
+                  <td>{n ?? '—'}</td>
+                  <td>{agentLabel(r)}</td>
                   <td className={o.cls}>
                     {o.label}
-                    {j.kind === 'review' && j.state === 'finished' && j.verdict !== 'unknown'
-                      ? ` · ${plural(j.findings?.length ?? 0, 'finding')}`
+                    {r.state === 'queued' && r.ahead ? ` · ${r.ahead} ahead` : ''}
+                    {r.kind === 'review' && r.state === 'finished' && (r.verdict === 'pass' || r.verdict === 'fail')
+                      ? ` · ${plural(r.findings?.length ?? 0, 'finding')}`
                       : ''}
                   </td>
-                  <td title={at?.runner}>{shortRunner(at?.runner) || '—'}</td>
+                  <td className="r">{waitedMs === undefined ? '—' : clock(waitedMs)}</td>
                   <td className="r">{ranMs === undefined ? '—' : clock(ranMs)}</td>
                 </tr>
               );

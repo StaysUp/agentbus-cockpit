@@ -14,8 +14,8 @@ function dropOld(): void {
   for (const k of OLD_KEYS) sessionStorage.removeItem(k);
 }
 
-// One address and one token: sessions, turns, model calls, jobs and reviews
-// all come from the one agentbus API.
+// One address and one token: sessions, turns, model calls and reviews all
+// come from the one agentbus API.
 export interface Connection {
   address: string;
   token: string;

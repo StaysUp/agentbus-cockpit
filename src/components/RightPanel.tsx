@@ -19,9 +19,9 @@ import { ToolsTab } from './ToolsTab';
 import { formatElapsed, liveStatus } from '../data/liveStatus';
 import { useNow } from '../utils/useNow';
 import { SessionPanel } from './SessionPanel';
-import { Job } from '../data/jobs';
-import { JobsView } from '../data/useJobs';
-import { JobsTab, ReviewBar } from './Jobs';
+import { ApiTurn } from '../data/jobs';
+import { QueueView } from '../data/useJobs';
+import { ReviewBar, TurnTab } from './Jobs';
 import { reviewUI } from '../features';
 import { folderLabel, useFolders } from '../data/folders';
 
@@ -51,11 +51,11 @@ interface RightPanelProps {
   // True for a source that streams: a running turn's strip and Tools tab
   // follow its events as they arrive. Recorded data shows turns as they are.
   live?: boolean;
-  // The service's jobs, when it keeps a queue: the Review button and the
-  // CI/CD tab read them.
-  jobs?: JobsView;
-  onReview?: (job: Job, agent: string, model: string) => Promise<void>;
-  onCancelJob?: (job: Job) => Promise<void>;
+  // The service's turn list, when it keeps a queue: the Review button and
+  // the CI/CD tab read it.
+  queue?: QueueView;
+  onReview?: (turn: Turn, agent: string, model: string) => Promise<void>;
+  onStopQueued?: (t: ApiTurn) => Promise<void>;
   // Fix on a failed review: puts a prompt in the message box. Given only
   // where the source can send a next message.
   onFix?: (prompt: string) => void;
@@ -92,9 +92,8 @@ export const RightPanel: React.FC<RightPanelProps> = (props) => {
         agentName={props.agentName ?? session.agent}
         onSelectTurn={(t) => props.onSelectTurn?.(t)}
         onClose={props.onClose}
-        jobs={props.jobs ? props.jobs.ofSession(session.id) : undefined}
-        refOf={props.jobs?.refOf}
-        jobsError={props.jobs?.error}
+        queue={props.queue ? props.queue.ofSession(session.id) : undefined}
+        queueError={props.queue?.error}
       />
     );
   }
@@ -159,9 +158,9 @@ const TurnPanel: React.FC<TurnPanelProps> = ({
   openRow,
   setOpenRow,
   live,
-  jobs,
+  queue,
   onReview,
-  onCancelJob,
+  onStopQueued,
   onFix,
   loadAgents,
 }) => {
@@ -236,10 +235,10 @@ const TurnPanel: React.FC<TurnPanelProps> = ({
   // How the turn continued, from its turn.started: the chat no longer shows it.
   const continued = continuedLine(turn.detail, session?.turnsList ?? []);
 
-  // The job that ran this turn, and its reviews, with the job queue.
-  const turnJob = jobs?.turnJob(turn.sessionId, turn.id);
-  const reviews = turnJob ? jobs!.reviewsOf(turnJob.id) : [];
-  const showJobs = !!jobs && reviewUI();
+  // The turn's row in the turn list, and its reviews, with the queue.
+  const row = queue?.turnOf(turn.sessionId, turn.id);
+  const reviews = queue ? queue.reviewsOf(turn.id) : [];
+  const showJobs = !!queue && reviewUI();
   const tabs = showJobs ? [...TURN_TABS, ['cicd', 'CI/CD'] as [TabKey, string]] : TURN_TABS;
   const tab: TabKey = activeTab === 'cicd' && !showJobs ? 'result' : activeTab;
 
@@ -307,15 +306,15 @@ const TurnPanel: React.FC<TurnPanelProps> = ({
           )}
         </div>
         {continued && <div className="turn-cont">{continued}</div>}
-        {showJobs && turnJob && onReview && (
+        {showJobs && onReview && (
           <ReviewBar
             key={turn.id}
             turn={turn}
-            job={turnJob}
+            row={row}
             reviews={reviews}
             loadAgents={loadAgents}
-            onReview={(agent, model) => onReview(turnJob, agent, model)}
-            onShowJobs={() => setActiveTab('cicd')}
+            onReview={(agent, model) => onReview(turn, agent, model)}
+            onShowTurns={() => setActiveTab('cicd')}
             onFix={onFix}
           />
         )}
@@ -572,7 +571,7 @@ const TurnPanel: React.FC<TurnPanelProps> = ({
       <div id="d-body">
         {tab !== 'cicd' && <TabSum tab={tab} turn={turn} detail={detail} />}
 
-        {tab === 'cicd' && <JobsTab job={turnJob} reviews={reviews} onCancel={onCancelJob} />}
+        {tab === 'cicd' && <TurnTab turn={turn} row={row} reviews={reviews} onStop={onStopQueued} />}
 
         {tab === 'result' && (
           <div>

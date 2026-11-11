@@ -67,14 +67,16 @@ const replayedCall = codexCtx([...history, prompt('and what did it print?'), rea
 const firstCall = codexCtx([toolsItem, base, perms, agents, prompt('run echo')]);
 
 function loader(answers: Record<string, CallContext>) {
-  const load = async (x: string, full: boolean): Promise<CallContext> => {
+  const turns: string[] = [];
+  const load = async (turn: string, x: string, full: boolean): Promise<CallContext> => {
+    turns.push(turn);
     const a = answers[x];
     if (!a) throw new Error('404');
     if (full) return a;
     const strip = ({ json: _j, ...rest }: ContextPiece) => rest;
     return { ...a, pieces: a.pieces.map(strip), reply: a.reply && strip(a.reply) };
   };
-  return { load };
+  return { load, turns };
 }
 
 const titles = (root: Element, sel = ':scope > .ctx-fold') => Array.from(root.querySelectorAll(sel)).map((f) => f.querySelector('.ctx-title')!.textContent);
@@ -167,7 +169,7 @@ describe('Context tab, codex', () => {
 
   it('a first turn: base instructions as System, tools folded, context folded, the prompt open', async () => {
     const { load } = loader({ c: firstCall });
-    const r = await render(<ContextTab exchange="c" load={load} />);
+    const r = await render(<ContextTab turn="T1" exchange="c" load={load} />);
     await flush();
     await flush();
     const body = r.container.querySelector('.ctx')!;
@@ -196,7 +198,7 @@ describe('Context tab, codex', () => {
       ['prompt', 'new'],
     ]);
     const { load } = loader({ c });
-    const r = await render(<ContextTab exchange="c" load={load} replayed={6} continuity="replay" replayFrom="T1" recovered />);
+    const r = await render(<ContextTab turn="T1" exchange="c" load={load} replayed={6} continuity="replay" replayFrom="T1" recovered />);
     await flush();
     await flush();
     const body = r.container.querySelector('.ctx')!;

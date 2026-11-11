@@ -4,8 +4,8 @@ import { formatDuration, formatTokens, stateLabel, turnStateClass } from '../uti
 import { Cost } from './Cost';
 import { CopyButton } from './Icons';
 import { PanelHead } from './PanelHead';
-import { Job, TurnRef } from '../data/jobs';
-import { SessionJobs } from './Jobs';
+import { ApiTurn } from '../data/jobs';
+import { SessionTurns } from './Jobs';
 import { reviewUI } from '../features';
 import { folderLabel, sessionFolderRef, useFolders } from '../data/folders';
 
@@ -17,10 +17,9 @@ interface SessionPanelProps {
   agentName: string;
   onSelectTurn: (turn: Turn) => void;
   onClose?: () => void;
-  // With the job queue: the session's jobs, live.
-  jobs?: Job[];
-  refOf?: (job: Job) => TurnRef | undefined;
-  jobsError?: string | null;
+  // With the turn queue: the session's turns and their reviews, live.
+  queue?: ApiTurn[];
+  queueError?: string | null;
 }
 
 // The session level: what the whole session cost and used, and its turns.
@@ -31,9 +30,8 @@ export const SessionPanel: React.FC<SessionPanelProps> = ({
   agentName,
   onSelectTurn,
   onClose,
-  jobs,
-  refOf,
-  jobsError,
+  queue,
+  queueError,
 }) => {
   const turns = session.turnsList;
   const folder = folderLabel(session.folder, sessionFolderRef(session), useFolders());
@@ -102,8 +100,8 @@ export const SessionPanel: React.FC<SessionPanelProps> = ({
             ))}
           </tbody>
         </table>
-        {jobs && refOf && reviewUI() && (
-          <SessionJobs jobs={jobs} turns={turns} refOf={refOf} onSelectTurn={onSelectTurn} error={jobsError} />
+        {queue && reviewUI() && (
+          <SessionTurns rows={queue} turns={turns} onSelectTurn={onSelectTurn} error={queueError} />
         )}
       </div>
     </section>

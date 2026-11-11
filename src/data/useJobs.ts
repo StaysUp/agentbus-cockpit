@@ -1,70 +1,59 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { currentAttempt, ended, Job, JobsSource, resultRef, TurnRef, turnFromEvents } from './jobs';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { ApiTurn, QueueSource } from './jobs';
 
-// How often the jobs are read again. The jobs API has no stream, so the
-// CI/CD view is live by reading the list every POLL_MS.
+// How often the turns are read again. The turn list has no stream of its
+// own, so the CI/CD view is live by reading the list every POLL_MS.
 export const POLL_MS = 2000;
 
-// The jobs, tied to the framework turns they ran.
-export interface JobsView {
-  jobs: Job[];
-  // The turn job that ran a framework turn, by "session/turn".
-  turnJob(session: string, turn: string): Job | undefined;
-  // Where a turn job's turn ran, once known.
-  refOf(job: Job): TurnRef | undefined;
-  // The reviews of a job, oldest first.
-  reviewsOf(jobId: string): Job[];
-  // Every job of a framework session, turns and reviews, oldest first.
-  ofSession(session: string): Job[];
+// The turns of the queue, tied together: each turn, and the reviews of it.
+export interface QueueView {
+  turns: ApiTurn[];
+  // The listed row of one turn, when the last read had it.
+  turnOf(session: string, turn: string): ApiTurn | undefined;
+  // The reviews of a turn, oldest first. A review runs in a session of its
+  // own and names the turn it reviews.
+  reviewsOf(turnId: string): ApiTurn[];
+  // A session's turns and the reviews of them, oldest first.
+  ofSession(session: string): ApiTurn[];
   // The last read's failure, in the API's words; null after a good read.
   error: string | null;
-  // Read again now (after a click made a job).
+  // Read again now (after a click asked for a turn).
   refresh(): void;
 }
 
-const key = (r: TurnRef) => `${r.session}/${r.turn}`;
-const byCreated = (a: Job, b: Job) => a.created.localeCompare(b.created) || a.id.localeCompare(b.id);
+// Asked, else started: a queued turn has only asked.
+const when = (t: ApiTurn) => t.asked || t.started || '';
+const byAsked = (a: ApiTurn, b: ApiTurn) => when(a).localeCompare(when(b)) || a.id.localeCompare(b.id);
 
-// Builds the view from a list and the turns found in attempt events.
-export function jobsView(jobs: Job[], found: Record<string, TurnRef>, error: string | null, refresh: () => void): JobsView {
-  const refs = new Map<string, TurnRef>();
-  const byTurn = new Map<string, Job>();
-  const reviews = new Map<string, Job[]>();
-  const sessions = new Map<string, Job[]>();
-  const add = (s: string, j: Job) => {
-    const list = sessions.get(s);
-    if (list) list.push(j);
-    else sessions.set(s, [j]);
+// Builds the view from one read of the list.
+export function queueView(turns: ApiTurn[], error: string | null, refresh: () => void): QueueView {
+  const rows = new Map<string, ApiTurn>();
+  const reviews = new Map<string, ApiTurn[]>();
+  const sessions = new Map<string, ApiTurn[]>();
+  const push = <K>(m: Map<K, ApiTurn[]>, k: K, t: ApiTurn) => {
+    const list = m.get(k);
+    if (list) list.push(t);
+    else m.set(k, [t]);
   };
-  for (const j of jobs) {
-    if (j.kind === 'turn') {
-      const ref = resultRef(j) ?? found[j.id];
-      if (ref) {
-        refs.set(j.id, ref);
-        byTurn.set(key(ref), j);
-      }
-      const s = ref?.session ?? j.session ?? j.spec.session;
-      if (s) add(s, j);
-    } else if (j.kind === 'review') {
-      const of = j.links?.reviews_job;
-      if (of) {
-        const list = reviews.get(of);
-        if (list) list.push(j);
-        else reviews.set(of, [j]);
-      }
-      if (j.session) add(j.session, j);
-    } else if (j.kind === 'apply') {
-      // An apply is a job of the session whose turns it applies.
-      const s = j.session ?? j.spec.session;
-      if (s) add(s, j);
+  for (const t of turns) {
+    if (t.kind === 'review') {
+      if (t.reviews) push(reviews, t.reviews, t);
+      continue;
     }
+    rows.set(`${t.session}/${t.id}`, t);
+    push(sessions, t.session, t);
   }
-  for (const l of reviews.values()) l.sort(byCreated);
-  for (const l of sessions.values()) l.sort(byCreated);
+  // A review is listed with the session of the turn it reviews.
+  for (const t of turns) {
+    if (t.kind !== 'review' || !t.reviews) continue;
+    const of = turns.find((x) => x.id === t.reviews && x.kind !== 'review');
+    if (of) push(sessions, of.session, t);
+  }
+  for (const l of reviews.values()) l.sort(byAsked);
+  for (const l of sessions.values()) l.sort(byAsked);
   return {
-    jobs,
-    turnJob: (session, turn) => byTurn.get(`${session}/${turn}`),
-    refOf: (job) => refs.get(job.id),
+    turns,
+    turnOf: (session, turn) => rows.get(`${session}/${turn}`),
     reviewsOf: (id) => reviews.get(id) ?? [],
     ofSession: (s) => sessions.get(s) ?? [],
     error,
@@ -72,21 +61,13 @@ export function jobsView(jobs: Job[], found: Record<string, TurnRef>, error: str
   };
 }
 
-// Reads the jobs every POLL_MS while mounted. A turn job that runs but has
-// not ended has no result yet, so its turn is read once from its attempt's
-// events (turn.created).
-export function useJobs(src: JobsSource | undefined): JobsView | undefined {
+// Reads the turns every POLL_MS while mounted.
+export function useQueue(src: QueueSource | undefined): QueueView | undefined {
   const pollMs = src?.pollMs ?? POLL_MS;
-  const [jobs, setJobs] = useState<Job[]>([]);
-  const [found, setFound] = useState<Record<string, TurnRef>>({});
+  const [turns, setTurns] = useState<ApiTurn[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
   const refresh = useCallback(() => setTick((t) => t + 1), []);
-  // Attempts whose events were read, so each is read at most until it names
-  // its turn.
-  const asked = useRef<Set<string>>(new Set());
-  const foundRef = useRef(found);
-  foundRef.current = found;
 
   useEffect(() => {
     if (!src) return;
@@ -94,25 +75,10 @@ export function useJobs(src: JobsSource | undefined): JobsView | undefined {
     let timer: ReturnType<typeof setTimeout> | null = null;
     const read = async () => {
       try {
-        const list = await src.listJobs();
+        const list = await src.listTurns();
         if (!active) return;
-        setJobs(list);
+        setTurns(list);
         setError(null);
-        for (const j of list) {
-          if (j.kind !== 'turn' || resultRef(j) || foundRef.current[j.id] || ended(j) || j.state === 'queued') continue;
-          const at = currentAttempt(j);
-          if (!at || asked.current.has(at.id)) continue;
-          asked.current.add(at.id);
-          src
-            .attemptEvents(at.id)
-            .then((evs) => {
-              const ref = turnFromEvents(evs);
-              if (ref && active) setFound((f) => ({ ...f, [j.id]: ref }));
-              // Not named yet: ask again on a later read.
-              else asked.current.delete(at.id);
-            })
-            .catch(() => asked.current.delete(at.id));
-        }
       } catch (err) {
         if (active) setError((err as Error).message);
       } finally {
@@ -126,5 +92,5 @@ export function useJobs(src: JobsSource | undefined): JobsView | undefined {
     };
   }, [src, pollMs, tick]);
 
-  return useMemo(() => (src ? jobsView(jobs, found, error, refresh) : undefined), [src, jobs, found, error, refresh]);
+  return useMemo(() => (src ? queueView(turns, error, refresh) : undefined), [src, turns, error, refresh]);
 }

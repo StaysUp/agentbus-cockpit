@@ -20,7 +20,8 @@ export interface ApiOrigin {
   kind: string;
   session?: string;
   turn?: string;
-  job?: string;
+  turn_kind?: string;
+  // A turn.started stored before 0.4 names the work's kind as job_kind.
   job_kind?: string;
   agent?: string;
 }
@@ -30,7 +31,7 @@ export interface ApiOrigin {
 export function turnOrigin(o: unknown): TurnOrigin | undefined {
   const a = o as ApiOrigin | undefined;
   if (!a || typeof a !== 'object' || (a.kind !== 'asked' && a.kind !== 'result')) return undefined;
-  return { kind: a.kind, session: a.session, turn: a.turn, job: a.job, jobKind: a.job_kind, agent: a.agent };
+  return { kind: a.kind, session: a.session, turn: a.turn, turnKind: a.turn_kind ?? a.job_kind, agent: a.agent };
 }
 
 // Kinds that belong to the session, not to any turn.
@@ -200,13 +201,15 @@ export function replyPreview(text: string): { text: string; truncated: boolean }
 
 // A turn's state by the API's rule: a run's turn (it has session.opened) is
 // running until its session.closed, then finished on exit code 0 with no
-// error, else failed. Any other turn is finished once it has a turn.completed.
+// error, stopped when someone stopped it, else failed. Any other turn is
+// finished once it has a turn.completed.
 function replayState(turnEvents: CockpitEvent[]): { state: TurnState; ended?: CockpitEvent; stopped?: boolean } {
   const opened = turnEvents.some((e) => e.kind === 'session.opened');
   const closed = turnEvents.find((e) => e.kind === 'session.closed');
   if (opened && closed) {
     const ok = closed.exit_code === 0 && !closed.error;
-    return { state: ok ? 'finished' : 'failed', ended: closed, stopped: closed.stopped === true || undefined };
+    const stopped = closed.stopped === true;
+    return { state: stopped ? 'stopped' : ok ? 'finished' : 'failed', ended: closed, stopped: stopped || undefined };
   }
   const completions = turnEvents.filter((e) => e.kind === 'turn.completed');
   if (!opened && completions.length > 0) return { state: 'finished', ended: completions[completions.length - 1] };

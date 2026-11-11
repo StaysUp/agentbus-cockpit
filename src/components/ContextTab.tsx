@@ -2,9 +2,11 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Block, blocksOf, layoutContext, leafTools, MessageRow, PieceRow, ReplayGroup, splitReplayed, sum, Sum, toolCount, turnInfo } from '../data/context';
 import { CallContext, ContextPiece, TurnDetail } from '../types';
 
-export type LoadContext = (exchange: string, full: boolean) => Promise<CallContext>;
+export type LoadContext = (turn: string, exchange: string, full: boolean) => Promise<CallContext>;
 
 interface ContextTabProps {
+  // The turn the call belongs to: the API reads a call by its turn.
+  turn: string;
   // The call's exchange; undefined when its events carry none.
   exchange?: string;
   // undefined when the data source keeps no request bodies.
@@ -208,7 +210,7 @@ const ToolsItemBody: React.FC<BodyProps> = ({ piece, need, full, ask, callSize }
   );
 };
 
-export const ContextTab: React.FC<ContextTabProps> = ({ exchange, load, replayed, continuity, replayFrom, turns, loadTurn, recovered }) => {
+export const ContextTab: React.FC<ContextTabProps> = ({ turn, exchange, load, replayed, continuity, replayFrom, turns, loadTurn, recovered }) => {
   const [light, setLight] = useState<Read>({ loading: true });
   const [full, setFull] = useState<Read>({});
 
@@ -221,7 +223,7 @@ export const ContextTab: React.FC<ContextTabProps> = ({ exchange, load, replayed
   // The outline first (full=false), unless the whole call is already read.
   useEffect(() => {
     if (!load || !exchange) return;
-    const whole = cached(load, `${exchange}|full`);
+    const whole = cached(load, `${turn}|${exchange}|full`);
     if (whole) {
       started.current = exchange;
       setLight({ ctx: whole });
@@ -230,16 +232,16 @@ export const ContextTab: React.FC<ContextTabProps> = ({ exchange, load, replayed
     }
     started.current = null;
     setFull({});
-    const outline = cached(load, `${exchange}|light`);
+    const outline = cached(load, `${turn}|${exchange}|light`);
     if (outline) {
       setLight({ ctx: outline });
       return;
     }
     let live = true;
     setLight({ loading: true });
-    load(exchange, false).then(
+    load(turn, exchange, false).then(
       (ctx) => {
-        keep(load, `${exchange}|light`, ctx);
+        keep(load, `${turn}|${exchange}|light`, ctx);
         if (live) setLight({ ctx });
       },
       (e: unknown) => {
@@ -249,23 +251,23 @@ export const ContextTab: React.FC<ContextTabProps> = ({ exchange, load, replayed
     return () => {
       live = false;
     };
-  }, [load, exchange]);
+  }, [load, turn, exchange]);
 
   // Reads the whole call once per exchange; a failed read is not retried.
   const needFull = useCallback(() => {
     if (!load || !exchange || started.current === exchange) return;
     started.current = exchange;
     setFull({ loading: true });
-    load(exchange, true).then(
+    load(turn, exchange, true).then(
       (ctx) => {
-        keep(load, `${exchange}|full`, ctx);
+        keep(load, `${turn}|${exchange}|full`, ctx);
         if (current.current === exchange) setFull({ ctx });
       },
       (e: unknown) => {
         if (current.current === exchange) setFull({ error: e instanceof Error ? e.message : String(e) });
       }
     );
-  }, [load, exchange]);
+  }, [load, turn, exchange]);
 
   // A small call is read whole straight away, so the open parts fill in.
   useEffect(() => {

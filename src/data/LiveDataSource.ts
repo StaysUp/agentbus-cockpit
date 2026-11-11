@@ -1,5 +1,5 @@
 import {
-  QueuedJob,
+  QueuedTurn,
   ConnectView,
   SubscriptionList,
   AgentSummary,
@@ -18,11 +18,10 @@ import {
   TurnDiff,
   TurnDetail,
   TurnList,
-  TurnState,
-  Usage,
 } from '../types';
 import { FolderInfo } from './folders';
-import { ApiOrigin, buildAgents, extractCleanPrompt, sessionGroup, turnDetail, turnOrigin } from './turns';
+import { ApiTurn } from './jobs';
+import { buildAgents, extractCleanPrompt, sessionGroup, turnDetail, turnOrigin } from './turns';
 
 export interface LiveDataSourceConfig {
   baseUrl?: string; // defaults to http://127.0.0.1:8787
@@ -37,47 +36,16 @@ interface Snapshot {
   sessions: SessionSummary[];
 }
 
-// One turn as GET /api/v0/turns sends it (store.Turn in the framework).
-interface ApiTurn {
-  id: string;
-  session: string;
-  agent: string;
-  agent_id?: string;
-  idempotency_key?: string;
-  folder: string;
-  // The folder's reference, when the service gives it on a turn row.
-  folder_ref?: string;
-  origin?: ApiOrigin;
-  prompt: string;
-  prompt_truncated?: boolean;
-  // The reply to the turn's last model call (first 500 characters), the
-  // model that call asked for, and how many calls the turn made. Absent from
-  // a service older than these fields.
-  reply?: string;
-  reply_truncated?: boolean;
-  model?: string;
-  model_calls?: number;
-  started_seq: number;
-  started: string;
-  ended?: string;
-  state: TurnState;
-  stopped?: boolean;
-  outcome?: string;
-  exit_code?: number;
-  usage: Usage | null;
-  cost_usd: number;
-  cost_complete: boolean;
-}
-
-// A listed turn as the screens read it. n is its number, oldest first.
+// A listed turn as the screens read it. n is its place, oldest first; the
+// turn's own number is used when the service gives it.
 function turnRow(t: ApiTurn, n: number): Turn {
-  const startMs = new Date(t.started).getTime();
+  const startMs = new Date(t.started ?? '').getTime();
   const endMs = t.ended ? new Date(t.ended).getTime() : NaN;
   return {
     id: t.id,
-    turnNumber: n,
+    turnNumber: typeof t.number === 'number' && t.number > 0 ? t.number : n,
     sessionId: t.session,
-    startedAt: t.started,
+    startedAt: t.started ?? '',
     endedAt: t.ended,
     durationMs: isNaN(endMs - startMs) ? undefined : Math.max(0, endMs - startMs),
     prompt: extractCleanPrompt(t.prompt),
@@ -93,11 +61,11 @@ function turnRow(t: ApiTurn, n: number): Turn {
     folderRef: t.folder_ref || undefined,
     origin: turnOrigin(t.origin),
     state: t.state,
-    stopped: t.stopped === true || undefined,
+    stopped: t.stopped === true || t.state === 'stopped' || undefined,
     outcome: t.outcome,
     usage: t.usage ?? null,
-    costUsd: t.cost_usd,
-    costComplete: t.cost_complete,
+    costUsd: typeof t.cost_usd === 'number' ? t.cost_usd : null,
+    costComplete: t.cost_complete !== false,
     startedSeq: t.started_seq,
   };
 }
@@ -161,7 +129,9 @@ export class LiveDataSource implements DataSource {
   }
 
   // GET /api/v0/turns?session=<id>: one session's turns, newest first, a page
-  // at a time. Every page is read (before = next_before until it is null), so
+  // at a time. The first page starts with the turns still queued: they are
+  // left out here, since the conversation shows a queued message as its own
+  // pending copy until its turn starts. Every page is read (before = next_before until it is null), so
   // the turns can be numbered from the oldest. The list's cursor is the first
   // page's: later pages are computed at that seq or after it. A page from
   // another store means the store changed mid-read: read the list again once.
@@ -187,24 +157,27 @@ export class LiveDataSource implements DataSource {
         before = data.next_before;
       }
       if (restart) continue;
-      const turns = rows.reverse().map((t, i) => turnRow(t, i + 1));
+      const turns = rows
+        .filter((t) => t.state !== 'queued')
+        .reverse()
+        .map((t, i) => turnRow(t, i + 1));
       return { store: first!.store, seq: first!.seq, turns };
     }
     throw new Error(`Store changed while reading the turns of ${sessionId}; try again`);
   }
 
-  // GET /api/v0/turns/<id>/events?session=<id>: one turn's events, paged by
-  // next_after until it is null. A 409 means the store changed: start over
-  // once. session asks for this session's events only: a turn id is unique
-  // only within its session.
+  // GET /api/v0/sessions/<id>/events?turn=<turn>: one turn's events, paged
+  // by next_after until it is null. A 409 means the store changed: start
+  // over once. A turn id is unique only within its session, so the session
+  // is in the path.
   async getTurn(sessionId: string, turnId: string): Promise<TurnDetail | null> {
-    const path = `${this.baseUrl}/api/v0/turns/${encodeURIComponent(turnId)}/events`;
+    const path = `${this.baseUrl}/api/v0/sessions/${encodeURIComponent(sessionId)}/events`;
     for (let attempt = 0; attempt < 2; attempt++) {
       const events: CockpitEvent[] = [];
       let cursor: { store: string; after: number } | null = null;
       let restart = false;
       for (;;) {
-        const params = new URLSearchParams({ session: sessionId, limit: '1000' });
+        const params = new URLSearchParams({ turn: turnId, limit: '1000' });
         if (cursor) {
           params.set('store', cursor.store);
           params.set('after', String(cursor.after));
@@ -228,10 +201,11 @@ export class LiveDataSource implements DataSource {
     throw new Error(`Store changed twice while reading turn ${turnId}`);
   }
 
-  // GET /api/v0/calls/<exchange>/context?full=<bool>: one call's request,
-  // piece by piece, and its reply. A 404 means no body is stored for it.
-  async getCallContext(exchange: string, full: boolean): Promise<CallContext> {
-    const url = `${this.baseUrl}/api/v0/calls/${encodeURIComponent(exchange)}/context?full=${full}`;
+  // GET /api/v0/turns/<turn>/calls/<exchange>?full=<bool>: one call's
+  // request, piece by piece, and its reply. The call must belong to the
+  // turn. A 404 means no body is stored for it.
+  async getCallContext(turn: string, exchange: string, full: boolean): Promise<CallContext> {
+    const url = `${this.baseUrl}/api/v0/turns/${encodeURIComponent(turn)}/calls/${encodeURIComponent(exchange)}?full=${full}`;
     const res = await fetch(url, { headers: this.headers() });
     if (!res.ok) throw new Error(`${res.status}: ${await apiError(res)}`);
     const data = await res.json();
@@ -247,20 +221,21 @@ export class LiveDataSource implements DataSource {
     return Array.isArray(data.harnesses) ? data.harnesses : [];
   }
 
-  // GET /api/v0/jobs/<id>: a queued message's turn job. A job that ended
-  // failed or cancelled before its turn started says why, in the refusal the
-  // runner recorded when there is one.
-  async queuedJob(job: string): Promise<QueuedJob> {
-    const res = await fetch(`${this.baseUrl}/api/v0/jobs/${encodeURIComponent(job)}`, { headers: this.headers() });
+  // GET /api/v0/turns/<id>?session=<id>: a queued message's turn. A turn
+  // that ended without ever starting (stopped while queued, or refused) did
+  // not run the message, and says why when it can. A turn that started is
+  // in the session's list, which shows it.
+  async queuedTurn(session: string, turn: string): Promise<QueuedTurn> {
+    const params = new URLSearchParams({ session });
+    const res = await fetch(`${this.baseUrl}/api/v0/turns/${encodeURIComponent(turn)}?${params}`, { headers: this.headers() });
     if (!res.ok) throw new Error(await apiError(res));
-    const j = await res.json();
-    const ended = j.state === 'finished' || j.state === 'failed' || j.state === 'cancelled';
-    // A job whose turn started ran the message, whatever its end: only one
-    // that ended before any attempt started its turn did not.
-    const started = Array.isArray(j.attempts) && j.attempts.some((a: { turn_started?: boolean }) => a.turn_started === true);
-    const failed = !started && (j.state === 'failed' || j.state === 'cancelled');
-    const refused = j.result && typeof j.result.refused === 'string' ? (j.result.refused as string) : '';
-    return { ended, failed, why: failed ? refused || `the job ${j.state}${j.reason ? `: ${j.reason}` : ''}` : undefined };
+    const t = ((await res.json()) as { turn?: ApiTurn }).turn;
+    if (!t) return { ended: false, failed: false };
+    const ended = t.state === 'finished' || t.state === 'failed' || t.state === 'stopped';
+    const started = !!t.started_seq;
+    const failed = ended && !started && t.state !== 'finished';
+    const why = t.error || (t.state === 'stopped' ? 'stopped before it started' : `the turn ${t.state}`);
+    return { ended, failed, why: failed ? why : undefined };
   }
 
   // GET /api/v0/agents: the saved agents, in the order they were made.
@@ -351,14 +326,14 @@ export class LiveDataSource implements DataSource {
   }
 
   // POST /api/v0/turns: start an agent with a first prompt, in a new session.
-  // 202 {id, turn, base_url}: id is the session, turn the new turn.
+  // 202 {session, turn, state}: the turn's id is there even while it waits.
   async startRun(req: RunRequest): Promise<Started> {
     return this.post('/api/v0/turns', req);
   }
 
   // POST /api/v0/turns with session: the next turn of a session, in its own
   // folder, on its latest agent or the saved agent req.agent names. 202
-  // {id, turn, base_url}, or {id, job, queued, ahead} when it waits behind
+  // {session, turn, state}, with state queued and ahead when it waits behind
   // the session's running turn; 404 for an unknown session; 409 when the
   // session cannot be continued from here.
   async sendMessage(
@@ -372,8 +347,9 @@ export class LiveDataSource implements DataSource {
     return this.post('/api/v0/turns', body);
   }
 
-  // POST /api/v0/turns/<id>/stop: 202 when the service stops the turn, or
-  // is stopping it already; 409 when the turn is not running (it has ended).
+  // POST /api/v0/turns/<id>/stop: 202 when the service stops the turn (a
+  // queued one at once), or is stopping it already; 409 when the turn has
+  // ended.
   async stopTurn(turnId: string): Promise<'stopping' | 'not-running'> {
     const res = await fetch(`${this.baseUrl}/api/v0/turns/${encodeURIComponent(turnId)}/stop`, {
       method: 'POST',

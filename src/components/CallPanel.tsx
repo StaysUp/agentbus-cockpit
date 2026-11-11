@@ -163,6 +163,7 @@ export const CallPanel: React.FC<CallPanelProps> = ({ turn, call, tab, onTab, on
 
         {tab === 'context' && (
           <ContextTab
+            turn={turn.id}
             exchange={req.exchange}
             load={loadContext}
             replayed={typeof req.replayed === 'number' ? req.replayed : undefined}

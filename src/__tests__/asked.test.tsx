@@ -54,9 +54,9 @@ describe('asked work in the conversation', () => {
       turn('T1', 1, { prompt: 'run all two on this' }),
       turn('T2', 2, {
         prompt: '[AgentBus] This message is from AgentBus, not from the person',
-        origin: { kind: 'result', session: 'child1', turn: 'tc', job: 'job_1', jobKind: 'turn', agent: 'deepseek' },
+        origin: { kind: 'result', session: 'child1', turn: 'tc', turnKind: 'turn', agent: 'deepseek' },
       }),
-      turn('T3', 3, { origin: { kind: 'result', session: 'rs', job: 'job_2', jobKind: 'review', agent: 'codex' } }),
+      turn('T3', 3, { origin: { kind: 'result', session: 'rs', turnKind: 'review', agent: 'codex' } }),
     ]);
     const r = await render(
       <ConvoColumn session={s} selectedTurn={null} onSelectTurn={() => {}} agents={SAVED} onOpenSession={(id) => opened.push(id)} />
@@ -106,7 +106,7 @@ describe('asked work in the conversation', () => {
             seq: 9,
             turns: [
               row('T3', 3, { kind: 'later' }),
-              row('T2', 2, { kind: 'result', session: 'c', turn: 'tc', job: 'job_1', job_kind: 'review', agent: 'codex' }),
+              row('T2', 2, { kind: 'result', session: 'c', turn: 'tc', turn_kind: 'review', agent: 'codex' }),
               row('T1', 1),
             ],
             next_before: null,
@@ -118,7 +118,7 @@ describe('asked work in the conversation', () => {
     const list = await new LiveDataSource({ baseUrl: 'http://cockpit.test' }).getTurns('p');
     expect(list.turns.map((t) => t.origin)).toEqual([
       undefined,
-      { kind: 'result', session: 'c', turn: 'tc', job: 'job_1', jobKind: 'review', agent: 'codex' },
+      { kind: 'result', session: 'c', turn: 'tc', turnKind: 'review', agent: 'codex' },
       undefined,
     ]);
   });
@@ -133,8 +133,8 @@ describe('asked work across sessions', () => {
   ];
   const parent = [
     ...started('p', 'T1', 'run codex on this', 'claude'),
-    ...started('p', 'T2', '[AgentBus] result', 'claude', { kind: 'result', session: 'c', turn: 'C1', job: 'job_1', job_kind: 'turn', agent: 'codex' }),
-    ...started('p', 'T3', '[AgentBus] result', 'claude', { kind: 'result', session: 'n', turn: 'N1', job: 'job_2', job_kind: 'turn', agent: 'codex' }),
+    ...started('p', 'T2', '[AgentBus] result', 'claude', { kind: 'result', session: 'c', turn: 'C1', turn_kind: 'turn', agent: 'codex' }),
+    ...started('p', 'T3', '[AgentBus] result', 'claude', { kind: 'result', session: 'n', turn: 'N1', job_kind: 'turn', agent: 'codex' }),
   ];
   const child = (id: string, turn: string) => started(id, turn, 'do it', 'codex', { kind: 'asked', session: 'p', turn: 'T1' });
 
@@ -142,7 +142,7 @@ describe('asked work across sessions', () => {
     const lr = liveReplay([...parent, ...child('c', 'C1')]);
     const turns = (await lr.source.getTurns('p')).turns;
     expect(turns.map((t) => t.origin?.kind)).toEqual([undefined, 'result', 'result']);
-    expect((await lr.source.getTurns('c')).turns[0].origin).toEqual({ kind: 'asked', session: 'p', turn: 'T1', job: undefined, jobKind: undefined, agent: undefined });
+    expect((await lr.source.getTurns('c')).turns[0].origin).toEqual({ kind: 'asked', session: 'p', turn: 'T1', turnKind: undefined, agent: undefined });
   });
 
   it('a result link opens the child session under its own agent, and one not listed yet opens once it is', async () => {

@@ -62,7 +62,9 @@ const firstCall = ctx([
 // Answers like the service: full=false leaves out every json.
 function loader(answers: Record<string, CallContext | Error>) {
   const calls: string[] = [];
-  const load = async (x: string, full: boolean): Promise<CallContext> => {
+  const turns: string[] = [];
+  const load = async (turn: string, x: string, full: boolean): Promise<CallContext> => {
+    turns.push(turn);
     calls.push(`${x}:${full}`);
     const a = answers[x];
     if (!a) throw new Error('404: no request body is stored for this call');
@@ -71,7 +73,7 @@ function loader(answers: Record<string, CallContext | Error>) {
     const strip = ({ json: _json, ...rest }: ContextPiece) => rest;
     return { ...a, pieces: a.pieces.map(strip), reply: a.reply && strip(a.reply) };
   };
-  return { load, calls };
+  return { load, calls, turns };
 }
 
 function events() {
@@ -109,7 +111,7 @@ describe('Context tab', () => {
   });
 
   it('a replayed call: the history is marked "Turn 1" and folded, the new message open', async () => {
-    const { load, calls } = loader({ x2: replayedCall, x1: firstCall });
+    const { load, calls, turns } = loader({ x2: replayedCall, x1: firstCall });
     const base = new ReplayDataSource(jsonl(events()));
     const source: DataSource = {
       getAgents: () => base.getAgents(),
@@ -131,6 +133,8 @@ describe('Context tab', () => {
 
     // The outline first, then the whole call (it is small).
     expect(calls).toEqual(['x2:false', 'x2:true']);
+    // The call is read by its turn: GET /api/v0/turns/T2/calls/x2.
+    expect(turns).toEqual(['T2', 'T2']);
     const body = q('#d-body .ctx')!;
     expect(titles(body)).toEqual([
       'System',
@@ -175,7 +179,7 @@ describe('Context tab', () => {
 
   it('a first-turn call has no replayed part, and its first message is the new one', async () => {
     const { load } = loader({ x: firstCall });
-    const r = await render(<ContextTab exchange="x" load={load} />);
+    const r = await render(<ContextTab turn="T1" exchange="x" load={load} />);
     await flush();
     await flush();
     const body = r.container.querySelector('.ctx')!;
@@ -193,7 +197,7 @@ describe('Context tab', () => {
     const big = 'line of output\n'.repeat(20_000); // 300,000 chars
     const call = ctx([user([{ type: 'tool_result', tool_use_id: 't', content: big }])]);
     const { load } = loader({ x: call });
-    const r = await render(<ContextTab exchange="x" load={load} />);
+    const r = await render(<ContextTab turn="T1" exchange="x" load={load} />);
     await flush();
     await flush();
     const fresh = r.container.querySelector('.ctx-fold.msg-new')!;
@@ -216,7 +220,7 @@ describe('Context tab', () => {
     const call = ctx([user('a short question')]);
     call.size = 5_000_000;
     const { load, calls } = loader({ x: call });
-    const r = await render(<ContextTab exchange="x" load={load} />);
+    const r = await render(<ContextTab turn="T1" exchange="x" load={load} />);
     await flush();
     await flush();
     // The outline only: the open message offers the read instead of starting it.
@@ -232,7 +236,7 @@ describe('Context tab', () => {
 
   it('shows the endpoint error plainly', async () => {
     const { load } = loader({});
-    const r = await render(<ContextTab exchange="gone" load={load} />);
+    const r = await render(<ContextTab turn="T1" exchange="gone" load={load} />);
     await flush();
     const err = r.container.querySelector('.bad')!;
     expect(err.textContent).toBe('The request could not be read: 404: no request body is stored for this call');
@@ -240,7 +244,7 @@ describe('Context tab', () => {
   });
 
   it('says so when the source keeps no request bodies', async () => {
-    const r = await render(<ContextTab exchange="x" />);
+    const r = await render(<ContextTab turn="T1" exchange="x" />);
     expect(r.container.textContent).toContain('keeps no request bodies');
     r.unmount();
   });

@@ -60,7 +60,7 @@ function fakeService() {
         next_before: null,
       });
     }
-    if (url.pathname === '/api/v0/turns/T1/events') return json({ store: 'st_1', events: events.slice(1), next_after: null });
+    if (url.pathname === '/api/v0/sessions/live-abc/events' && url.searchParams.get('turn') === 'T1') return json({ store: 'st_1', events: events.slice(1), next_after: null });
     return json({}, 404);
   });
   return { fn, calls };
@@ -161,8 +161,10 @@ describe('Connect screen', () => {
     const paths = svc.calls.map((c) => new URL(c.url).pathname);
     expect(paths).toContain('/api/v0/events');
     expect(paths).toContain('/api/v0/turns');
-    expect(paths).toContain('/api/v0/turns/T1/events');
-    expect(paths).not.toContain('/api/v0/sessions/live-abc/events');
+    // One turn's events, never the whole session's.
+    const eventReads = svc.calls.map((c) => new URL(c.url)).filter((u) => u.pathname === '/api/v0/sessions/live-abc/events');
+    expect(eventReads.length).toBeGreaterThan(0);
+    expect(eventReads.every((u) => u.searchParams.get('turn') === 'T1')).toBe(true);
     expect(svc.calls.every((c) => c.auth === `Bearer ${TOKEN}`)).toBe(true);
     r.unmount();
   });
@@ -290,23 +292,25 @@ describe('AgentsColumn', () => {
   });
 });
 
-describe('Jobs on the one API', () => {
-  // The service as above, with a job queue on the same address and token.
-  function withJobs() {
+describe('The turn queue on the one API', () => {
+  // The service as above, with a turn queue on the same address and token:
+  // GET /api/v0/turns of every session answers.
+  function withQueue() {
     const svc = fakeService();
-    const jobsCalls: string[] = [];
+    const queueCalls: string[] = [];
     const fn = vi.fn(async (input: string, init?: RequestInit) => {
-      if (new URL(input).pathname !== '/api/v0/jobs') return svc.fn(input, init);
-      jobsCalls.push(input);
+      const url = new URL(input);
+      if (url.pathname !== '/api/v0/turns' || url.searchParams.has('session')) return svc.fn(input, init);
+      queueCalls.push(input);
       const auth = new Headers(init?.headers).get('Authorization');
       if (auth !== `Bearer ${TOKEN}`) return json({ error: 'unauthorized' }, 401);
-      return json({ jobs: [] });
+      return json({ store: 'st_1', seq: 5, turns: [], next_before: null });
     });
-    return { fn, jobsCalls };
+    return { fn, queueCalls };
   }
 
   it('one address and one token: the connect form asks for nothing else', async () => {
-    const s = withJobs();
+    const s = withQueue();
     vi.stubGlobal('fetch', s.fn);
     const r = await render(<Cockpit />);
     expect(r.container.querySelectorAll('form.connect input').length).toBe(2);
@@ -314,9 +318,9 @@ describe('Jobs on the one API', () => {
     await type(r.container.querySelector('input[name="token"]'), TOKEN);
     await submit(r.container);
     expect(r.container.querySelector('form.connect')).toBeNull();
-    // The jobs are read from the same address, with the same token.
-    expect(s.jobsCalls.length).toBeGreaterThan(0);
-    expect(s.jobsCalls.every((u) => u.startsWith(ADDR))).toBe(true);
+    // The turn list is read from the same address, with the same token.
+    expect(s.queueCalls.length).toBeGreaterThan(0);
+    expect(s.queueCalls.every((u) => u.startsWith(ADDR))).toBe(true);
     expect(Object.keys(sessionStorage).sort()).toEqual(['agentbus.address', 'agentbus.token']);
     expect(localStorage.length).toBe(0);
     expect(r.container.querySelector('.brand-foot')?.textContent).not.toContain('jobs at');
@@ -326,7 +330,7 @@ describe('Jobs on the one API', () => {
   it('a connect drops a control-plane token kept from before there was one API', async () => {
     sessionStorage.setItem('agentbus.jobs.address', 'http://127.0.0.1:8790');
     sessionStorage.setItem('agentbus.jobs.token', 'old');
-    const s = withJobs();
+    const s = withQueue();
     vi.stubGlobal('fetch', s.fn);
     const r = await render(<Cockpit />);
     await type(r.container.querySelector('input[name="token"]'), TOKEN);
@@ -336,14 +340,16 @@ describe('Jobs on the one API', () => {
     r.unmount();
   });
 
-  it('a service with no job queue still connects, without jobs', async () => {
+  it('a service with no turn queue still connects, without the queue', async () => {
     const svc = fakeService();
     vi.stubGlobal('fetch', svc.fn);
     const r = await render(<Cockpit />);
     await type(r.container.querySelector('input[name="token"]'), TOKEN);
     await submit(r.container);
     expect(r.container.querySelector('form.connect')).toBeNull();
-    expect(svc.calls.filter((c) => c.url.includes('/api/v0/jobs')).length).toBe(1);
+    // One probe of GET /api/v0/turns, answered 404, and no more reads of it.
+    expect(svc.calls.filter((c) => c.url.endsWith('/api/v0/turns?limit=1')).length).toBe(1);
+    expect(svc.calls.filter((c) => c.url.includes('/api/v0/turns?limit=200')).length).toBe(0);
     r.unmount();
   });
 });

@@ -428,7 +428,7 @@ describe('the switch window', () => {
       getTurn: (s, t) => replay.getTurn(s, t),
       sendMessage: async (id) => {
         sent.push(id);
-        return { id };
+        return { session: id, turn: 'Tnext', state: 'running' as const };
       },
     };
     const r = await render(<App dataSource={source} />);

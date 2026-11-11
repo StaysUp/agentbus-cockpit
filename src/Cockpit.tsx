@@ -13,7 +13,7 @@ import {
   saveReplay,
 } from './data/connection';
 import { LiveDataSource } from './data/LiveDataSource';
-import { JobsClient, probeJobs } from './data/jobs';
+import { probeQueue, TurnsClient } from './data/jobs';
 import { ReplayDataSource } from './data/ReplayDataSource';
 import rawSessionsJsonl from '../testdata/sessions-v0.jsonl?raw';
 
@@ -29,15 +29,15 @@ export const Cockpit: React.FC = () => {
   );
 
   const live = saved?.mode === 'live' && !checking ? saved.connection : null;
-  // Whether the service keeps a job queue: agentbus up and agentbus server
+  // Whether the service keeps a turn queue: agentbus up and agentbus server
   // do; a runner's own service does not. Read once per connect.
-  const [hasJobs, setHasJobs] = useState(false);
+  const [hasQueue, setHasQueue] = useState(false);
   const dataSource = useMemo(() => {
     if (saved?.mode === 'replay') return new ReplayDataSource(rawSessionsJsonl);
     if (live) return new LiveDataSource({ baseUrl: live.address, token: live.token });
     return null;
   }, [saved, live]);
-  const jobs = useMemo(() => (live && hasJobs ? new JobsClient(live.address, live.token) : undefined), [live, hasJobs]);
+  const queue = useMemo(() => (live && hasQueue ? new TurnsClient(live.address, live.token) : undefined), [live, hasQueue]);
 
   // Each check gets an id. Any mode change (recorded data, disconnect, a new
   // connect) takes a new id, so the result of an older check is ignored.
@@ -51,9 +51,9 @@ export const Cockpit: React.FC = () => {
   useEffect(() => {
     if (saved?.mode !== 'live' || !checking) return;
     const id = startCheck();
-    checkAll(saved.connection).then(({ problem, jobs }) => {
+    checkAll(saved.connection).then(({ problem, queue }) => {
       if (id !== checkId.current) return;
-      setHasJobs(jobs);
+      setHasQueue(queue);
       setChecking(false);
       if (problem) {
         clearSaved();
@@ -72,9 +72,9 @@ export const Cockpit: React.FC = () => {
     const id = startCheck();
     setChecking(true);
     setError(null);
-    const { problem, jobs } = await checkAll(c);
+    const { problem, queue } = await checkAll(c);
     if (id !== checkId.current) return;
-    setHasJobs(jobs);
+    setHasQueue(queue);
     setChecking(false);
     if (problem) {
       setError(problem);
@@ -116,9 +116,9 @@ export const Cockpit: React.FC = () => {
 
   return (
     <App
-      key={live ? `${live.address}\n${live.token}\n${hasJobs}` : 'replay'}
+      key={live ? `${live.address}\n${live.token}\n${hasQueue}` : 'replay'}
       dataSource={dataSource}
-      jobs={jobs}
+      queue={queue}
       sourceLabel={label}
       onDisconnect={disconnect}
       disconnectLabel={live ? 'Disconnect' : 'Connect'}
@@ -126,12 +126,12 @@ export const Cockpit: React.FC = () => {
   );
 };
 
-// The service first, then whether it keeps a job queue. problem is the first
-// problem found, or null.
-async function checkAll(c: Connection): Promise<{ problem: string | null; jobs: boolean }> {
+// The service first, then whether it keeps a turn queue. problem is the
+// first problem found, or null.
+async function checkAll(c: Connection): Promise<{ problem: string | null; queue: boolean }> {
   const problem = await checkConnection(c, window.location.origin);
-  if (problem) return { problem, jobs: false };
-  return { problem: null, jobs: await probeJobs(c.address, c.token) };
+  if (problem) return { problem, queue: false };
+  return { problem: null, queue: await probeQueue(c.address, c.token) };
 }
 
 export default Cockpit;

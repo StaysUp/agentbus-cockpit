@@ -81,6 +81,7 @@ function apiTurns(events: CockpitEvent[]) {
 interface Req {
   method: string;
   path: string;
+  query?: string;
   body: unknown;
 }
 
@@ -119,7 +120,7 @@ function fakeService(opts: {
     const url = new URL(input);
     const method = init?.method ?? 'GET';
     const body = init?.body ? JSON.parse(init.body as string) : undefined;
-    reqs.push({ method, path: url.pathname, body });
+    reqs.push({ method, path: url.pathname, query: url.search, body });
     const p = url.pathname;
     if (p === '/api/v0/sessions') return json({ store: 'st_1', seq, sessions: state.sessions });
     if (p === '/api/v0/harnesses') return json({ harnesses: opts.agents ?? [] });
@@ -155,10 +156,10 @@ function fakeService(opts: {
     if (p === '/api/v0/turns' && method === 'POST' && session) {
       return opts.messages
         ? opts.messages(session, body)
-        : json({ id: session, turn: 'Tnext', base_url: `${BASE}/s/${session}/t/Tnext` }, 202);
+        : json({ session: session, turn: 'Tnext', state: 'running', base_url: `${BASE}/s/${session}/t/Tnext` }, 202);
     }
     if (p === '/api/v0/turns' && method === 'POST')
-      return opts.runs ? opts.runs(body) : json({ id: 'new1', turn: 'Tn', base_url: `${BASE}/s/new1/t/Tn` }, 202);
+      return opts.runs ? opts.runs(body) : json({ session: 'new1', turn: 'Tn', state: 'running', base_url: `${BASE}/s/new1/t/Tn` }, 202);
     if (p === '/api/v0/turns' && method === 'GET') {
       // Newest first, opts.turnPage turns a page, paged by before.
       const all = apiTurns(state.events[url.searchParams.get('session') ?? ''] ?? []);
@@ -168,9 +169,9 @@ function fakeService(opts: {
       const more = older.length > page.length;
       return json({ store: 'st_1', seq, turns: page, next_before: more ? page[page.length - 1].started_seq : null });
     }
-    const m = p.match(/^\/api\/v0\/turns\/([^/]+)\/events$/);
-    if (m && method === 'GET') {
-      const turn = decodeURIComponent(m[1]);
+    const m = p.match(/^\/api\/v0\/sessions\/([^/]+)\/events$/);
+    if (m && method === 'GET' && url.searchParams.has('turn')) {
+      const turn = url.searchParams.get('turn')!;
       const list = Object.values(state.events).flat().filter((e) => e.turn === turn);
       return json({ store: 'st_1', events: list, next_after: null });
     }
@@ -463,9 +464,9 @@ describe('The started turn', () => {
     await pick('B');
     expect(shownSession(r.container)).toBe('B');
     await send('second in B');
-    await act(async () => replies.B(json({ id: 'B', turn: 'TB2', base_url: `${BASE}/s/B/t/TB2` }, 202)));
+    await act(async () => replies.B(json({ session: 'B', turn: 'TB2', state: 'running', base_url: `${BASE}/s/B/t/TB2` }, 202)));
     await settle();
-    await act(async () => replies.A(json({ id: 'A', turn: 'TA2', base_url: `${BASE}/s/A/t/TA2` }, 202)));
+    await act(async () => replies.A(json({ session: 'A', turn: 'TA2', state: 'running', base_url: `${BASE}/s/A/t/TA2` }, 202)));
     await settle();
     await svc.push(ev({ session: 'B', kind: 'turn.started', turn: 'TB2', text: 'second in B' }));
     await settle();
@@ -512,7 +513,7 @@ describe('The started turn', () => {
       if (how === 'agent') want = 'new1';
 
       // The reply lands, and the new session is listed.
-      await act(async () => reply!(json({ id: 'new1', turn: 'Tn', base_url: `${BASE}/s/new1/t/Tn` }, 202)));
+      await act(async () => reply!(json({ session: 'new1', turn: 'Tn', state: 'running', base_url: `${BASE}/s/new1/t/Tn` }, 202)));
       await settle();
       svc.state.sessions = [row('new1', { open: true, last: '2026-11-05T10:00:00Z' }), ...svc.state.sessions];
       await svc.push(ev({ session: 'new1', kind: 'session.opened', hold: 'h1', turn: 'Tn', agent: 'claude', folder: '/Users/ana/x' }));
@@ -635,7 +636,7 @@ describe('The prompt box', () => {
       events: { s1: running },
       messages: (_id, body) => {
         key = String((body as Record<string, unknown>).idempotency_key);
-        return json({ id: 's1', turn: '', job: 'job_2', base_url: '', queued: true, ahead: 1 }, 202);
+        return json({ session: 's1', turn: 't_2', state: 'queued', ahead: 1 }, 202);
       },
     });
     const r = await mount(svc);
@@ -687,7 +688,7 @@ describe('The prompt box', () => {
       sessions: [row('s1', { resumable: false, open: true })],
       events: { s1: running },
       agents: AGENTS,
-      messages: (id) => json({ id, turn: '', base_url: '', job: 'job_q', queued: true, ahead: 1 }, 202),
+      messages: (id) => json({ session: id, turn: 't_q', state: 'queued', ahead: 1 }, 202),
     });
     const r = await mount(svc);
     const pick = () => r.container.querySelector('#c-reply .next-agent') as HTMLSelectElement;
@@ -706,18 +707,18 @@ describe('The prompt box', () => {
     r.unmount();
   });
 
-  it('a queued job whose turn started is not offered for a retry', async () => {
+  it('a queued turn that started is not offered for a retry', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const running = oneTurn('s1', 'first').slice(0, 2);
     const svc = fakeService({
       sessions: [row('s1', { resumable: false, open: true })],
       events: { s1: running },
-      messages: (id) => json({ id, turn: '', base_url: '', job: 'job_s', queued: true, ahead: 1 }, 202),
+      messages: (id) => json({ session: id, turn: 't_s', state: 'queued', ahead: 1 }, 202),
     });
     const inner = svc.fn.getMockImplementation()!;
     svc.fn.mockImplementation(async (input: string, init?: RequestInit) => {
-      if (new URL(input).pathname === '/api/v0/jobs/job_s')
-        return json({ id: 'job_s', state: 'failed', reason: 'agent', attempts: [{ id: 't_1', turn_started: true }] });
+      if (new URL(input).pathname === '/api/v0/turns/t_s')
+        return json({ store: 'st_1', seq: 1, turn: { id: 't_s', session: 's1', agent: 'codex', folder: '/w', prompt: 'p', state: 'failed', started_seq: 5, error: 'agent' } });
       return inner(input, init);
     });
     const r = await mount(svc);
@@ -737,7 +738,7 @@ describe('The prompt box', () => {
     const svc = fakeService({
       sessions: [row('s1', { resumable: false, open: true }), row('s2', { resumable: true })],
       events: { s1: running, s2: oneTurn('s2', 'other') },
-      messages: (id) => json({ id, turn: '', base_url: '', job: 'job_q', queued: true, ahead: 1 }, 202),
+      messages: (id) => json({ session: id, turn: 't_q', state: 'queued', ahead: 1 }, 202),
     });
     const r = await mount(svc);
     await setValue(box(r), 'wait for me');
@@ -762,7 +763,7 @@ describe('The prompt box', () => {
       sessions: [row('s1', { resumable: false, open: true })],
       events: { s1: running },
       agents: AGENTS,
-      messages: (id) => (++n === 1 ? json({ error: 'gateway timeout' }, 504) : json({ id, turn: '', base_url: '', job: 'job_q', queued: true, ahead: 2 }, 202)),
+      messages: (id) => (++n === 1 ? json({ error: 'gateway timeout' }, 504) : json({ session: id, turn: 't_q', state: 'queued', ahead: 2 }, 202)),
     });
     const r = await mount(svc);
     const pick = () => r.container.querySelector('#c-reply .next-agent') as HTMLSelectElement;
@@ -790,7 +791,7 @@ describe('The prompt box', () => {
     const svc = fakeService({
       sessions: [row('s1', { resumable: false, open: true })],
       events: { s1: running },
-      messages: (id) => (++n === 1 ? json({ error: 'no' }, 400) : json({ id, turn: '', base_url: '', job: 'job_q', queued: true, ahead: 1 }, 202)),
+      messages: (id) => (++n === 1 ? json({ error: 'no' }, 400) : json({ session: id, turn: 't_q', state: 'queued', ahead: 1 }, 202)),
     });
     const r = await mount(svc);
     await setValue(box(r), 'will fail');
@@ -823,18 +824,18 @@ describe('The prompt box', () => {
     r.unmount();
   });
 
-  it('a queued message whose job ends without its turn shows as failed, with why', async () => {
+  it('a queued message whose turn ends without starting shows as failed, with why', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const running = oneTurn('s1', 'first').slice(0, 2);
     const svc = fakeService({
       sessions: [row('s1', { resumable: false, open: true })],
       events: { s1: running },
-      messages: (id) => json({ id, turn: '', base_url: '', job: 'job_q', queued: true, ahead: 1 }, 202),
+      messages: (id) => json({ session: id, turn: 't_q', state: 'queued', ahead: 1 }, 202),
     });
     const inner = svc.fn.getMockImplementation()!;
     svc.fn.mockImplementation(async (input: string, init?: RequestInit) => {
-      if (new URL(input).pathname === '/api/v0/jobs/job_q')
-        return json({ id: 'job_q', state: 'failed', reason: 'setup', result: { refused: 'this session cannot be continued from here', status: 409 } });
+      if (new URL(input).pathname === '/api/v0/turns/t_q')
+        return json({ store: 'st_1', seq: 1, turn: { id: 't_q', session: 's1', agent: '', folder: '', prompt: 'p', state: 'failed', error: 'this session cannot be continued from here' } });
       return inner(input, init);
     });
     const r = await mount(svc);
@@ -1125,7 +1126,7 @@ describe('The turn list from the API', () => {
   const turnReads = (svc: ReturnType<typeof fakeService>) =>
     svc.reqs.filter((q) => q.path === '/api/v0/turns' && q.method === 'GET').length;
   const eventReads = (svc: ReturnType<typeof fakeService>, turn: string) =>
-    svc.reqs.filter((q) => q.path === `/api/v0/turns/${turn}/events`).length;
+    svc.reqs.filter((q) => /^\/api\/v0\/sessions\/[^/]+\/events$/.test(q.path) && new URLSearchParams(q.query).get('turn') === turn).length;
 
   it('reads every page by next_before and shows the turns oldest first, never the session events', async () => {
     const events = [...oneTurn('s1', 'one', 1), ...oneTurn('s1', 'two', 2), ...oneTurn('s1', 'three', 3)];
@@ -1143,7 +1144,8 @@ describe('The turn list from the API', () => {
     // Turn 1 is open: its events were read, and only its.
     expect(eventReads(svc, 'T1-s1')).toBe(1);
     expect(eventReads(svc, 'T2-s1')).toBe(0);
-    expect(svc.reqs.some((q) => /\/sessions\/[^/]+\/events$/.test(q.path))).toBe(false);
+    // Every read of a session's events names one turn.
+    expect(svc.reqs.some((q) => /\/sessions\/[^/]+\/events$/.test(q.path) && !new URLSearchParams(q.query).has('turn'))).toBe(false);
     r.unmount();
   });
 
@@ -1397,7 +1399,7 @@ describe('The sessions list and rename', () => {
     });
     await settle();
     const patch = svc.reqs.filter((q) => q.method === 'PATCH');
-    expect(patch).toEqual([{ method: 'PATCH', path: '/api/v0/sessions/s2', body: { title: 'Login fix' } }]);
+    expect(patch).toEqual([{ method: 'PATCH', path: '/api/v0/sessions/s2', query: '', body: { title: 'Login fix' } }]);
     expect(r.container.querySelector('#sessions .title-edit')).toBeNull();
     expect(r.container.querySelector('#sessions .sess[data-session="s2"] .s-tt')?.textContent).toBe('Login fix');
     // The rename selects nothing: s1 stays on screen.

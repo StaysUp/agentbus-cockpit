@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { reviewUI } from '../features';
 import { liveStatus, LiveTurn } from '../data/liveStatus';
 import { turnNotes } from '../data/turns';
-import { Level, QueuedJob, SavedAgent, SessionDetail, Started, Turn } from '../types';
+import { Level, QueuedTurn, SavedAgent, SessionDetail, Started, Turn } from '../types';
 import { useNow } from '../utils/useNow';
 import { formatCost, formatTokens, stateLabel, turnStateClass } from '../utils/format';
 import { Cost } from './Cost';
@@ -31,9 +31,9 @@ interface ConvoColumnProps {
   // message's idempotency_key, which its turn carries. A message sent while
   // a turn runs is queued behind it: the answer says queued.
   onSend?: (prompt: string, readOnly: boolean, agent: string | undefined, key: string) => Promise<Started | undefined | void>;
-  // Reads a queued message's turn job, so one that ends without a turn
-  // shows as failed rather than queued for good.
-  queuedJob?: (job: string) => Promise<QueuedJob>;
+  // Reads a queued message's turn by its id, so one that ends without
+  // starting shows as failed rather than queued for good.
+  queuedTurn?: (session: string, turn: string) => Promise<QueuedTurn>;
   // The source lists each turn's idempotency_key, so a sent message leaves
   // the list only when its own turn is listed. Without it, any newer turn
   // ends a message that is not failed.
@@ -117,7 +117,7 @@ const OriginLine: React.FC<{ turn: Turn; agents?: SavedAgent[]; onOpenSession?: 
   if (o.kind === 'result') {
     return (
       <div className="m-origin">
-        {o.jobKind === 'review' ? 'Review result from ' : 'Result from '}
+        {o.turnKind === 'review' ? 'Review result from ' : 'Result from '}
         <b>{agentNameOf(o.agent, agents)}</b>, delivered by AgentBus, not typed by you
         {link('open its session')}
       </div>
@@ -150,8 +150,8 @@ export interface Pending {
   turnsAtSend: number;
   state: 'sending' | 'queued' | 'accepted' | 'failed';
   ahead?: number;
-  // The turn job, once the service answered.
-  job?: string;
+  // The turn's id, once the service answered.
+  turn?: string;
   // Why it failed, in the API's words.
   error?: string;
   // What it was sent with: the agent it named, if any.
@@ -162,7 +162,7 @@ export interface Pending {
 // An update of a session's pending messages.
 export type PendingUpdate = (list: Pending[]) => Pending[];
 
-// How often a queued message's job is read.
+// How often a queued message's turn is read.
 export const QUEUED_POLL_MS = 3000;
 
 // A key for one message: its turn carries it, so the message is matched to
@@ -192,7 +192,7 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
   onPrefillTaken,
   agents,
   onOpenSession,
-  queuedJob,
+  queuedTurn,
   keyed,
   pending: keptPending,
   onPending,
@@ -335,8 +335,8 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
     const set = (patch: Partial<Pending>) => setPending((list) => list.map((x) => (x.key === p.key ? { ...x, ...patch } : x)));
     try {
       const started = await onSend!(p.prompt, p.readOnly, p.agent, p.key);
-      if (started && started.queued) set({ state: 'queued', ahead: started.ahead, job: started.job });
-      else set({ state: 'accepted', job: started ? started.job : undefined });
+      if (started && started.state === 'queued') set({ state: 'queued', ahead: started.ahead, turn: started.turn });
+      else set({ state: 'accepted', turn: started ? started.turn : undefined });
     } catch (err) {
       set({ state: 'failed', error: (err as Error).message });
     }
@@ -349,19 +349,20 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
     inputRef.current?.focus();
   };
 
-  // A queued message whose job ends without its turn (refused, cancelled)
+  // A queued message whose turn ends without starting (refused, stopped)
   // shows as failed, with why.
-  const waiting = pending.filter((p) => p.state === 'queued' && p.job).map((p) => p.job!).join(',');
+  const sessionId = session.id;
+  const waiting = pending.filter((p) => p.state === 'queued' && p.turn).map((p) => p.turn!).join(',');
   useEffect(() => {
-    if (!queuedJob || waiting === '') return;
+    if (!queuedTurn || waiting === '') return;
     let active = true;
     const check = async () => {
-      for (const job of waiting.split(',')) {
+      for (const turn of waiting.split(',')) {
         try {
-          const st = await queuedJob(job);
+          const st = await queuedTurn(sessionId, turn);
           if (!active) return;
           if (st.ended && st.failed)
-            setPending((list) => list.map((x) => (x.job === job && x.state === 'queued' ? { ...x, state: 'failed', error: st.why } : x)));
+            setPending((list) => list.map((x) => (x.turn === turn && x.state === 'queued' ? { ...x, state: 'failed', error: st.why } : x)));
         } catch {
           // A read that fails is tried again on the next tick.
         }
@@ -372,7 +373,7 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
       active = false;
       clearInterval(id);
     };
-  }, [waiting, queuedJob]);
+  }, [waiting, queuedTurn, sessionId]);
 
   // The chat is prompts and replies, under one header line per turn. A turn's
   // calls and how it continued are in the panel, so opening a turn never

@@ -91,11 +91,11 @@ function fakeService(opts: { sessions: ReturnType<typeof row>[]; events: Record<
     }
     const stop = p.match(/^\/api\/v0\/turns\/([^/]+)\/stop$/);
     if (stop && method === 'POST') {
-      return opts.stop ? opts.stop() : json({ id: 's1', turn: decodeURIComponent(stop[1]) }, 202);
+      return opts.stop ? opts.stop() : json({ session: 's1', turn: decodeURIComponent(stop[1]) }, 202);
     }
-    const m = p.match(/^\/api\/v0\/turns\/([^/]+)\/events$/);
-    if (m && method === 'GET') {
-      const turn = decodeURIComponent(m[1]);
+    const m = p.match(/^\/api\/v0\/sessions\/([^/]+)\/events$/);
+    if (m && method === 'GET' && url.searchParams.has('turn')) {
+      const turn = url.searchParams.get('turn')!;
       const list = Object.values(state.events).flat().filter((e) => e.turn === turn);
       return json({ store: 'st_1', events: list, next_after: null });
     }
@@ -268,7 +268,7 @@ describe('The Stop button', () => {
   it('a recorded session.closed with stopped reads as stopped', () => {
     const events = [...runningTurn('s1'), ev({ session: 's1', kind: 'session.closed', turn: 'T1', hold: 'h1', exit_code: 143, stopped: true })];
     const [turn] = buildTurns('s1', events);
-    expect(turn.state).toBe('failed');
+    expect(turn.state).toBe('stopped');
     expect(turn.stopped).toBe(true);
   });
 });
@@ -276,7 +276,7 @@ describe('The Stop button', () => {
 describe('LiveDataSource.stopTurn', () => {
   it('posts to /turns/<id>/stop with the token and no body; 202 is stopping, 409 is not running, others reject with the API words', async () => {
     const answers = [
-      json({ id: 's1', turn: 'T1' }, 202),
+      json({ session: 's1', turn: 'T1' }, 202),
       json({ error: 'the turn is not running' }, 409),
       json({ error: 'no such turn' }, 404),
     ];
@@ -297,12 +297,12 @@ describe('LiveDataSource.stopTurn', () => {
   it('reads stopped from the turn list', async () => {
     const turn = {
       id: 'T1', session: 's1', agent: 'codex', folder: '/w', prompt: 'p', started_seq: 1,
-      started: '2026-11-07T09:00:00Z', ended: '2026-11-07T09:00:05Z', state: 'failed', stopped: true,
+      started: '2026-11-07T09:00:00Z', ended: '2026-11-07T09:00:05Z', state: 'stopped', stopped: true,
       exit_code: 143, usage: null, cost_usd: 0, cost_complete: true,
     };
     vi.stubGlobal('fetch', vi.fn(async () => json({ store: 'st', seq: 2, turns: [turn], next_before: null })));
     const list = await new LiveDataSource({ baseUrl: BASE }).getTurns('s1');
     expect(list.turns[0].stopped).toBe(true);
-    expect(list.turns[0].state).toBe('failed');
+    expect(list.turns[0].state).toBe('stopped');
   });
 });

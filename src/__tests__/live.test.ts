@@ -62,7 +62,7 @@ describe('LiveDataSource', () => {
     ...fields,
   });
 
-  it('getTurns pages by next_before until it is null and numbers the turns from the oldest', async () => {
+  it('getTurns pages by next_before until it is null, leaves out queued turns, and numbers the turns from the oldest', async () => {
     const urls: string[] = [];
     vi.stubGlobal(
       'fetch',
@@ -76,6 +76,9 @@ describe('LiveDataSource', () => {
             store: 'st_1',
             seq: 40,
             turns: [
+              // The first page starts with the queued turns: the chat shows
+              // a queued message as its own pending copy instead.
+              apiTurn('Q4', 0, { state: 'queued', started: undefined, started_seq: undefined, number: 4, asked: '2026-11-05T09:01:00Z' }),
               apiTurn('T3', 30, { state: 'running', usage: null, cost_usd: 0, prompt: 'x'.repeat(500), prompt_truncated: true }),
               apiTurn('T2', 20, { ended: '2026-11-05T09:00:07Z', outcome: 'finished', cost_complete: false }),
             ],
@@ -150,7 +153,7 @@ describe('LiveDataSource', () => {
       vi.fn(async (input: string) => {
         const url = new URL(input);
         urls.push(url.pathname + url.search);
-        const session = url.searchParams.get('session');
+        const session = url.pathname.split('/')[4];
         const mine = turnEvents.filter((e) => !session || e.session === session);
         const after = url.searchParams.get('after');
         if (!after) return json({ store: 'st_1', events: mine.slice(0, 2), next_after: 5 });
@@ -159,8 +162,8 @@ describe('LiveDataSource', () => {
       })
     );
     const d = (await new LiveDataSource({ baseUrl: BASE }).getTurn('abc', 'T1'))!;
-    expect(urls[0]).toBe('/api/v0/turns/T1/events?session=abc&limit=1000');
-    expect(urls[1]).toContain('session=abc');
+    expect(urls[0]).toBe('/api/v0/sessions/abc/events?turn=T1&limit=1000');
+    expect(urls[1]).toContain('/api/v0/sessions/abc/events?turn=T1');
     expect(urls[1]).toContain('store=st_1');
     expect(urls[1]).toContain('after=5');
     expect(d.events.map((e) => e.session)).toEqual(['abc', 'abc', 'abc', 'abc']);
@@ -210,7 +213,7 @@ describe('LiveDataSource', () => {
       vi.fn(async (input: string) => {
         const url = new URL(input);
         reads++;
-        if (url.pathname.includes('/none/')) return json({ store: 'st_2', events: [], next_after: null });
+        if (url.searchParams.get('turn') === 'none') return json({ store: 'st_2', events: [], next_after: null });
         if (reads === 1) return json({ store: 'st_1', events: sessionEvents.slice(1, 2), next_after: 4 });
         if (reads === 2) return json({ store: 'st_2' }, 409);
         return json({ store: 'st_2', events: sessionEvents.slice(1), next_after: null });
@@ -340,21 +343,43 @@ describe('LiveDataSource', () => {
     expect((await src.getSessions()).map((s) => s.id)).toEqual(['abc', 'plain']);
   });
 
-  it('reads a call context by its exchange, with full as asked, and says the API\'s words on 404', async () => {
+  it('reads a call context by its turn and exchange, with full as asked, and says the API\'s words on 404', async () => {
     const urls: string[] = [];
     const auth: (string | null)[] = [];
     vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
       urls.push(url);
       auth.push(new Headers(init?.headers).get('Authorization'));
-      if (url.includes('/calls/gone/')) return json({ error: 'no request body is stored for this call' }, 404);
+      if (url.includes('/calls/gone?')) return json({ error: 'no request body is stored for this call' }, 404);
       return json({ exchange: 'x-1/7', size: 10, pieces: [{ kind: 'message', label: 'user', hash: 'h', size: 10 }] });
     });
     const src = new LiveDataSource({ baseUrl: BASE, token: 'tok' });
-    const c = await src.getCallContext('x-1/7', false);
+    const c = await src.getCallContext('T1', 'x-1/7', false);
     expect(c.pieces).toHaveLength(1);
-    expect(urls[0]).toBe(`${BASE}/api/v0/calls/x-1%2F7/context?full=false`);
+    expect(urls[0]).toBe(`${BASE}/api/v0/turns/T1/calls/x-1%2F7?full=false`);
     expect(auth[0]).toBe('Bearer tok');
-    await expect(src.getCallContext('gone', true)).rejects.toThrow('404: no request body is stored for this call');
-    expect(urls[1]).toBe(`${BASE}/api/v0/calls/gone/context?full=true`);
+    await expect(src.getCallContext('T1', 'gone', true)).rejects.toThrow('404: no request body is stored for this call');
+    expect(urls[1]).toBe(`${BASE}/api/v0/turns/T1/calls/gone?full=true`);
+  });
+  it('follows a queued message by its turn id: only a turn that ended without starting failed it', async () => {
+    const urls: string[] = [];
+    const rows: Record<string, Record<string, unknown>> = {
+      q: { state: 'queued', ahead: 1 },
+      gone: { state: 'stopped', stopped: true },
+      refused: { state: 'failed', error: 'the session is closed' },
+      ran: { state: 'stopped', stopped: true, started_seq: 12 },
+      done: { state: 'finished', started_seq: 13 },
+    };
+    vi.stubGlobal('fetch', async (url: string) => {
+      urls.push(url);
+      const id = new URL(url).pathname.split('/').pop()!;
+      return json({ store: 'st', seq: 1, turn: { id, session: 's1', agent: '', folder: '', prompt: 'p', state: 'queued', ...rows[id] } });
+    });
+    const src = new LiveDataSource({ baseUrl: BASE });
+    expect(await src.queuedTurn('s1', 'q')).toEqual({ ended: false, failed: false, why: undefined });
+    expect(urls[0]).toBe(`${BASE}/api/v0/turns/q?session=s1`);
+    expect(await src.queuedTurn('s1', 'gone')).toEqual({ ended: true, failed: true, why: 'stopped before it started' });
+    expect(await src.queuedTurn('s1', 'refused')).toEqual({ ended: true, failed: true, why: 'the session is closed' });
+    expect(await src.queuedTurn('s1', 'ran')).toEqual({ ended: true, failed: false, why: undefined });
+    expect(await src.queuedTurn('s1', 'done')).toEqual({ ended: true, failed: false, why: undefined });
   });
 });

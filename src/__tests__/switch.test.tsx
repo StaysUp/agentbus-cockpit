@@ -4,7 +4,7 @@
 import { act } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { App } from '../App';
-import { Job, JobSpec, JobsSource } from '../data/jobs';
+import { QueueSource } from '../data/jobs';
 import { buildAgents, createEmptyUsage } from '../data/turns';
 import { CockpitEvent, DataSource, SavedAgent, SessionSummary } from '../types';
 import { ev, flush, liveReplay, render } from './helpers';
@@ -29,7 +29,7 @@ function mixed(session = 's1'): CockpitEvent[] {
 function source(events: CockpitEvent[]) {
   const base = liveReplay(events);
   const resumable = <T extends { resumable?: boolean }>(list: T[]) => list.map((s) => ({ ...s, resumable: true }));
-  const sendMessage = vi.fn(async (id: string) => ({ id, turn: 'Tnext' }));
+  const sendMessage = vi.fn(async (id: string) => ({ session: id, turn: 'Tnext', state: 'running' as const }));
   const src: DataSource = {
     ...base.source,
     getSessions: async (a) => resumable(await base.source.getSessions(a)),
@@ -109,34 +109,25 @@ describe('switching agent per message', () => {
 
   it('sends the picked agent through POST /api/v0/turns when the service keeps a queue', async () => {
     const { src, sendMessage } = source(mixed());
-    const created: JobSpec[] = [];
-    const T0 = '2026-11-09T01:00:00Z';
-    let made: Job | null = null;
-    const jobs: JobsSource = {
-      address: 'http://jobs.test',
+    const reviews: string[] = [];
+    const queue: QueueSource = {
+      address: 'http://agentbus.test',
       pollMs: 10,
-      listJobs: async () => (made ? [made] : []),
-      getJob: async () => made!,
-      createTurnJob: async (spec) => {
-        created.push(spec);
-        made = {
-          id: 'job_1', kind: 'turn', state: 'running', spec, verdict: null, created: T0, updated: T0, attempt: 'att_1',
-          attempts: [{ id: 'att_1', number: 1, runner: 'r', state: 'running', taken: T0, started: T0 }],
-        };
-        return made;
+      listTurns: async () => [],
+      review: async (id) => {
+        reviews.push(id);
+        return { session: 'r1', turn: 'R1', state: 'queued' };
       },
-      review: async () => made!,
-      cancel: async () => undefined,
-      attemptEvents: async () => [{ seq: 1, time: T0, kind: 'turn.created', data: { session: 's1', turn: 'Tnext' } }],
+      stop: async () => undefined,
     };
-    const r = await render(<App dataSource={src} jobs={jobs} />);
+    const r = await render(<App dataSource={src} queue={queue} />);
     await waitFor(() => r.container.querySelector('#c-reply .next-agent') !== null, 'the picker');
     await setValue(r.container.querySelector('#c-reply .next-agent'), 'a_haiku');
     await send(r.container, 'back to haiku');
-    // With a queue too, a message is POST /api/v0/turns, which makes its job.
+    // With a queue too, a message is POST /api/v0/turns: the one path.
     await waitFor(() => sendMessage.mock.calls.length === 1, 'the send');
     expect((sendMessage.mock.calls[0] as unknown[])[1]).toMatchObject({ agent: 'a_haiku', prompt: 'back to haiku' });
-    expect(created).toHaveLength(0);
+    expect(reviews).toHaveLength(0);
     r.unmount();
   });
 

@@ -441,7 +441,7 @@ describe('selection edge cases', () => {
       getTurn: (s, t) => (s === 'fresh' ? freshReplay.getTurn(s, t) : replay.getTurn(s, t)),
       getHarnesses: async () => [{ name: 'claude', found: true }],
       listAgents: async () => [{ id: 'claude', name: 'Claude Code', harness: 'claude', access: 'subscription' }],
-      startRun: async () => ({ id: 'fresh' }),
+      startRun: async () => ({ session: 'fresh', turn: 'Tfresh', state: 'running' as const }),
       subscribe: (_cb, onSnapshot) => {
         snapshot = onSnapshot ?? null;
         replay.getSessions().then((l) => onSnapshot?.(l));
