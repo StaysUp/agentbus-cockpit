@@ -3,7 +3,10 @@ import rawSessionsJsonl from '../testdata/sessions-v0.jsonl?raw';
 import { AgentsColumn } from './components/AgentsColumn';
 import { ConvoColumn, Pending, PendingUpdate } from './components/ConvoColumn';
 import { AgentsDialog } from './components/AgentsDialog';
-import { SettingsDialog } from './components/SettingsDialog';
+import { SettingsPage } from './components/SettingsPage';
+import { RunnersPage } from './components/RunnersPage';
+import { useRunners } from './components/RunnersList';
+import { usePage } from './page';
 import type { SettingsApi } from './data/settings';
 import { SubscriptionApi } from './components/ConnectStep';
 import { NewSessionDialog } from './components/NewSessionDialog';
@@ -181,7 +184,8 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
 
   // The agents form: closed (null), or open for a new agent or on one to edit.
   const [agentsDialog, setAgentsDialog] = useState<{ edit?: SavedAgent } | null>(null);
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  // The page on screen: the cockpit, /runners or /settings.
+  const [page, goPage] = usePage();
   // The saved agents: the rows of the Agents column, the picker beside Send
   // and each turn's agent name. Read at the start, whenever the agents form
   // closes, and after a remove (agentsKey).
@@ -551,10 +555,9 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
   // The Settings page, when the source has every settings route.
   const settingsApi = useMemo<SettingsApi | undefined>(() => {
     const d = dataSource;
-    if (!d.getSettings || !d.putDefaults || !d.getPolicy || !d.putPolicy || !d.getInstructions || !d.putInstructions) return undefined;
+    if (!d.getSettings || !d.getPolicy || !d.putPolicy || !d.getInstructions || !d.putInstructions) return undefined;
     return {
       getSettings: () => d.getSettings!(),
-      putDefaults: (v, etag) => d.putDefaults!(v, etag),
       getPolicy: () => d.getPolicy!(),
       putPolicy: (p, etag) => d.putPolicy!(p, etag),
       getInstructions: () => d.getInstructions!(),
@@ -562,6 +565,10 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
     };
   }, [dataSource]);
   const loadRunners = useMemo(() => (dataSource.listRunners ? () => dataSource.listRunners!() : undefined), [dataSource]);
+  // The runners, read for the online count beside the Runners link and for
+  // the Runners page.
+  const runners = useRunners(loadRunners);
+  const runnersOnline = runners.runners ? runners.runners.filter((r) => r.online).length : undefined;
   const removeAgent = async (id: string) => {
     await dataSource.removeAgent!(id);
     setAgentsKey((k) => k + 1);
@@ -911,7 +918,11 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
   const callShown = !!selectedTurn?.detail?.modelCalls.some((p) => p.requested.id === selectedCallId);
   const shownLevel: Level = !selectedTurn ? 'session' : level === 'call' && !callShown ? 'turn' : level;
   const dialogOpenRef = useRef(false);
-  dialogOpenRef.current = newSession !== null || agentsDialog !== null || settingsOpen;
+  // The page of its own on screen, if any. A source without the page's
+  // routes shows the cockpit at that address instead.
+  const pageShown = (page === 'runners' && !!loadRunners) || (page === 'settings' && !!settingsApi);
+  // A page of its own counts as a dialog: Esc leaves the cockpit under it as it is.
+  dialogOpenRef.current = newSession !== null || agentsDialog !== null || pageShown;
 
   // Esc first leaves a focused text box, then collapses an open row in the
   // turn panel, then closes the panel. The panel's Session and Turn links
@@ -940,6 +951,15 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
     );
   }
 
+  // The pages of their own, each at its address. A source without the
+  // page's routes shows the cockpit.
+  if (pageShown && page === 'runners') {
+    return <RunnersPage runners={runners.runners} error={runners.error} onBack={() => goPage('cockpit')} />;
+  }
+  if (pageShown && page === 'settings') {
+    return <SettingsPage api={settingsApi!} onBack={() => goPage('cockpit')} />;
+  }
+
   return (
     <FoldersContext.Provider value={folders}>
     <div id="app" className={panelOpen ? 'panel' : 'nopanel'}>
@@ -955,8 +975,9 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
         onAddAgent={canKeepAgents ? () => setAgentsDialog({}) : undefined}
         onEditAgent={canKeepAgents && dataSource.updateAgent ? (a) => a.saved && setAgentsDialog({ edit: a.saved }) : undefined}
         onRemoveAgent={canKeepAgents && dataSource.removeAgent ? removeAgent : undefined}
-        loadRunners={loadRunners}
-        onSettings={settingsApi ? () => setSettingsOpen(true) : undefined}
+        onRunners={loadRunners ? () => goPage('runners') : undefined}
+        runnersOnline={runnersOnline}
+        onSettings={settingsApi ? () => goPage('settings') : undefined}
       />
 
       <SessionsColumn
@@ -1112,9 +1133,6 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
           apply={dataSource.applyTurn ? () => dataSource.applyTurn!(changesTurn.id) : undefined}
           onClose={() => setChangesTurn(null)}
         />
-      )}
-      {settingsOpen && settingsApi && (
-        <SettingsDialog api={settingsApi} onClose={() => setSettingsOpen(false)} />
       )}
       {agentsDialog && canKeepAgents && (
         <AgentsDialog

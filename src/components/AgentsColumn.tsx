@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { AgentSummary, RunnerInfo } from '../types';
+import { follow, PAGE_PATHS } from '../page';
+import { AgentSummary } from '../types';
 import { PlusIcon } from './Icons';
-import { RunnersList } from './RunnersList';
 
 interface AgentsColumnProps {
   agents: AgentSummary[];
@@ -16,8 +16,11 @@ interface AgentsColumnProps {
   onAddAgent?: () => void;
   onEditAgent?: (agent: AgentSummary) => void;
   onRemoveAgent?: (agentId: string) => Promise<void>;
-  // Given only when the source lists runners (GET /api/v0/runners).
-  loadRunners?: () => Promise<RunnerInfo[] | null>;
+  // Given only when the source lists runners (GET /api/v0/runners): opens
+  // the Runners page. runnersOnline is how many are online; undefined
+  // before the first read.
+  onRunners?: () => void;
+  runnersOnline?: number;
   // Given only when the source keeps settings: opens the Settings page.
   onSettings?: () => void;
 }
@@ -37,7 +40,8 @@ export const AgentsColumn: React.FC<AgentsColumnProps> = ({
   onAddAgent,
   onEditAgent,
   onRemoveAgent,
-  loadRunners,
+  onRunners,
+  runnersOnline,
   onSettings,
 }) => {
   // The row asking "Remove?", and a remove in flight or refused.
@@ -151,7 +155,26 @@ export const AgentsColumn: React.FC<AgentsColumnProps> = ({
         {/* The AgentBus this cockpit reads, as one card at the foot: its name, a
             live dot and where the data comes from. */}
         <div className="brand-foot">
-          {loadRunners && <RunnersList load={loadRunners} />}
+          {/* Quiet links to the cockpit's own pages, each at its address. */}
+          {(onRunners || onSettings) && (
+            <nav className="side-links" aria-label="Pages">
+              {onRunners && (
+                <a className="side-link" href={PAGE_PATHS.runners} onClick={follow(onRunners)}>
+                  <span>Runners</span>
+                  {runnersOnline !== undefined && (
+                    <span className="sl-n" title="online">
+                      {runnersOnline}
+                    </span>
+                  )}
+                </a>
+              )}
+              {onSettings && (
+                <a className="side-link" href={PAGE_PATHS.settings} onClick={follow(onSettings)}>
+                  <span>Settings</span>
+                </a>
+              )}
+            </nav>
+          )}
           <div className="bus-card">
             <span className="bc-t">
               <b className="brand">AgentBus</b>
@@ -160,11 +183,6 @@ export const AgentsColumn: React.FC<AgentsColumnProps> = ({
                 <span>{sourceLabel}</span>
               </span>
             </span>
-            {onSettings && (
-              <button className="bus-settings" onClick={onSettings}>
-                Settings
-              </button>
-            )}
             {onDisconnect && (
               <button className="disconnect" onClick={onDisconnect}>
                 {disconnectLabel}

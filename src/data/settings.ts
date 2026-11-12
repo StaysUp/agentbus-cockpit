@@ -1,6 +1,5 @@
 // The settings routes (/api/v0/settings), as the Settings page reads them:
-// the settings' state with its defaults version, the policy, and the
-// instructions. Every write sends back the ETag its read got, so a change
+// the settings' state, the policy, and the instructions. Every write sends back the ETag its read got, so a change
 // made elsewhere in between is refused (412) rather than undone.
 
 // A value and the ETag it was read with.
@@ -11,10 +10,9 @@ export interface Versioned<T> {
 
 // GET /api/v0/settings.
 export interface SettingsInfo {
-  version: number;
-  defaults_version: number;
-  latest_defaults_version: number;
+  version: number; // the save counter, sent as the ETag; not shown
   created?: string;
+  changed?: string; // the last change; absent when none
   imported?: string;
   imported_files?: string[];
 }
@@ -86,7 +84,6 @@ export function lines(text: string): string[] {
 // What the Settings page needs from a data source.
 export interface SettingsApi {
   getSettings(): Promise<Versioned<SettingsInfo>>;
-  putDefaults(version: number, etag: string): Promise<Versioned<SettingsInfo>>;
   getPolicy(): Promise<Versioned<Policy>>;
   putPolicy(p: Policy, etag: string): Promise<Versioned<Policy>>;
   getInstructions(): Promise<Versioned<string>>;

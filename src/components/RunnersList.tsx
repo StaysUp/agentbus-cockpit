@@ -2,21 +2,27 @@ import React, { useEffect, useState } from 'react';
 import { RunnerInfo } from '../types';
 import { formatAgo } from '../utils/format';
 
-// How often the list is read again while it is on screen.
+// How often the list is read again: the online count stays current.
 export const RUNNERS_POLL_MS = 30_000;
 
-interface RunnersListProps {
-  // GET /api/v0/runners; null when the service has no such route.
-  load: () => Promise<RunnerInfo[] | null>;
+// What useRunners holds: undefined before the first read, null when the
+// service has no such route, else the list; and the last read's error.
+export interface RunnersState {
+  runners: RunnerInfo[] | null | undefined;
+  error: string | null;
 }
 
-// The runners and connectors control knows: each one's name, an online dot,
-// when it was last seen, and the harnesses it found with their versions.
-export const RunnersList: React.FC<RunnersListProps> = ({ load }) => {
-  const [runners, setRunners] = useState<RunnerInfo[] | null | undefined>(undefined);
+// useRunners reads the runners, and again every RUNNERS_POLL_MS. No load
+// (a source without the route) reads nothing.
+export function useRunners(load?: () => Promise<RunnerInfo[] | null>): RunnersState {
+  const [runners, setRunners] = useState<RunnerInfo[] | null | undefined>(load ? undefined : null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!load) {
+      setRunners(null);
+      return;
+    }
     let live = true;
     const read = () =>
       load().then(
@@ -36,12 +42,16 @@ export const RunnersList: React.FC<RunnersListProps> = ({ load }) => {
       clearInterval(timer);
     };
   }, [load]);
+  return { runners, error };
+}
 
+// The runners and connectors control knows: each one's name, an online dot,
+// when it was last seen, and the harnesses it found with their versions.
+export const RunnersList: React.FC<RunnersState> = ({ runners, error }) => {
   // A service without the route shows nothing; so does the first read.
   if (runners === null || (runners === undefined && !error)) return null;
   return (
     <div className="runners" aria-label="Runners">
-      <div className="col-lab">Runners</div>
       {error && <p className="dim runners-err">{error}</p>}
       {runners && runners.length === 0 && <p className="dim runners-none">No runner has enrolled.</p>}
       {runners?.map((r) => {

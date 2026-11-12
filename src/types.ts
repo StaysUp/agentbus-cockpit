@@ -483,7 +483,6 @@ export interface DataSource {
   subscriptionsOn?(): Promise<void>;
   // The settings routes (/api/v0/settings), for the Settings page.
   getSettings?(): Promise<Versioned<SettingsInfo>>;
-  putDefaults?(version: number, etag: string): Promise<Versioned<SettingsInfo>>;
   getPolicy?(): Promise<Versioned<Policy>>;
   putPolicy?(p: Policy, etag: string): Promise<Versioned<Policy>>;
   getInstructions?(): Promise<Versioned<string>>;

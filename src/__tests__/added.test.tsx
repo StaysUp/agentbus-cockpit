@@ -1,9 +1,8 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest';
 import { ContextTab, holdsAdded } from '../components/ContextTab';
-import { RunnersList } from '../components/RunnersList';
 import { addedContext } from '../data/turns';
-import { CallContext, ContextPiece, RunnerInfo, TurnDetail } from '../types';
+import { CallContext, ContextPiece, TurnDetail } from '../types';
 import { click, ev, flush, render } from './helpers';
 
 function piece(kind: string, label: string, json: unknown): ContextPiece {
@@ -81,54 +80,3 @@ describe('Added by AgentBus', () => {
   });
 });
 
-describe('Runners list', () => {
-  const runners: RunnerInfo[] = [
-    {
-      id: 'run_a',
-      name: 'mac',
-      role: 'runner',
-      online: true,
-      last_seen: new Date().toISOString(),
-      labels: [],
-      harnesses: [
-        { name: 'claude', found: true, version: '2.1.319' },
-        { name: 'codex', found: false },
-      ],
-    },
-    { id: 'run_b', name: 'mac', role: 'connector', online: true, last_seen: new Date().toISOString(), labels: [], harnesses: [] },
-    { id: 'run_c', name: 'box', role: 'runner', online: false, last_seen: new Date(Date.now() - 3 * 60_000).toISOString(), labels: [], harnesses: [] },
-  ];
-
-  it('shows each runner with a dot, when it was last seen, and the harnesses it found', async () => {
-    const r = await render(<RunnersList load={async () => runners} />);
-    await flush();
-    const rows = Array.from(r.container.querySelectorAll('.runner'));
-    expect(rows.map((x) => x.getAttribute('data-runner'))).toEqual(['run_a', 'run_b', 'run_c']);
-    expect(rows[0].querySelector('.live')).not.toBeNull();
-    expect(rows[0].textContent).toContain('online');
-    expect(rows[0].querySelector('.rn-h')!.textContent).toBe('claude 2.1.319');
-    expect(rows[1].textContent).toContain('connector');
-    expect(rows[1].querySelector('.rn-h')).toBeNull();
-    expect(rows[2].querySelector('.gone')).not.toBeNull();
-    expect(rows[2].textContent).toContain('last seen 3 min ago');
-    expect(rows[2].querySelector('.rn-h')!.textContent).toBe('no harness found');
-    r.unmount();
-  });
-
-  it('shows nothing on a service without the route, and the API’s words on an error', async () => {
-    const none = await render(<RunnersList load={async () => null} />);
-    await flush();
-    expect(none.container.querySelector('.runners')).toBeNull();
-    none.unmount();
-    const bad = await render(
-      <RunnersList
-        load={async () => {
-          throw new Error('the token is not valid');
-        }}
-      />
-    );
-    await flush();
-    expect(bad.container.querySelector('.runners-err')!.textContent).toBe('the token is not valid');
-    bad.unmount();
-  });
-});

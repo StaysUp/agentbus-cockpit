@@ -9,17 +9,18 @@ import {
   Versioned,
   withGrants,
 } from "../data/settings";
+import { PageFrame } from "./PageFrame";
 
-// The Settings page: control's settings, one global set for every machine.
+// The Settings page (/settings): control's settings, one global set for every machine.
 // The grants (files a session gets, the sandbox, the network, and two
-// actions), the whole policy as JSON, the instructions every turn gets, and
-// the defaults version with a move to the newest. Each part saves on its
+// actions), the whole policy as JSON, and the instructions every turn gets,
+// with when the settings last changed. Each part saves on its
 // own, with the version it read; a change made elsewhere in between is
 // refused, and the page reads everything again.
 
-interface SettingsDialogProps {
+interface SettingsPageProps {
   api: SettingsApi;
-  onClose: () => void;
+  onBack: () => void;
 }
 
 interface Loaded {
@@ -30,7 +31,7 @@ interface Loaded {
 
 const json = (p: Policy) => JSON.stringify(p, null, 2);
 
-export const SettingsDialog: React.FC<SettingsDialogProps> = ({ api, onClose }) => {
+export const SettingsPage: React.FC<SettingsPageProps> = ({ api, onBack }) => {
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   // The drafts, reset from what was read.
@@ -82,14 +83,6 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ api, onClose }) 
   useEffect(() => {
     load();
   }, [load]);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !busy) onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose, busy]);
 
   // save runs one part's write, then reads the settings' state and what the
   // write changed. A draft of a part it did not change stays.
@@ -160,15 +153,10 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ api, onClose }) 
   };
 
   const info = loaded?.info.value;
-  const behind = info && info.defaults_version < info.latest_defaults_version;
 
   return (
-    <div
-      className="modal-back"
-      onMouseDown={(e) => e.target === e.currentTarget && !busy && onClose()}
-    >
-      <div className="new-dialog settings-dialog" role="dialog" aria-label="Settings">
-        <div className="nd-title">Settings</div>
+    <PageFrame title="Settings" onBack={onBack}>
+      <div className="new-dialog settings-dialog settings-page">
         {loadError && (
           <div className="form-error">
             {loadError}{" "}
@@ -180,32 +168,9 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ api, onClose }) 
         {!loaded && !loadError && <div className="nd-note">Reading…</div>}
         {loaded && grants && info && (
           <fieldset className="ad-set" disabled={!!busy}>
-            <section className="st-part" aria-label="Defaults">
-              <div className="st-head">Defaults</div>
-              <div className="nd-note">
-                Version {info.defaults_version}
-                {behind ? `; version ${info.latest_defaults_version} is the newest.` : ", the newest."}{" "}
-                Settings version {info.version}.
-              </div>
-              {behind && (
-                <div className="nd-actions">
-                  <button
-                    type="button"
-                    className="connect-go"
-                    onClick={() =>
-                      save("defaults", () =>
-                        api.putDefaults(info.latest_defaults_version, loaded.info.etag),
-                        // A new version can move any default.
-                        { policy: true, instructions: true },
-                      )
-                    }
-                  >
-                    Move to version {info.latest_defaults_version}
-                  </button>
-                </div>
-              )}
-              {note("defaults")}
-            </section>
+            {info.changed && (
+              <div className="nd-note">Last changed {new Date(info.changed).toLocaleString()}.</div>
+            )}
 
             <section className="st-part" aria-label="Grants">
               <div className="st-head">Grants</div>
@@ -336,16 +301,10 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ api, onClose }) 
               </div>
               {note("instructions")}
             </section>
-
-            <div className="nd-actions">
-              <button type="button" className="use-recorded" onClick={onClose}>
-                Close
-              </button>
-            </div>
           </fieldset>
         )}
       </div>
-    </div>
+    </PageFrame>
   );
 };
 

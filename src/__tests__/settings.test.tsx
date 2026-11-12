@@ -2,9 +2,8 @@
 import { act } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../App';
-import { AgentsColumn } from '../components/AgentsColumn';
 import { ReplayDataSource } from '../data/ReplayDataSource';
-import { SettingsDialog } from '../components/SettingsDialog';
+import { SettingsPage } from '../components/SettingsPage';
 import { LiveDataSource } from '../data/LiveDataSource';
 import { grantsOf, lines, networkOf, Policy, SettingsApi, SettingsInfo, withGrants } from '../data/settings';
 import { click, ev, flush, jsonl, panelOpen, render } from './helpers';
@@ -41,7 +40,7 @@ function button(c: HTMLElement, text: string): HTMLElement | undefined {
 // with 412 as the service does.
 function fakeApi(info: Partial<SettingsInfo> = {}) {
   const state = {
-    info: { version: 3, defaults_version: 1, latest_defaults_version: 1, ...info } as SettingsInfo,
+    info: { version: 3, ...info } as SettingsInfo,
     policy: policy(),
     instructions: 'Be brief.',
   };
@@ -49,14 +48,10 @@ function fakeApi(info: Partial<SettingsInfo> = {}) {
   const stale = (e: string) => {
     if (e !== etag()) throw Object.assign(new Error('changed'), { status: 412 });
     state.info.version++;
+    state.info.changed = '2026-11-12T10:00:00Z';
   };
   const api = {
     getSettings: vi.fn(async () => ({ value: { ...state.info }, etag: etag() })),
-    putDefaults: vi.fn(async (v: number, e: string) => {
-      stale(e);
-      state.info.defaults_version = v;
-      return { value: { ...state.info }, etag: etag() };
-    }),
     getPolicy: vi.fn(async () => ({ value: structuredClone(state.policy), etag: etag() })),
     putPolicy: vi.fn(async (p: Policy, e: string) => {
       stale(e);
@@ -136,22 +131,28 @@ describe('the settings routes', () => {
 });
 
 describe('the Settings page', () => {
-  it('shows the defaults version and moves to the newest', async () => {
-    const { api, state } = fakeApi({ defaults_version: 1, latest_defaults_version: 2 });
-    const { container } = await render(<SettingsDialog api={api} onClose={() => {}} />);
+  it('shows no versions, only when the settings last changed', async () => {
+    const { api } = fakeApi({ version: 3, changed: '2026-11-12T09:00:00Z' });
+    const { container } = await render(<SettingsPage api={api} onBack={() => {}} />);
     await flush();
-    expect(container.textContent).toContain('Version 1; version 2 is the newest.');
-    await click(button(container, 'Move to version 2'));
+    const text = container.textContent ?? '';
+    expect(text).toContain(`Last changed ${new Date('2026-11-12T09:00:00Z').toLocaleString()}.`);
+    expect(text).not.toMatch(/[Vv]ersion/);
+    expect(text).not.toContain('Defaults');
+    expect(container.querySelector('[aria-label="Defaults"]')).toBeNull();
+  });
+
+  it('says nothing of changes when the settings never changed', async () => {
+    const { api } = fakeApi();
+    const { container } = await render(<SettingsPage api={api} onBack={() => {}} />);
     await flush();
-    expect(api.putDefaults).toHaveBeenCalledWith(2, '"3"');
-    expect(state.info.defaults_version).toBe(2);
-    expect(container.textContent).toContain('Version 2, the newest.');
-    expect(button(container, 'Move to version 2')).toBeUndefined();
+    expect(container.textContent).not.toContain('Last changed');
+    expect(container.textContent).toContain('Grants');
   });
 
   it('saves the grants into the policy with the version it read', async () => {
     const { api, state } = fakeApi();
-    const { container } = await render(<SettingsDialog api={api} onClose={() => {}} />);
+    const { container } = await render(<SettingsPage api={api} onBack={() => {}} />);
     await flush();
     await setValue(container.querySelector('textarea[name="read"]'), '~/.aws/config\n');
     await click(container.querySelector('[aria-label="Sandbox"] [role="radio"]:nth-child(2)'));
@@ -178,7 +179,7 @@ describe('the Settings page', () => {
 
   it('refuses a stale write and says so', async () => {
     const { api, state } = fakeApi();
-    const { container } = await render(<SettingsDialog api={api} onClose={() => {}} />);
+    const { container } = await render(<SettingsPage api={api} onBack={() => {}} />);
     await flush();
     state.info.version = 9; // changed elsewhere
     await click(container.querySelector('input[name="commands"]'));
@@ -193,7 +194,7 @@ describe('the Settings page', () => {
 
   it('saves the policy as JSON, and refuses JSON that does not parse', async () => {
     const { api, state } = fakeApi();
-    const { container } = await render(<SettingsDialog api={api} onClose={() => {}} />);
+    const { container } = await render(<SettingsPage api={api} onBack={() => {}} />);
     await flush();
     const area = container.querySelector('textarea[name="policy"]');
     await setValue(area, '{ not json');
@@ -209,7 +210,7 @@ describe('the Settings page', () => {
 
   it('keeps an unsaved draft of another part when one part saves', async () => {
     const { api, state } = fakeApi();
-    const { container } = await render(<SettingsDialog api={api} onClose={() => {}} />);
+    const { container } = await render(<SettingsPage api={api} onBack={() => {}} />);
     await flush();
     await setValue(container.querySelector('textarea[name="instructions"]'), 'Draft, not saved.');
     await click(container.querySelector('input[name="commands"]'));
@@ -218,13 +219,13 @@ describe('the Settings page', () => {
     expect(state.policy.commands).toBe(false);
     expect((container.querySelector('textarea[name="instructions"]') as HTMLTextAreaElement).value).toBe('Draft, not saved.');
     expect(api.getInstructions).toHaveBeenCalledTimes(1);
-    // The settings version moved, and the page shows it.
-    expect(container.textContent).toContain('Settings version 4.');
+    // The page read the state again: it shows when the settings changed.
+    expect(container.textContent).toContain('Last changed');
   });
 
   it('saves the instructions', async () => {
     const { api, state } = fakeApi();
-    const { container } = await render(<SettingsDialog api={api} onClose={() => {}} />);
+    const { container } = await render(<SettingsPage api={api} onBack={() => {}} />);
     await flush();
     expect((container.querySelector('textarea[name="instructions"]') as HTMLTextAreaElement).value).toBe('Be brief.');
     await setValue(container.querySelector('textarea[name="instructions"]'), 'Be kind.');
@@ -235,38 +236,92 @@ describe('the Settings page', () => {
   });
 });
 
-describe('the Settings button', () => {
-  it('shows only when the source keeps settings', async () => {
-    const onSettings = vi.fn();
-    const a = await render(<AgentsColumn agents={[]} selectedAgentId={null} onSelectAgent={() => {}} onSettings={onSettings} />);
-    await click(button(a.container, 'Settings'));
-    expect(onSettings).toHaveBeenCalledTimes(1);
-    const b = await render(<AgentsColumn agents={[]} selectedAgentId={null} onSelectAgent={() => {}} />);
-    expect(button(b.container, 'Settings')).toBeUndefined();
-  });
-});
-
 describe('the Settings page in the app', () => {
-  it('Escape closes Settings and leaves the turn panel open', async () => {
+  afterEach(() => window.history.replaceState(null, '', '/'));
+
+  const source = () => {
     const replay = new ReplayDataSource(jsonl([
       ev({ seq: 1, session: 'st', kind: 'session.registered', agent: 'claude', folder: '/w' }),
       ev({ seq: 2, session: 'st', kind: 'turn.started', turn: 'T1', exchange: 'x1', text: 'hi', agent: 'claude', folder: '/w' }),
       ev({ seq: 3, session: 'st', kind: 'turn.completed', turn: 'T1', exchange: 'x1', outcome: 'finished' }),
     ]));
-    const source = Object.assign(replay, fakeApi().api);
-    const r = await render(<App dataSource={source} />);
+    return Object.assign(replay, fakeApi().api);
+  };
+  // A click as a browser sends it, cancelable, for a link.
+  const follow = async (el: Element | undefined) => {
+    await act(async () => {
+      el!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 }));
+    });
+  };
+  const link = (c: HTMLElement, text: string) =>
+    [...c.querySelectorAll('a')].find((a) => a.textContent?.trim() === text) as HTMLAnchorElement | undefined;
+
+  it('opens at /settings from the Settings link, and ← Cockpit and Back return', async () => {
+    const r = await render(<App dataSource={source()} />);
+    await flush();
+    await flush();
+    const go = link(r.container, 'Settings');
+    expect(go?.getAttribute('href')).toBe('/settings');
+    await follow(go);
+    await flush();
+    expect(window.location.pathname).toBe('/settings');
+    expect(r.container.querySelector('#page[aria-label="Settings"]')).not.toBeNull();
+    expect(r.container.querySelector('#agents, aside')).toBeNull();
+    // Esc on a page of its own does nothing.
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+    expect(r.container.querySelector('#page[aria-label="Settings"]')).not.toBeNull();
+    await follow(link(r.container, '← Cockpit'));
+    await flush();
+    expect(window.location.pathname).toBe('/');
+    expect(r.container.querySelector('#page')).toBeNull();
+    // Forward to Settings again, then the browser's Back.
+    await follow(link(r.container, 'Settings'));
+    await flush();
+    await act(async () => {
+      window.history.replaceState(null, '', '/');
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    });
+    await flush();
+    expect(r.container.querySelector('#page')).toBeNull();
+    expect(link(r.container, 'Settings')).toBeDefined();
+  });
+
+  it('opens straight on the page at /settings, as a reload or a bookmark does', async () => {
+    window.history.replaceState(null, '', '/settings');
+    const r = await render(<App dataSource={source()} />);
+    await flush();
+    await flush();
+    expect(r.container.querySelector('#page[aria-label="Settings"]')).not.toBeNull();
+    expect(r.container.textContent).toContain('Grants');
+  });
+
+  it('shows the cockpit at /settings when the source keeps no settings', async () => {
+    window.history.replaceState(null, '', '/settings');
+    const replay = new ReplayDataSource(jsonl([ev({ seq: 1, session: 'st', kind: 'session.registered', agent: 'claude', folder: '/w' })]));
+    const r = await render(<App dataSource={replay} />);
+    await flush();
+    expect(r.container.querySelector('#page')).toBeNull();
+    expect(link(r.container, 'Settings')).toBeUndefined();
+  });
+
+  it('keeps Esc working in the cockpit shown at /settings when the source keeps no settings', async () => {
+    window.history.replaceState(null, '', '/settings');
+    const replay = new ReplayDataSource(jsonl([
+      ev({ seq: 1, session: 'st', kind: 'session.registered', agent: 'claude', folder: '/w' }),
+      ev({ seq: 2, session: 'st', kind: 'turn.started', turn: 'T1', exchange: 'x1', text: 'hi', agent: 'claude', folder: '/w' }),
+      ev({ seq: 3, session: 'st', kind: 'turn.completed', turn: 'T1', exchange: 'x1', outcome: 'finished' }),
+    ]));
+    const r = await render(<App dataSource={replay} />);
     await flush();
     await flush();
     await click(r.container.querySelector('#convo .tb'));
     await flush();
     expect(panelOpen(r.container)).toBe(true);
-    await click(button(r.container, 'Settings'));
-    await flush();
-    expect(r.container.querySelector('[aria-label="Settings"]')).not.toBeNull();
     await act(async () => {
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     });
-    expect(r.container.querySelector('[aria-label="Settings"]')).toBeNull();
-    expect(panelOpen(r.container)).toBe(true);
+    expect(panelOpen(r.container)).toBe(false);
   });
 });

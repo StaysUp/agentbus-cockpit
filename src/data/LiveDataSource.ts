@@ -372,10 +372,6 @@ export class LiveDataSource implements DataSource {
     return this.versioned('GET', '/api/v0/settings');
   }
 
-  async putDefaults(version: number, etag: string): Promise<Versioned<SettingsInfo>> {
-    return this.versioned('PUT', '/api/v0/settings/defaults', etag, { version });
-  }
-
   async getPolicy(): Promise<Versioned<Policy>> {
     return this.versioned('GET', '/api/v0/settings/permissions');
   }
