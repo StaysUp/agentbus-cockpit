@@ -7,7 +7,7 @@ import { App } from '../App';
 import { QueueSource } from '../data/jobs';
 import { buildAgents, createEmptyUsage } from '../data/turns';
 import { CockpitEvent, DataSource, SavedAgent, SessionSummary } from '../types';
-import { ev, flush, liveReplay, render } from './helpers';
+import { choose, click, ev, flush, liveReplay, optionsOf, render } from './helpers';
 
 const SAVED: SavedAgent[] = [
   { id: 'claude', name: 'Claude Code', harness: 'claude', access: 'subscription' },
@@ -81,8 +81,8 @@ describe('switching agent per message', () => {
     const { src, sendMessage } = source(mixed());
     const r = await render(<App dataSource={src} />);
     await waitFor(() => r.container.querySelector('#c-reply .next-agent') !== null, 'the picker');
-    const pick = r.container.querySelector('#c-reply .next-agent') as HTMLSelectElement;
-    expect([...pick.options].map((o) => o.textContent)).toEqual(['Claude Code', 'Claude Code · haiku', 'Codex']);
+    const pick = r.container.querySelector('#c-reply .next-agent') as HTMLButtonElement;
+    expect((await optionsOf(r.container, 'next_agent')).map((o) => o[1])).toEqual(['Claude Code', 'Claude Code · haiku', 'Codex']);
     expect(pick.value).toBe('codex');
     expect((r.container.querySelector('#c-reply textarea') as HTMLTextAreaElement).placeholder).toBe('Message Codex…');
 
@@ -99,7 +99,7 @@ describe('switching agent per message', () => {
     const { src, sendMessage } = source(mixed());
     const r = await render(<App dataSource={src} />);
     await waitFor(() => r.container.querySelector('#c-reply .next-agent') !== null, 'the picker');
-    await setValue(r.container.querySelector('#c-reply .next-agent'), 'a_haiku');
+    await choose(r.container, 'next_agent', 'a_haiku');
     expect((r.container.querySelector('#c-reply textarea') as HTMLTextAreaElement).placeholder).toBe('Message Claude Code · haiku…');
     await send(r.container, 'back to haiku');
     await waitFor(() => sendMessage.mock.calls.length === 1, 'the send');
@@ -122,7 +122,7 @@ describe('switching agent per message', () => {
     };
     const r = await render(<App dataSource={src} queue={queue} />);
     await waitFor(() => r.container.querySelector('#c-reply .next-agent') !== null, 'the picker');
-    await setValue(r.container.querySelector('#c-reply .next-agent'), 'a_haiku');
+    await choose(r.container, 'next_agent', 'a_haiku');
     await send(r.container, 'back to haiku');
     // With a queue too, a message is POST /api/v0/turns: the one path.
     await waitFor(() => sendMessage.mock.calls.length === 1, 'the send');
@@ -139,7 +139,7 @@ describe('switching agent per message', () => {
     src.createAgent = async () => SAVED[0];
     const r = await render(<App dataSource={src} />);
     await waitFor(() => r.container.querySelector('#c-reply .next-agent') !== null, 'the picker');
-    await setValue(r.container.querySelector('#c-reply .next-agent'), 'a_haiku');
+    await choose(r.container, 'next_agent', 'a_haiku');
     // The agent is removed; the list is read again when the agents form closes.
     list = SAVED.filter((a) => a.id !== 'a_haiku');
     await act(async () => {
@@ -149,8 +149,8 @@ describe('switching agent per message', () => {
     await act(async () => {
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
     });
-    await waitFor(() => (r.container.querySelector('#c-reply .next-agent') as HTMLSelectElement).options.length === 2, 'the new list');
-    expect((r.container.querySelector('#c-reply .next-agent') as HTMLSelectElement).value).toBe('codex');
+    await waitFor(() => (r.container.querySelector('#c-reply .next-agent') as HTMLButtonElement).value === 'codex', 'the new list');
+    expect((await optionsOf(r.container, 'next_agent')).length).toBe(2);
     await send(r.container, 'still here?');
     await waitFor(() => sendMessage.mock.calls.length === 1, 'the send');
     expect((sendMessage.mock.calls[0] as unknown[])[1]).toEqual({ prompt: 'still here?', read_only: false, agent: 'codex', idempotency_key: expect.stringMatching(/^cockpit-msg-/) });
@@ -162,9 +162,9 @@ describe('switching agent per message', () => {
     const { src } = source(events);
     const r = await render(<App dataSource={src} />);
     await waitFor(() => r.container.querySelector('#c-reply .next-agent') !== null, 'the picker');
-    const pick = r.container.querySelector('#c-reply .next-agent') as HTMLSelectElement;
+    const pick = r.container.querySelector('#c-reply .next-agent') as HTMLButtonElement;
     expect(pick.value).toBe('a_gone');
-    expect(pick.options[0].textContent).toBe('Codex');
+    expect((await optionsOf(r.container, 'next_agent'))[0][1]).toBe('Codex');
     r.unmount();
   });
 });
@@ -174,12 +174,14 @@ describe('the Send menu', () => {
     const { src } = source(mixed());
     const r = await render(<App dataSource={src} />);
     await waitFor(() => r.container.querySelector('#c-reply .send-mode') !== null, 'the send menu');
-    const menu = r.container.querySelector('#c-reply .send-mode') as HTMLSelectElement;
+    const menu = r.container.querySelector('#c-reply .send-mode') as HTMLButtonElement;
     expect(menu.value).toBe('send');
-    const opts = [...menu.options];
-    expect(opts.map((o) => o.value)).toEqual(['send', 'fork']);
+    await click(menu);
+    const opts = [...document.querySelectorAll('[role="listbox"] [role="option"]')] as HTMLButtonElement[];
+    expect(opts.map((o) => o.getAttribute('data-value'))).toEqual(['send', 'fork']);
     expect(opts[1].disabled).toBe(true);
     expect(opts[1].textContent).toContain('coming soon');
+    await click(menu);
     r.unmount();
   });
 });

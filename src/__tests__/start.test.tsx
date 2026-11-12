@@ -8,7 +8,7 @@ import { checkConnection } from '../data/connection';
 import { LiveDataSource } from '../data/LiveDataSource';
 import { buildTurns } from '../data/turns';
 import { CockpitEvent } from '../types';
-import { click, continuedLine, ev, flush, panelOpen, render, rowSession, shownSession } from './helpers';
+import { choose as chooseOpt, click, continuedLine, ev, flush, optionsOf, panelOpen, render, rowSession, selectIn, shownSession } from './helpers';
 
 const BASE = 'http://cockpit.test';
 
@@ -269,13 +269,15 @@ describe('New session', () => {
     await settle();
     const dialog = r.container.querySelector('.new-dialog')!;
     expect(dialog).not.toBeNull();
-    const options = Array.from(dialog.querySelectorAll('select[name="agent"] option')) as HTMLOptionElement[];
-    expect(options.map((o) => o.value)).toEqual(['claude', 'codex']);
-    expect(options[0].disabled).toBe(false);
-    expect(options[1].disabled).toBe(true);
-    expect(options[1].textContent).toContain('not installed');
+    const options = await optionsOf(dialog, 'agent');
+    expect(options.map((o) => o[0])).toEqual(['claude', 'codex']);
+    expect(options[0][2]).toBe(false);
+    expect(options[1][2]).toBe(true);
+    expect(document.querySelector('[role="listbox"]')).toBeNull();
     // An agent and a folder, then an optional name and first message.
-    expect(Array.from(dialog.querySelectorAll('input, select, textarea')).map((e) => e.getAttribute('name'))).toEqual(['agent', 'folder', 'name', 'prompt']);
+    expect(Array.from(dialog.querySelectorAll('input, [role="combobox"], textarea')).map((e) => e.getAttribute('name'))).toEqual(['agent', 'folder', 'name', 'prompt']);
+    // No browser-drawn select anywhere in the dialog.
+    expect(dialog.querySelector('select')).toBeNull();
     expect(dialog.textContent).toContain('Claude Code · default model · subscription');
     r.unmount();
   });
@@ -308,7 +310,7 @@ describe('New session', () => {
     r.unmount();
   });
 
-  it('on a service that lists folders, the first is picked and the turn names it by folder_ref and connector', async () => {
+  it('on a service that lists folders, none is picked for the person; the one picked goes by folder_ref and connector', async () => {
     const folders = [
       { ref: 'fld_00000000000000a1', name: 'app', connector: 'con_1', runner: 'run_1' },
       { ref: 'fld_00000000000000b2', name: 'site', connector: 'con_2', runner: 'run_2' },
@@ -321,9 +323,14 @@ describe('New session', () => {
     const dialog = r.container.querySelector('.new-dialog')!;
     const picks = Array.from(dialog.querySelectorAll('.nd-recent button')) as HTMLButtonElement[];
     expect(picks.map((b) => b.textContent)).toEqual(['app', 'site', '/Users/ana/old']);
-    expect(picks[0].className).toBe('on');
+    // Nothing is picked until the person picks: Start waits for a folder.
+    expect(dialog.querySelector('.nd-recent button.on')).toBeNull();
     expect((dialog.querySelector('input[name="folder"]') as HTMLInputElement).value).toBe('');
+    expect((dialog.querySelector('button[type="submit"]') as HTMLButtonElement).disabled).toBe(true);
+    expect(dialog.textContent).toContain('Pick a folder to start.');
     await click(picks[1]);
+    expect(picks[1].className).toBe('on');
+    expect((dialog.querySelector('button[type="submit"]') as HTMLButtonElement).disabled).toBe(false);
     await setValue(dialog.querySelector('textarea[name="prompt"]'), 'read the README');
     await submitForm(dialog);
     expect(sentBody(svc)).toEqual({ agent: 'claude', folder_ref: 'fld_00000000000000b2', connector: 'con_2', isolate: true, prompt: 'read the README' });
@@ -604,7 +611,7 @@ describe('New session: name, no first message, folders', () => {
     expect(r.container.querySelector('#sessions .sess.on')).toBeNull();
     const input = r.container.querySelector('#c-reply textarea') as HTMLTextAreaElement;
     expect(input.disabled).toBe(false);
-    expect((r.container.querySelector('#c-reply select.next-agent') as HTMLSelectElement).value).toBe('claude');
+    expect((r.container.querySelector('#c-reply .next-agent') as HTMLButtonElement).value).toBe('claude');
 
     await setValue(input, 'read the README');
     await submitForm(r.container.querySelector('#c-reply form'));
@@ -924,12 +931,12 @@ describe('The prompt box', () => {
       messages: (id) => json({ session: id, turn: 't_q', state: 'queued', ahead: 1 }, 202),
     });
     const r = await mount(svc);
-    const pick = () => r.container.querySelector('#c-reply .next-agent') as HTMLSelectElement;
-    const choose = async (v: string) =>
-      act(async () => {
-        pick().value = v;
-        pick().dispatchEvent(new Event('change', { bubbles: true }));
-      });
+    const pick = () => r.container.querySelector('#c-reply .next-agent') as HTMLButtonElement;
+    const choose = async (v: string) => {
+      if (pick().value === v) return;
+      await click(pick());
+      await click(document.querySelector(`[role="listbox"] [data-value="${v}"]`));
+    };
     for (const [agent, text] of [['claude', 'one'], ['codex', 'two'], ['codex', 'three'], ['claude', 'four']]) {
       await choose(agent);
       await setValue(box(r), text);
@@ -999,12 +1006,11 @@ describe('The prompt box', () => {
       messages: (id) => (++n === 1 ? json({ error: 'gateway timeout' }, 504) : json({ session: id, turn: 't_q', state: 'queued', ahead: 2 }, 202)),
     });
     const r = await mount(svc);
-    const pick = () => r.container.querySelector('#c-reply .next-agent') as HTMLSelectElement;
-    const choose = async (v: string) =>
-      act(async () => {
-        pick().value = v;
-        pick().dispatchEvent(new Event('change', { bubbles: true }));
-      });
+    const pick = () => r.container.querySelector('#c-reply .next-agent') as HTMLButtonElement;
+    const choose = async (v: string) => {
+      await chooseOpt(r.container, 'next_agent', v);
+      expect(pick().value).toBe(v);
+    };
     await choose('codex');
     await setValue(box(r), 'on codex');
     await submitForm(r.container.querySelector('#c-reply form'));
@@ -1141,10 +1147,11 @@ describe('Agents', () => {
     // opencode is listed and cannot be picked; the API key is shown and disabled.
     expect((form.querySelector('[data-harness="opencode"]') as HTMLButtonElement).disabled).toBe(true);
     expect((form.querySelector('[data-access="api"]') as HTMLButtonElement).disabled).toBe(true);
-    expect(Array.from(form.querySelectorAll('.f-off select')).every((x) => (x as HTMLSelectElement).disabled)).toBe(true);
+    expect(Array.from(form.querySelectorAll('.f-off [role="combobox"]')).every((x) => (x as HTMLButtonElement).disabled)).toBe(true);
+    expect(form.querySelector('select')).toBeNull();
     // The name follows harness and model.
     expect((form.querySelector('input[name="name"]') as HTMLInputElement).value).toBe('Claude Code · sonnet');
-    const models = Array.from(form.querySelectorAll('select[name="model"] option')).map((o) => (o as HTMLOptionElement).value);
+    const models = (await optionsOf(form, 'model')).map((o) => o[0]);
     expect(models).toEqual(['sonnet', 'opus', 'haiku', '']);
     r.unmount();
   });
@@ -1156,7 +1163,7 @@ describe('Agents', () => {
     await settle();
     const form = () => r.container.querySelector('.agent-form')!;
     await click(form().querySelector('[data-access="openrouter"]'));
-    expect(form().querySelector('select[name="model"]')).toBeNull();
+    expect(selectIn(form(), 'model')).toBeNull();
     const model = form().querySelector('input[name="model"]') as HTMLInputElement;
     expect(model.value).toBe('deepseek/deepseek-v4.1-flash');
     await setValue(model, 'qwen/qwen3-coder:free');
@@ -1188,11 +1195,7 @@ describe('Agents', () => {
     await settle();
     const form = () => r.container.querySelector('.agent-form')!;
     await setValue(form().querySelector('input[name="name"]'), 'Codex');
-    const sel = form().querySelector('select[name="model"]') as HTMLSelectElement;
-    await act(async () => {
-      sel.value = 'haiku';
-      sel.dispatchEvent(new Event('change', { bubbles: true }));
-    });
+    await chooseOpt(form(), 'model', 'haiku');
     expect((form().querySelector('input[name="name"]') as HTMLInputElement).value).toBe('Codex');
     await submitForm(form());
     expect(r.container.querySelector('.agent-form .form-error')?.textContent).toBe('an agent named "Codex" already exists');
@@ -1218,7 +1221,7 @@ describe('Agents', () => {
     // control).
     const set = r.container.querySelector('.agent-form > fieldset') as HTMLFieldSetElement;
     expect(set.disabled).toBe(true);
-    expect(set.querySelectorAll('input, select, button').length).toBe(r.container.querySelectorAll('.agent-form input, .agent-form select, .agent-form button').length);
+    expect(set.querySelectorAll('input, button').length).toBe(r.container.querySelectorAll('.agent-form input, .agent-form button').length);
     await act(async () => {
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
     });
@@ -1293,11 +1296,7 @@ describe('Agents', () => {
     await settle();
     const form = () => r.container.querySelector('.agent-form')!;
     expect((form().querySelector('input[name="name"]') as HTMLInputElement).value).toBe('Claude Code');
-    const sel = form().querySelector('select[name="model"]') as HTMLSelectElement;
-    await act(async () => {
-      sel.value = 'opus';
-      sel.dispatchEvent(new Event('change', { bubbles: true }));
-    });
+    await chooseOpt(form(), 'model', 'opus');
     await submitForm(form());
     const put = svc.reqs.find((q) => q.method === 'PUT');
     expect(put?.path).toBe('/api/v0/agents/claude');
@@ -1756,30 +1755,28 @@ describe('New session: the machine, then a folder on it', () => {
     return { r, dialog: r.container.querySelector('.new-dialog')! };
   }
   const picks = (dialog: Element) => Array.from(dialog.querySelectorAll('.nd-recent button')).map((b) => b.textContent);
-  const choose = async (dialog: Element, v: string) =>
-    act(async () => {
-      const sel = dialog.querySelector('select[name="machine"]') as HTMLSelectElement;
-      sel.value = v;
-      sel.dispatchEvent(new Event('change', { bubbles: true }));
-    });
+  const choose = (dialog: Element, v: string) => chooseOpt(dialog, 'machine', v);
 
   it('lists the machines, offline ones disabled, and shows only the picked machine\'s folders and recents', async () => {
     localStorage.setItem('agentbus.folders.con_a', JSON.stringify(['/Users/ana/web']));
     localStorage.setItem('agentbus.folders.con_c', JSON.stringify(['/work/ops']));
     const svc = fakeService({ sessions: [row('s1')], events: { s1: oneTurn('s1', 'hi') }, agents: AGENTS, folders: FOLDERS, runners: MACHINES });
     const { r, dialog } = await openDialog(svc);
-    const select = dialog.querySelector('select[name="machine"]') as HTMLSelectElement;
-    const options = Array.from(select.options).map((o) => [o.value, o.textContent, o.disabled]);
+    const options = await optionsOf(dialog, 'machine');
     expect(options).toEqual([
       ['con_a', 'mac', false],
       ['con_c', 'vm', false],
-      ['con_b', 'box (offline)', true],
+      ['con_b', 'box', true],
     ]);
-    expect(select.value).toBe('con_a');
+    expect(selectIn(dialog, 'machine')!.value).toBe('con_a');
     expect(picks(dialog)).toEqual(['app', '/Users/ana/web']);
+    // A folder picked on one machine is dropped when the machine changes.
+    await click(dialog.querySelector('.nd-recent button'));
+    expect(dialog.querySelector('.nd-recent button.on')?.textContent).toBe('app');
     await choose(dialog, 'con_c');
     expect(picks(dialog)).toEqual(['infra', '/work/ops']);
-    expect(dialog.querySelector('.nd-recent button.on')?.textContent).toBe('infra');
+    expect(dialog.querySelector('.nd-recent button.on')).toBeNull();
+    expect((dialog.querySelector('button[type="submit"]') as HTMLButtonElement).disabled).toBe(true);
     r.unmount();
   });
 
@@ -1801,7 +1798,7 @@ describe('New session: the machine, then a folder on it', () => {
     localStorage.setItem('agentbus.machine', 'con_c');
     const svc = fakeService({ sessions: [row('s1')], events: { s1: oneTurn('s1', 'hi') }, agents: AGENTS, folders: FOLDERS, runners: MACHINES });
     const { r, dialog } = await openDialog(svc);
-    expect((dialog.querySelector('select[name="machine"]') as HTMLSelectElement).value).toBe('con_c');
+    expect(selectIn(dialog, 'machine')!.value).toBe('con_c');
     r.unmount();
   });
 

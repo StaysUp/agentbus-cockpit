@@ -27,10 +27,21 @@ export interface Rendered {
   unmount: () => void;
 }
 
+// Every root rendered and not yet unmounted, for unmountAll.
+const mounted = new Set<Root>();
+
+// unmountAll unmounts every root still mounted, so a page's window
+// listeners and leave guard end with its test.
+export function unmountAll(): void {
+  for (const r of mounted) act(() => r.unmount());
+  mounted.clear();
+}
+
 export async function render(node: React.ReactNode): Promise<Rendered> {
   const container = document.createElement('div');
   document.body.appendChild(container);
   const root = createRoot(container);
+  mounted.add(root);
   await act(async () => {
     root.render(node);
   });
@@ -38,6 +49,7 @@ export async function render(node: React.ReactNode): Promise<Rendered> {
     container,
     root,
     unmount: () => {
+      mounted.delete(root);
       act(() => root.unmount());
       container.remove();
     },
@@ -140,4 +152,31 @@ export function panelOpen(container: HTMLElement): boolean {
 // The id of a row in the Sessions column.
 export function rowSession(row: Element): string | undefined {
   return (row as HTMLElement).dataset.session;
+}
+
+// The cockpit's own Select (components/Controls.tsx): its trigger is a
+// button named like the field, its menu is drawn on document.body.
+export function selectIn(scope: ParentNode, name: string): HTMLButtonElement | null {
+  return scope.querySelector(`button[role="combobox"][name="${name}"]`);
+}
+
+// optionsOf opens the select and lists its options as [value, label, disabled], then closes it.
+export async function optionsOf(scope: ParentNode, name: string): Promise<[string, string, boolean][]> {
+  const sel = selectIn(scope, name)!;
+  await click(sel);
+  const list = Array.from(document.querySelectorAll('[role="listbox"] [role="option"]')).map(
+    (o) => [o.getAttribute('data-value') ?? '', o.querySelector('.mi-l')?.textContent ?? '', (o as HTMLButtonElement).disabled] as [string, string, boolean]
+  );
+  await click(sel);
+  return list;
+}
+
+// choose picks the option with value in the select named name.
+export async function choose(scope: ParentNode, name: string, value: string): Promise<void> {
+  const sel = selectIn(scope, name);
+  if (!sel) throw new Error(`no select ${name}`);
+  await click(sel);
+  const opt = document.querySelector(`[role="listbox"] [role="option"][data-value="${value}"]`);
+  if (!opt) throw new Error(`no option ${value} in ${name}`);
+  await click(opt);
 }

@@ -95,9 +95,7 @@ button.sess:hover { background: rgba(0,0,0,.04); }
 #c-reply .go.stop:disabled { opacity: .5; }
 /* The agent for the next message, beside Send: quiet text until hovered (mockup v4, round 17). */
 #c-reply .box.with-pick { padding-right: 16.5rem; }
-#c-reply .next-agent { position: absolute; right: 6rem; bottom: 0.5rem; height: 2rem; max-width: 10rem; padding: 0 1.375rem 0 0.5rem; border: 0; border-radius: 0.5rem; background: transparent; font: inherit; font-size: 0.8125rem; color: var(--ink3); text-overflow: ellipsis; cursor: pointer; -webkit-appearance: none; appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4 6l4 4 4-4' fill='none' stroke='%23999' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 0.375rem center; background-size: 0.75rem; text-align: right; }
-#c-reply .next-agent:hover, #c-reply .next-agent:focus-visible { background-color: rgba(0,0,0,.04); color: var(--ink2); outline: none; }
+#c-reply .next-agent { position: absolute; right: 6rem; bottom: 0.5rem; max-width: 10rem; }
 #c-reply .next-agent:disabled { cursor: default; opacity: .6; }
 
 /* ---------- right panel ---------- */
@@ -428,7 +426,7 @@ tr.ev-open > td { background: #FBFBFA; border-bottom: 1px solid var(--line); pad
 .agent-form label > .nd-seg { margin-top: 1px; }
 .agent-form label > .nd-note { margin-top: 0.125rem; }
 .nd-seg button:disabled { color: var(--ink3); opacity: 0.55; cursor: not-allowed; }
-.agent-form .f-off > span:first-child, .agent-form .f-off select { opacity: 0.6; }
+.agent-form .f-off > span:first-child { opacity: 0.6; }
 .new-dialog input[name="key_env"] { font-family: var(--mono); font-size: max(11px, 0.6875rem); }
 /* The Connect step of a subscription agent: the person's own subscription,
    kept on control for their runners. */
@@ -460,21 +458,19 @@ tr.ev-open > td { background: #FBFBFA; border-bottom: 1px solid var(--line); pad
 .nd-title { font-size: 0.9062rem; font-weight: 650; }
 .new-dialog label { display: flex; flex-direction: column; gap: 0.1875rem; }
 .new-dialog label > span { font-size: max(11px, 0.6875rem); color: var(--ink3); }
-.new-dialog input[type="text"], .new-dialog select, .new-dialog textarea { font: inherit; font-size: max(11px, 0.75rem); line-height: 1rem; padding: 0.375rem 0.5rem; border: 1px solid var(--line2); border-radius: 0.375rem; background: var(--panel); color: var(--ink); resize: vertical; }
+.new-dialog input[type="text"], .new-dialog textarea { font: inherit; font-size: max(11px, 0.75rem); line-height: 1rem; padding: 0.375rem 0.5rem; border: 1px solid var(--line2); border-radius: 0.375rem; background: var(--panel); color: var(--ink); resize: vertical; }
 .new-dialog input[name="folder"] { font-family: var(--mono); font-size: max(11px, 0.6875rem); }
-.new-dialog input:focus, .new-dialog select:focus, .new-dialog textarea:focus { outline: none; border-color: var(--ink3); }
+.new-dialog input:focus, .new-dialog textarea:focus { outline: none; border-color: var(--ink3); }
 .nd-recent { display: flex; flex-direction: column; gap: 1px; margin-top: -0.375rem; }
 .nd-recent button { text-align: left; padding: 2px 0.375rem; border-radius: 0.3125rem; color: var(--ink3); }
-.nd-recent button:hover, .nd-recent button.on { background: #F1F1EE; color: var(--ink); }
+.nd-recent button:hover { background: #F1F1EE; color: var(--ink); }
+.nd-recent button.on { background: var(--sel-row); color: var(--ink); box-shadow: inset 2px 0 0 var(--sel-bar); }
+.nd-recent button.on::before { content: '✓ '; color: var(--sel-bar); }
 .nd-recent code { font-size: max(11px, 0.6875rem); }
-label.nd-check { display: inline-flex; flex-direction: row; align-items: center; gap: 0.375rem; }
-label.nd-check input[type="checkbox"] { width: 0.75rem; height: 0.75rem; margin: 0; accent-color: var(--ink2); }
-label.nd-check > span { font-size: max(11px, 0.75rem); color: var(--ink); }
 .nd-note { font-size: max(11px, 0.6875rem); color: var(--ink3); margin-top: -0.375rem; }
 .nd-actions { display: flex; align-items: center; gap: 0.75rem; margin-top: 0.1875rem; }
 .form-error { font-size: max(11px, 0.6875rem); line-height: 1rem; color: var(--amber); background: var(--amber-bg); border-radius: 0.375rem; padding: 0.375rem 0.5rem; }
 .reply-foot { display: flex; align-items: center; gap: 0.625rem; padding: 0.375rem 0.25rem 0; font-size: max(11px, 0.6875rem); color: var(--ink3); min-height: 1.25rem; }
-.reply-foot label.nd-check > span { font-size: max(11px, 0.6875rem); color: var(--ink3); }
 #c-reply .form-error { margin-top: 0.3125rem; }
 .tb.pending { cursor: default; }
 
@@ -590,7 +586,7 @@ label.nd-check > span { font-size: max(11px, 0.75rem); color: var(--ink); }
 .brand-foot { padding: 0.6rem 0.75rem 0.8rem; border-top: 1px solid var(--line); }
 #agents { min-height: 0; overflow: hidden; }
 .bus-card .bc-t { min-width: 0; flex: 1; }
-.bus-card .bc-v { display: block; margin-top: 0.15rem; padding-left: 0.75rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); font-size: max(11px, 0.6rem); color: var(--ink3); }
+.bus-card .bc-v { margin-left: 0.1rem; font-weight: 500; color: var(--ink3); }
 
 /* ---------- one strip style: every label alike, every value alike ---------- */
 /* Labels are the strip's direct spans only; anything inside a value (a lower-bound
@@ -686,10 +682,9 @@ label.nd-check > span { font-size: max(11px, 0.75rem); color: var(--ink); }
 .rb-pick { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; padding: 0.375rem 0.625rem; border: 1px solid var(--line2); border-radius: 0.5rem; background: var(--panel); }
 .rb-pick > span:first-child { font-size: max(11px, 0.6875rem); color: var(--ink3); }
 .rb-fields { display: flex; gap: 0.375rem; align-items: center; }
-.rb-fields select, .rb-fields input { font: inherit; font-size: 0.8125rem; font-weight: 600; border: 0; background: transparent; color: var(--ink); padding: 0; min-width: 0; }
-.rb-fields select { flex: none; }
+.rb-fields input { font: inherit; font-size: 0.8125rem; font-weight: 600; border: 0; background: transparent; color: var(--ink); padding: 0; min-width: 0; }
 .rb-fields input { flex: 1; font-family: var(--mono); font-weight: 500; font-size: max(11px, 0.75rem); border-left: 1px solid var(--line); padding-left: 0.5rem; }
-.rb-fields select:focus, .rb-fields input:focus { outline: none; }
+.rb-fields input:focus { outline: none; }
 .rb-go { flex: none; padding: 0 1rem; border-radius: 0.5rem; background: var(--ink); color: #fff; font-size: 0.8125rem; font-weight: 600; }
 .rb-go:disabled { opacity: .45; cursor: default; }
 .rb-note { font-size: max(11px, 0.7188rem); }
@@ -753,9 +748,10 @@ label.nd-check > span { font-size: max(11px, 0.75rem); color: var(--ink); }
 /* Send as a split button: the button, and a small menu of how to send. */
 #c-reply .go-split { position: absolute; right: 0.5rem; bottom: 0.5rem; display: flex; height: 2rem; }
 #c-reply .go-split .go { position: static; height: 2rem; border-radius: 0.5rem 0 0 0.5rem; }
-#c-reply .send-mode { width: 1.5rem; height: 2rem; border: 0; border-left: 1px solid rgba(255,255,255,.25); border-radius: 0 0.5rem 0.5rem 0; background: var(--ink) no-repeat center / 0.625rem url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='white' stroke-width='1.5'/%3E%3C/svg%3E"); color: transparent; font: inherit; cursor: pointer; -webkit-appearance: none; appearance: none; }
-#c-reply .send-mode option { color: var(--ink); }
+#c-reply .send-mode { width: 1.5rem; height: 2rem; justify-content: center; border-left: 1px solid rgba(255,255,255,.25); border-radius: 0 0.5rem 0.5rem 0; background: var(--ink); }
+#c-reply .send-mode svg { color: #fff; width: 0.625rem; height: 0.625rem; }
 #c-reply .send-mode:disabled { opacity: .22; cursor: default; }
+.reply-foot .ctl-check { font-size: max(11px, 0.6875rem); color: var(--ink3); }
 
 /* ---------- rename ---------- */
 /* Every row keeps its height, so a long list scrolls rather than squeezes. */
@@ -877,8 +873,8 @@ label.nd-check > span { font-size: max(11px, 0.75rem); color: var(--ink); }
 
 /* The Settings page's editors. */
 .pg-edit { border: 0; margin: 0; padding: 0; min-width: 0; display: flex; flex-direction: column; gap: 0.8rem; }
-.pg-edit label { display: flex; flex-direction: column; gap: 0.4rem; }
-.pg-edit label > .pg-note { margin: 0; }
+.pg-edit label, .pg-edit .pg-field { display: flex; flex-direction: column; gap: 0.4rem; }
+.pg-edit label > .pg-note, .pg-edit .pg-field > .pg-note { margin: 0; }
 .pg-edit label > .nd-note { margin-top: 0; }
 .pg-edit label > .sub-h { margin: 0; }
 .pg-edit .nd-seg { align-self: flex-start; }
@@ -886,9 +882,6 @@ label.nd-check > span { font-size: max(11px, 0.75rem); color: var(--ink); }
 .page textarea:focus { outline: none; border-color: var(--line2); }
 .page textarea[name="read"], .page textarea[name="hosts"], .page textarea.pg-code { font-family: var(--mono); font-size: max(11px, 0.7rem); }
 .page textarea.pg-code, .page textarea.pg-text { min-height: 24rem; height: calc(100vh - 10rem); resize: none; }
-.pg-switch { flex-direction: row !important; align-items: center; gap: 0.5rem !important; font-size: 0.775rem; color: var(--ink2); cursor: pointer; }
-.pg-switch input { position: absolute; opacity: 0; width: 1px; height: 1px; }
-.pg-switch input:focus-visible + .sw { outline: 2px solid var(--sel-bar); outline-offset: 2px; }
 .sw { display: inline-block; width: 1.8rem; height: 1.05rem; flex: none; border-radius: 0.55rem; background: var(--line2); position: relative; transition: background .15s; }
 .sw::after { content: ''; position: absolute; top: 0.1rem; left: 0.1rem; width: 0.85rem; height: 0.85rem; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.25); transition: left .15s var(--ease); }
 .sw.on { background: var(--green); }
@@ -921,3 +914,45 @@ label.nd-check > span { font-size: max(11px, 0.75rem); color: var(--ink); }
   .page .colbody { overflow: visible; }
   .page textarea.pg-code, .page textarea.pg-text { height: 24rem; }
 }
+
+/* ---------- the cockpit's own controls (components/Controls.tsx) ---------- */
+/* Select: the turn view's picker look. field = a form box, quiet = text and a chevron, icon = the chevron alone. */
+.ctl-select { display: inline-flex; align-items: center; gap: 0.375rem; min-width: 0; font: inherit; color: var(--ink); cursor: pointer; text-align: left; }
+.ctl-select .cs-v { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ctl-select svg { flex: none; color: var(--ink3); transition: transform .15s; }
+.ctl-select.open svg { transform: rotate(180deg); }
+.ctl-select.empty .cs-v { color: var(--ink3); }
+.ctl-select:disabled { cursor: default; }
+.ctl-select:disabled .cs-v { color: var(--ink3); }
+.ctl-select.field { width: 100%; font-size: max(11px, 0.75rem); line-height: 1rem; padding: 0.375rem 0.5rem; border: 1px solid var(--line2); border-radius: 0.375rem; background: var(--panel); transition: border-color .15s; }
+.ctl-select.field:hover:not(:disabled) { border-color: #A9A9A3; }
+.ctl-select.field.open, .ctl-select.field:focus-visible { border-color: var(--ink3); outline: none; }
+.ctl-select.field:disabled { background: #F3F3F0; border-color: var(--line); }
+.ctl-select.quiet { padding: 0 0.375rem; height: 2rem; border-radius: 0.5rem; color: var(--ink3); font-size: 0.8125rem; }
+.ctl-select.quiet:hover:not(:disabled), .ctl-select.quiet.open, .ctl-select.quiet:focus-visible { background: rgba(0,0,0,.04); color: var(--ink2); outline: none; }
+.ctl-select.quiet .cs-v { color: inherit; }
+.ctl-menu { z-index: 70; width: auto; max-width: 24rem; animation: none; }
+.ctl-menu .menu-i { font-size: 0.8125rem; text-align: left; }
+.ctl-menu .menu-i.act:not(:disabled) { background: #F1F1EE; }
+.ctl-menu .menu-i:disabled { color: #ADADA7; cursor: not-allowed; background: none; }
+.ctl-menu .mi-l { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ctl-menu .tag { padding-left: 0.75rem; white-space: nowrap; }
+/* Checkbox: a small box, ticked in ink. */
+.ctl-check { display: inline-flex; align-items: center; gap: 0.375rem; font-size: max(11px, 0.75rem); color: var(--ink); cursor: pointer; }
+.ctl-check .cb { width: 0.8rem; height: 0.8rem; flex: none; display: grid; place-items: center; border: 1px solid var(--line2); border-radius: 0.2rem; background: var(--panel); color: #fff; transition: background .12s, border-color .12s; }
+.ctl-check.on .cb { background: var(--ink); border-color: var(--ink); }
+.ctl-check:hover:not(:disabled) .cb { border-color: var(--ink3); }
+.ctl-check:focus-visible { outline: none; }
+.ctl-check:focus-visible .cb { outline: 2px solid var(--sel-bar); outline-offset: 1px; }
+.ctl-check:disabled { cursor: default; opacity: .55; }
+/* Switch */
+.ctl-switch { display: inline-flex; align-items: center; gap: 0.5rem; font-size: 0.775rem; color: var(--ink2); cursor: pointer; }
+.ctl-switch:focus-visible { outline: none; }
+.ctl-switch:focus-visible .sw { outline: 2px solid var(--sel-bar); outline-offset: 2px; }
+/* Unsaved changes on Settings. */
+.prow .pr-dirty, .pg-dirty { font-size: max(11px, 0.65rem); font-weight: 600; color: var(--amber); }
+.prow .pr-dirty { margin-left: 0.4rem; }
+.leave-ask { display: flex; flex-direction: column; gap: 0.625rem; }
+.rb-fields .ctl-select.quiet { flex: none; height: auto; padding: 0; color: var(--ink); font-weight: 600; background: none; }
+.rb-fields .ctl-select.quiet:hover:not(:disabled) { background: none; color: var(--ink); }
+.pg-save-at { display: inline-flex; align-items: center; gap: 0.6rem; }

@@ -57,9 +57,7 @@ export const RunnersPage: React.FC<RunnersPageProps> = ({ runners, error, pendin
       }
       foot={
         <>
-          One runner per machine. It holds the machine's folders, runs their sessions and applies their changes.{' '}
-          <code>agentbus up</code> starts one; <code>agentbus login</code> with this control's address signs in another
-          machine, which waits here for approval.
+          <code>agentbus login</code> with this control's address adds a machine. It waits here for approval.
         </>
       }
       main={
@@ -259,11 +257,9 @@ const RunnerDetail: React.FC<{ r: RunnerInfo; actions?: RunnerActions; onDone: (
             </>
           )}
         </div>
-        <p className="pg-note">
-          {connector
-            ? 'A connector from before 0.5. It takes no work now: run agentbus runner on this machine instead.'
-            : "This machine's one program. It holds the machine's folders, runs their sessions and applies their changes. It asks control for work, and reports the harnesses it finds."}
-        </p>
+        {connector && (
+          <p className="pg-note">A connector from before 0.5. It takes no work now: run agentbus runner on this machine instead.</p>
+        )}
         <table className="grid pg-kv">
           <tbody>
             {!connector && (

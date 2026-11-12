@@ -182,16 +182,19 @@ export const AgentsColumn: React.FC<AgentsColumnProps> = ({
         )}
         <div className="bus-card">
           <span className="bc-t">
-            <b className="brand">AgentBus</b>
+            <b className="brand">
+              AgentBus
+              {version && " "}
+              {version && (
+                <span className="bc-v" title="this service's build">
+                  {version}
+                </span>
+              )}
+            </b>
             <span className="bc-a gw">
               <i className="live" />
               <span>{sourceLabel}</span>
             </span>
-            {version && (
-              <span className="bc-v" title="this service's build">
-                {version}
-              </span>
-            )}
           </span>
           {onDisconnect && (
             <button className="disconnect" onClick={onDisconnect}>

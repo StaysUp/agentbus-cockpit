@@ -106,12 +106,11 @@ export function formatAgo(isoString: string | undefined, now: number = Date.now(
   return `${d} ${d === 1 ? 'day' : 'days'} ago`;
 }
 
-// versionLabel is the service's build in a few words: a release by its
-// version ("0.5.0"); a dev build by its version and short commit
-// ("dev · 12874bd"), with "+" when the tree had changes.
+// versionLabel is the service's build in one short word: a release by its
+// version ("0.5.0"); a dev build by its short commit ("12874bd"), with "+"
+// when the tree had changes; a dev build with no commit by nothing.
 export function versionLabel(v: VersionInfo): string {
   if (!v.version) return '';
-  const dev = /dev/.test(v.version);
-  if (!dev || !v.commit) return v.version;
-  return `${v.version} · ${v.commit.slice(0, 7)}${v.modified ? '+' : ''}`;
+  if (!/dev/.test(v.version)) return v.version;
+  return v.commit ? `${v.commit.slice(0, 7)}${v.modified ? '+' : ''}` : '';
 }

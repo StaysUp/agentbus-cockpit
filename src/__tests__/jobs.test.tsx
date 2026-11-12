@@ -17,7 +17,7 @@ import {
 } from '../data/jobs';
 import { queueView } from '../data/useJobs';
 import { CockpitEvent, DataSource } from '../types';
-import { click, ev, flush, liveReplay, render } from './helpers';
+import { choose, click, ev, flush, liveReplay, render, selectIn } from './helpers';
 
 const T0 = '2026-11-08T10:00:00Z';
 
@@ -193,12 +193,12 @@ describe('Review', () => {
     await waitFor(() => r.container.querySelector('#convo .tb') !== null, 'the turn');
     await openTurn(r.container);
     await waitFor(() => bar(r.container) !== null, 'the review bar');
-    const select = bar(r.container)!.querySelector('select[name="reviewer"]') as HTMLSelectElement;
+    const select = selectIn(bar(r.container)!, 'reviewer')!;
     expect(select.value).toBe('codex');
     expect(tabNames(r.container)).toContain('CI/CD');
 
     // Claude can review Claude's turn, and the bar says it is the same vendor.
-    await setValue(select, 'claude');
+    await choose(bar(r.container)!, 'reviewer', 'claude');
     expect((bar(r.container)!.querySelector('input[name="reviewer-model"]') as HTMLInputElement).value).toBe('sonnet');
     expect(bar(r.container)!.textContent).toContain('Same vendor as the author.');
 

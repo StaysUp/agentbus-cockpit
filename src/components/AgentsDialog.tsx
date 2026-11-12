@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { Combo, Seg, Select } from "./Controls";
 import { AccessOption, AgentFields, Harness, SavedAgent } from "../types";
 import { ConnectStep, SubscriptionApi } from "./ConnectStep";
 
@@ -85,9 +86,7 @@ function formOf(a: SavedAgent): FormState {
 const Off: React.FC<{ label: string; value: string }> = ({ label, value }) => (
   <label className="f-off">
     <span>{label}</span>
-    <select disabled>
-      <option>{value}</option>
-    </select>
+    <Select label={label} value="v" options={[{ value: "v", label: value }]} onChange={() => undefined} disabled />
     <span className="nd-note">Not available yet.</span>
   </label>
 );
@@ -231,29 +230,22 @@ export const AgentsDialog: React.FC<AgentsDialogProps> = ({
             <fieldset className="ad-set" disabled={busy}>
               <label>
                 <span>Harness</span>
-                <span className="nd-seg" role="radiogroup" aria-label="Harness">
-                  {hs.map((h) => (
-                    <button
-                      type="button"
-                      role="radio"
-                      key={h.name}
-                      data-harness={h.name}
-                      aria-checked={form.harness === h.name}
-                      className={form.harness === h.name ? "on" : ""}
-                      disabled={!usable(h)}
-                      title={
-                        h.disabled
-                          ? "Not available yet"
-                          : !h.found
-                            ? "Not installed where the service runs"
-                            : undefined
-                      }
-                      onClick={() => update({ harness: h.name })}
-                    >
-                      {h.label ?? h.name}
-                    </button>
-                  ))}
-                </span>
+                <Seg
+                  label="Harness"
+                  dataKey="harness"
+                  value={form.harness}
+                  options={hs.map((h) => ({
+                    value: h.name,
+                    label: h.label ?? h.name,
+                    disabled: !usable(h),
+                    title: h.disabled
+                      ? "Not available yet"
+                      : !h.found
+                        ? "Not installed where the service runs"
+                        : undefined,
+                  }))}
+                  onChange={(v) => update({ harness: v })}
+                />
                 <span className="nd-note">
                   It decides the loop, the tools and how the agent reaches a
                   model.
@@ -264,23 +256,18 @@ export const AgentsDialog: React.FC<AgentsDialogProps> = ({
               </label>
               <label>
                 <span>Access</span>
-                <span className="nd-seg" role="radiogroup" aria-label="Access">
-                  {accessesOf(harness).map((x) => (
-                    <button
-                      type="button"
-                      role="radio"
-                      key={x.kind}
-                      data-access={x.kind}
-                      aria-checked={form.access === x.kind}
-                      className={form.access === x.kind ? "on" : ""}
-                      disabled={!!x.disabled}
-                      title={x.disabled ? "Not available yet" : undefined}
-                      onClick={() => update({ access: x.kind })}
-                    >
-                      {x.label}
-                    </button>
-                  ))}
-                </span>
+                <Seg
+                  label="Access"
+                  dataKey="access"
+                  value={form.access}
+                  options={accessesOf(harness).map((x) => ({
+                    value: x.kind,
+                    label: x.label,
+                    disabled: !!x.disabled,
+                    title: x.disabled ? "Not available yet" : undefined,
+                  }))}
+                  onChange={(v) => update({ access: v })}
+                />
                 <span className="nd-note">
                   {openRouter
                     ? "The key is read from an environment variable where the turn runs. Its value is never shown or stored."
@@ -293,40 +280,28 @@ export const AgentsDialog: React.FC<AgentsDialogProps> = ({
               <label>
                 <span>Model</span>
                 {access?.any_model ? (
-                  <>
-                    <input
-                      name="model"
-                      type="text"
-                      list="ad-models"
-                      value={form.model}
-                      onChange={(e) => update({ model: e.target.value })}
-                      placeholder="an OpenRouter model id"
-                      spellCheck={false}
-                      autoComplete="off"
-                    />
-                    <datalist id="ad-models">
-                      {access.models.map((m) => (
-                        <option key={m} value={m} />
-                      ))}
-                    </datalist>
-                  </>
-                ) : (
-                  <select
+                  <Combo
                     name="model"
+                    label="Model"
                     value={form.model}
-                    onChange={(e) => update({ model: e.target.value })}
-                  >
-                    {(access?.models ?? []).map((m) => (
-                      <option key={m} value={m}>
-                        {m}
-                      </option>
-                    ))}
-                    {form.model &&
-                      !(access?.models ?? []).includes(form.model) && (
-                        <option value={form.model}>{form.model}</option>
-                      )}
-                    <option value="">Harness default</option>
-                  </select>
+                    onChange={(v) => update({ model: v })}
+                    placeholder="an OpenRouter model id"
+                    suggestions={access.models}
+                  />
+                ) : (
+                  <Select
+                    name="model"
+                    label="Model"
+                    value={form.model}
+                    onChange={(v) => update({ model: v })}
+                    options={[
+                      ...(access?.models ?? []).map((m) => ({ value: m, label: m })),
+                      ...(form.model && !(access?.models ?? []).includes(form.model)
+                        ? [{ value: form.model, label: form.model }]
+                        : []),
+                      { value: "", label: "Harness default" },
+                    ]}
+                  />
                 )}
                 <span className="nd-note">
                   Only what {harness?.label ?? form.harness} offers for this

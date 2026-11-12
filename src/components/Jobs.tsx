@@ -16,6 +16,7 @@ import {
 import { Turn } from '../types';
 import { formatCost } from '../utils/format';
 import { useNow } from '../utils/useNow';
+import { Combo, Select } from './Controls';
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
@@ -138,35 +139,26 @@ export const ReviewBar: React.FC<ReviewBarProps> = ({ turn, row, reviews, loadAg
         <label className="rb-pick">
           <span>Checked by</span>
           <span className="rb-fields">
-            <select
+            <Select
               name="reviewer"
+              label="Checked by"
+              variant="quiet"
+              className="rb-agent"
               value={agent}
-              onChange={(e) => {
-                setAgent(e.target.value);
-                setModel(defaultModel(e.target.value));
+              options={agents.map((a) => ({ value: a, label: a }))}
+              onChange={(v) => {
+                setAgent(v);
+                setModel(defaultModel(v));
               }}
-            >
-              {agents.map((a) => (
-                <option key={a} value={a}>
-                  {a}
-                </option>
-              ))}
-            </select>
-            <input
-              name="reviewer-model"
-              type="text"
-              value={model}
-              onChange={(e) => setModel(e.target.value)}
-              placeholder="default model"
-              list={`models-${agent}`}
-              spellCheck={false}
-              autoComplete="off"
             />
-            <datalist id={`models-${agent}`}>
-              {modelHints(agent).map((m) => (
-                <option key={m} value={m} />
-              ))}
-            </datalist>
+            <Combo
+              name="reviewer-model"
+              label="Reviewer model"
+              value={model}
+              onChange={setModel}
+              placeholder="default model"
+              suggestions={modelHints(agent)}
+            />
           </span>
         </label>
         <button

@@ -10,6 +10,7 @@ import { folderLabel, sessionFolderRef, useFolders } from '../data/folders';
 import { LiveLine } from './LiveLine';
 import { PencilIcon, TitleEdit } from './TitleEdit';
 import { ShellEntry } from './ShellEntry';
+import { Checkbox, Select } from './Controls';
 import { commandsAfter } from '../data/shell';
 
 interface ConvoColumnProps {
@@ -617,21 +618,19 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
             disabled={!canSend}
           />
           {showPick && (
-            <select
+            <Select
+              name="next_agent"
               className="next-agent"
-              aria-label="Agent for the next message"
+              variant="quiet"
+              label="Agent for the next message"
               title="Agent for the next message"
               value={nextAgent}
+              placeholder="Agent"
               disabled={!canSend}
-              onChange={(e) => setPicked(e.target.value)}
-            >
-              {!nextAgent && <option value="">Agent</option>}
-              {pickList.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.name}
-                </option>
-              ))}
-            </select>
+              options={pickList.map((a) => ({ value: a.id, label: a.name }))}
+              onChange={setPicked}
+              align="right"
+            />
           )}
           {showStop ? (
             <button type="button" className="go stop" disabled={lastStopping} onClick={stop}>
@@ -644,19 +643,21 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
               </button>
               {/* How to send. Fork (run in parallel from the same point) is
                   shown but not built yet. */}
-              <select
+              <Select
+                name="send_mode"
                 className="send-mode"
-                aria-label="How to send"
+                variant="icon"
+                label="How to send"
                 title="How to send"
                 value="send"
                 disabled={!canSend}
+                align="right"
+                options={[
+                  { value: 'send', label: sendLabel === 'Queue' ? 'Queue: run after the running turn' : 'Send' },
+                  { value: 'fork', label: 'Fork: run in parallel from here', hint: 'coming soon', disabled: true },
+                ]}
                 onChange={() => undefined}
-              >
-                <option value="send">{sendLabel === 'Queue' ? 'Queue: run after the running turn' : 'Send'}</option>
-                <option value="fork" disabled>
-                  Fork: run in parallel from here (coming soon)
-                </option>
-              </select>
+              />
             </span>
           )}
         </form>
@@ -665,10 +666,7 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
             {why ? (
               <span className="reply-why">{why}</span>
             ) : (
-              <label className="nd-check">
-                <input type="checkbox" checked={readOnly} onChange={(e) => setReadOnly(e.target.checked)} />
-                <span>Read only</span>
-              </label>
+              <Checkbox className="reply-ro" name="read_only" label="Read only" checked={readOnly} onChange={setReadOnly} />
             )}
           </div>
         )}

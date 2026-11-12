@@ -155,11 +155,12 @@ describe('the Runners page in three columns', () => {
     expect(main().textContent).toContain('not reported yet');
   });
 
-  it('says one runner per machine, and shows the machine a session names', async () => {
+  it('shows the machine a session names, with no boilerplate about what a runner is', async () => {
     const r = await render(<RunnersPage runners={[{ ...full, connector: 'con_8a7b6c5d4e3f2a10' }]} error={null} onBack={() => {}} />);
     const machine = [...r.container.querySelectorAll('.pg-main .pg-kv tr')].find((x) => x.textContent!.startsWith('Machine'))!;
     expect(machine.textContent).toBe('Machinecon_8a7b6c5d4e3f2a10');
-    expect(r.container.textContent).toContain('One runner per machine.');
+    expect(r.container.textContent).not.toContain('One runner per machine.');
+    expect(r.container.textContent).not.toContain("This machine's one program");
     expect(r.container.textContent).not.toContain('A connector owns');
   });
 
@@ -191,9 +192,9 @@ describe('the Runners page in three columns', () => {
 describe('the AgentBus card', () => {
   it('names a release by its version, and a dev build by its short commit too', () => {
     expect(versionLabel({ version: '0.5.0', commit: '5fea80b5aaaabbbb', modified: false })).toBe('0.5.0');
-    expect(versionLabel({ version: 'dev', commit: '12874bdeabbcdc22', modified: false })).toBe('dev · 12874bd');
-    expect(versionLabel({ version: 'dev', commit: '12874bdeabbcdc22', modified: true })).toBe('dev · 12874bd+');
-    expect(versionLabel({ version: 'dev' })).toBe('dev');
+    expect(versionLabel({ version: 'dev', commit: '12874bdeabbcdc22', modified: false })).toBe('12874bd');
+    expect(versionLabel({ version: 'dev', commit: '12874bdeabbcdc22', modified: true })).toBe('12874bd+');
+    expect(versionLabel({ version: 'dev' })).toBe('');
   });
 
   it('reads GET /api/v0/version with the token', async () => {
@@ -217,7 +218,9 @@ describe('the AgentBus card', () => {
     await flush();
     expect(src.getVersion).toHaveBeenCalledTimes(1);
     const col = r.container.querySelector('#agents')!;
-    expect(col.querySelector('.bus-card .bc-v')!.textContent).toBe('dev · 12874bd');
+    expect(col.querySelector('.bus-card .bc-v')!.textContent).toBe('12874bd');
+    // Inline, right after the name: "AgentBus 12874bd", no line of its own.
+    expect(col.querySelector('.bus-card .brand')!.textContent).toBe('AgentBus 12874bd');
     // The column is its header, the list that scrolls, then the foot: the
     // links and the card are never inside the list.
     expect([...col.children].map((x) => x.className)).toEqual(['colhead', 'colbody', 'brand-foot']);

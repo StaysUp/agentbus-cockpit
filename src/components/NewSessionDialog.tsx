@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { FolderInfo, lastMachine, recentFolders } from '../data/folders';
 import { Harness, RunRequest, RunnerInfo, SavedAgent } from '../types';
 import { agentLine } from './AgentsDialog';
+import { Select } from './Controls';
 
 interface NewSessionDialogProps {
   // The saved agents (GET /api/v0/agents).
@@ -83,25 +84,20 @@ export const NewSessionDialog: React.FC<NewSessionDialogProps> = ({
   // newest first (recentFolders keeps no more).
   const folders = byMachine ? allFolders.filter((f) => f.connector === machine) : allFolders;
   const recent = useMemo(() => recentFolders(byMachine ? machine : undefined), [byMachine, machine]);
-  // A listed folder first, as the service knows it; else the last path.
-  // Picked again when the machine changes, unless the person chose a folder.
-  const firstWhere = (): Where | null =>
-    folders[0] ? { ref: folders[0].ref, connector: folders[0].connector } : recent[0] ? { path: recent[0] } : null;
-  const [where, setWhere] = useState<Where | null>(firstWhere);
-  const [touched, setTouched] = useState(false);
+  // No folder is picked for the person: the session runs where they say,
+  // so Start waits for a listed folder, a recent one or a typed path. A
+  // listed folder that leaves the list is dropped.
+  const [where, setWhere] = useState<Where | null>(null);
   const folderKey = folders.map((f) => f.ref).join(',');
   useEffect(() => {
-    if (touched) return;
-    setWhere((cur) => (cur && 'ref' in cur && folders.some((f) => f.ref === cur.ref) ? cur : firstWhere()));
-    // firstWhere reads folders and recent, named by folderKey and recent.
-  }, [folderKey, recent, touched]);
-  const pick = (w: Where) => {
-    setTouched(true);
-    setWhere(w);
-  };
+    setWhere((cur) => (cur && 'ref' in cur && !folders.some((f) => f.ref === cur.ref) ? null : cur));
+    // folders is derived from allFolders and machine each render.
+  }, [folderKey]);
+  const pick = (w: Where) => setWhere(w);
+  // Another machine holds other folders: the folder is picked again.
   const pickMachine = (m: string) => {
     setMachineTouched(true);
-    setTouched(false);
+    if (m !== machine) setWhere(null);
     setMachine(m);
   };
   const path = where && 'path' in where ? where.path : '';
@@ -166,14 +162,20 @@ export const NewSessionDialog: React.FC<NewSessionDialogProps> = ({
         <div className="nd-title">New session</div>
         <label>
           <span>Agent</span>
-          <select name="agent" value={agent} onChange={(e) => setAgent(e.target.value)} disabled={!agents}>
-            {!agents && <option value="">{agentsError ? '' : 'Looking…'}</option>}
-            {agents?.map((a) => (
-              <option key={a.id} value={a.id} disabled={!found(a)}>
-                {found(a) ? a.name : `${a.name} (not installed)`}
-              </option>
-            ))}
-          </select>
+          <Select
+            name="agent"
+            label="Agent"
+            value={agent}
+            disabled={!agents}
+            placeholder={agents ? 'No agents' : agentsError ? '' : 'Looking…'}
+            options={(agents ?? []).map((a) => ({
+              value: a.id,
+              label: a.name,
+              hint: found(a) ? undefined : 'not installed',
+              disabled: !found(a),
+            }))}
+            onChange={setAgent}
+          />
         </label>
         {chosen && <div className="nd-note">{agentLine(chosen, harnesses)}</div>}
         {agentsError && <div className="form-error">{agentsError}</div>}
@@ -190,14 +192,19 @@ export const NewSessionDialog: React.FC<NewSessionDialogProps> = ({
         {byMachine && (
           <label>
             <span>Machine</span>
-            <select name="machine" value={machine} onChange={(e) => pickMachine(e.target.value)}>
-              {!picked && <option value="">Pick a machine</option>}
-              {usable.map((m) => (
-                <option key={m.connector} value={m.connector} disabled={!m.online}>
-                  {m.online ? m.name : `${m.name} (offline)`}
-                </option>
-              ))}
-            </select>
+            <Select
+              name="machine"
+              label="Machine"
+              value={picked ? machine : ''}
+              placeholder="Pick a machine"
+              options={usable.map((m) => ({
+                value: m.connector!,
+                label: m.name,
+                hint: m.online ? undefined : 'offline',
+                disabled: !m.online,
+              }))}
+              onChange={pickMachine}
+            />
           </label>
         )}
         {byMachine && !usable.some((m) => m.online) && (
@@ -210,7 +217,7 @@ export const NewSessionDialog: React.FC<NewSessionDialogProps> = ({
             type="text"
             value={path}
             onChange={(e) => pick({ path: e.target.value })}
-            placeholder={folders.length > 0 ? 'or type a path' : '/Users/you/project'}
+            placeholder={folders.length > 0 || recent.length > 0 ? 'Pick one below, or type a path' : '/Users/you/project'}
             spellCheck={false}
             autoComplete="off"
           />
@@ -235,6 +242,7 @@ export const NewSessionDialog: React.FC<NewSessionDialogProps> = ({
             ))}
           </div>
         )}
+        {!hasWhere && (folders.length > 0 || recent.length > 0) && <div className="nd-note">Pick a folder to start.</div>}
         <div className="nd-note">
           {byMachine
             ? `A folder on ${picked?.name ?? 'the machine picked'}: pick a recent one or type its path. The session runs on that machine. `

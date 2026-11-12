@@ -1,12 +1,12 @@
 // @vitest-environment jsdom
-import { act } from 'react';
+import React, { act } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../App';
 import { ReplayDataSource } from '../data/ReplayDataSource';
 import { SettingsPage } from '../components/SettingsPage';
 import { LiveDataSource } from '../data/LiveDataSource';
 import { grantsOf, lines, networkOf, Policy, SettingsApi, SettingsInfo, withGrants } from '../data/settings';
-import { click, ev, flush, jsonl, panelOpen, render } from './helpers';
+import { click, ev, flush, jsonl, panelOpen, render, unmountAll } from './helpers';
 
 // The policy as GET /api/v0/settings/permissions sends it on the defaults.
 function policy(): Policy {
@@ -37,8 +37,8 @@ async function pick(c: HTMLElement, sel: string) {
   await click(c.querySelector(sel));
 }
 
-function button(c: HTMLElement, text: string): HTMLElement | undefined {
-  return [...c.querySelectorAll('button')].find((b) => b.textContent?.trim() === text) as HTMLElement | undefined;
+function button(c: HTMLElement, text: string): HTMLButtonElement | undefined {
+  return [...c.querySelectorAll('button')].find((b) => b.textContent?.trim() === text);
 }
 
 // A settings API in memory, with versions as ETags, that refuses a stale one
@@ -74,6 +74,7 @@ function fakeApi(info: Partial<SettingsInfo> = {}) {
 }
 
 afterEach(() => {
+  unmountAll();
   document.body.innerHTML = '';
   vi.restoreAllMocks();
 });
@@ -166,7 +167,7 @@ describe('the Settings page', () => {
     await click(container.querySelector('[aria-label="Network"] [role="radio"]:nth-child(2)'));
     await setValue(container.querySelector('textarea[name="hosts"]'), 'github.com\nregistry.npmjs.org');
     await pick(container, '[data-grant="apply"]');
-    await click(container.querySelector('input[name="agents_apply"]'));
+    await click(container.querySelector('button[name="agents_apply"]'));
     // There is no "!" commands grant: a "!" message goes to the agent.
     expect(container.querySelector('[data-grant="commands"]')).toBeNull();
     // The table shows the drafts before they are saved.
@@ -198,14 +199,14 @@ describe('the Settings page', () => {
     await flush();
     state.info.version = 9; // changed elsewhere
     await pick(container, '[data-grant="apply"]');
-    await click(container.querySelector('input[name="agents_apply"]'));
+    await click(container.querySelector('button[name="agents_apply"]'));
     await click(button(container, 'Save grants'));
     await flush();
     expect(container.textContent).toContain('Changed elsewhere since this page read it.');
     expect(state.policy.agent_api?.apply).toBe(true);
     await click(button(container, 'Read again'));
     await flush();
-    expect((container.querySelector('input[name="agents_apply"]') as HTMLInputElement).checked).toBe(true);
+    expect(container.querySelector('button[name="agents_apply"]')!.getAttribute('aria-checked')).toBe('true');
   });
 
   it('saves the policy as JSON, and refuses JSON that does not parse', async () => {
@@ -233,7 +234,7 @@ describe('the Settings page', () => {
     await setValue(container.querySelector('textarea[name="instructions"]'), 'Draft, not saved.');
     await pick(container, '[data-part="grants"]');
     await pick(container, '[data-grant="apply"]');
-    await click(container.querySelector('input[name="agents_apply"]'));
+    await click(container.querySelector('button[name="agents_apply"]'));
     await click(button(container, 'Save grants'));
     await flush();
     expect(state.policy.agent_api?.apply).toBe(false);
@@ -242,6 +243,130 @@ describe('the Settings page', () => {
     expect(api.getInstructions).toHaveBeenCalledTimes(1);
     // The page read the state again: it shows when the settings changed.
     expect(container.textContent).toContain('Last changed');
+  });
+
+  it('shows which parts hold unsaved changes, and opens Save only then', async () => {
+    const { api } = fakeApi();
+    const { container } = await render(<SettingsPage api={api} onBack={() => {}} />);
+    await flush();
+    const dirty = () => [...container.querySelectorAll('.pg-list [data-part]')].filter((x) => x.querySelector('.pr-dirty')).map((x) => x.getAttribute('data-part'));
+    expect(dirty()).toEqual([]);
+    expect(button(container, 'Save grants')!.disabled).toBe(true);
+    expect(container.querySelector('.pg-dirty')).toBeNull();
+    await pick(container, '[data-grant="apply"]');
+    await click(container.querySelector('button[name="agents_apply"]'));
+    expect(dirty()).toEqual(['grants']);
+    expect(container.querySelector('.pg-main .pg-dirty')!.textContent).toBe('Unsaved changes');
+    expect(button(container, 'Save grants')!.disabled).toBe(false);
+    // Put back as it was: nothing to save again.
+    await click(container.querySelector('button[name="agents_apply"]'));
+    expect(dirty()).toEqual([]);
+    expect(button(container, 'Save grants')!.disabled).toBe(true);
+    await pick(container, '[data-part="instructions"]');
+    expect(button(container, 'Save instructions')!.disabled).toBe(true);
+    await setValue(container.querySelector('textarea[name="instructions"]'), 'New words.');
+    expect(dirty()).toEqual(['instructions']);
+    await click(button(container, 'Save instructions'));
+    await flush();
+    expect(dirty()).toEqual([]);
+    expect(button(container, 'Save instructions')!.disabled).toBe(true);
+  });
+
+  it('asks before leaving with unsaved changes, and stays or leaves on the answer', async () => {
+    const { api } = fakeApi();
+    const { usePage } = await import('../page');
+    window.history.replaceState(null, '', '/settings');
+    const Pages: React.FC = () => {
+      const [page, go] = usePage();
+      return page === 'settings' ? <SettingsPage api={api} onBack={() => go('cockpit')} /> : <div id="cockpit-shown" />;
+    };
+    const { container } = await render(<Pages />);
+    await flush();
+    const ask = () => document.querySelector('[role="alertdialog"]');
+    // A link's click, as a browser sends it: cancelable, so the page keeps it.
+    const back = () =>
+      act(async () => {
+        container.querySelector('.page-back')!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 }));
+      });
+    await pick(container, '[data-grant="apply"]');
+    await click(container.querySelector('button[name="agents_apply"]'));
+    // A reload or a closed tab asks through the browser.
+    const unload = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(unload);
+    expect(unload.defaultPrevented).toBe(true);
+    await back();
+    expect(ask()!.textContent).toContain('Your changes to Grants are not saved.');
+    await click([...ask()!.querySelectorAll('button')].find((x) => x.textContent === 'Stay')!);
+    expect(ask()).toBeNull();
+    // Escape is Stay too.
+    await back();
+    await act(async () => {
+      ask()!.querySelector('button')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+    expect(ask()).toBeNull();
+    expect(window.location.pathname).toBe('/settings');
+    expect(container.querySelector('#cockpit-shown')).toBeNull();
+    // The browser's Back asks too, and the address stays on the page meanwhile.
+    window.history.pushState(null, '', '/');
+    await act(async () => {
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    });
+    expect(window.location.pathname).toBe('/settings');
+    expect(ask()).not.toBeNull();
+    await click([...ask()!.querySelectorAll('button')].find((x) => x.textContent === 'Leave without saving')!);
+    expect(container.querySelector('#cockpit-shown')).not.toBeNull();
+    expect(window.location.pathname).toBe('/');
+    // Gone from the page, the guard is gone too.
+    const later = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(later);
+    expect(later.defaultPrevented).toBe(false);
+  });
+
+  it('asked to leave while a save lands, it leaves once nothing is unsaved', async () => {
+    const { api, state } = fakeApi();
+    const { usePage } = await import('../page');
+    window.history.replaceState(null, '', '/settings');
+    const Pages: React.FC = () => {
+      const [page, go] = usePage();
+      return page === 'settings' ? <SettingsPage api={api} onBack={() => go('cockpit')} /> : <div id="cockpit-shown" />;
+    };
+    const { container } = await render(<Pages />);
+    await flush();
+    await pick(container, '[data-grant="apply"]');
+    await click(container.querySelector('button[name="agents_apply"]'));
+    // The read after the write waits until released.
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    api.getPolicy.mockImplementationOnce(async () => {
+      await held;
+      return { value: structuredClone(state.policy), etag: `"${state.info.version}"` };
+    });
+    await click(button(container, 'Save grants'));
+    await act(async () => {
+      container.querySelector('.page-back')!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 }));
+    });
+    expect(document.querySelector('[role="alertdialog"]')).not.toBeNull();
+    await act(async () => release());
+    await flush();
+    expect(document.querySelector('[role="alertdialog"]')).toBeNull();
+    expect(container.querySelector('#cockpit-shown')).not.toBeNull();
+  });
+
+  it('leaves at once when nothing is unsaved', async () => {
+    const { api } = fakeApi();
+    const { usePage } = await import('../page');
+    window.history.replaceState(null, '', '/settings');
+    const Pages: React.FC = () => {
+      const [page, go] = usePage();
+      return page === 'settings' ? <SettingsPage api={api} onBack={() => go('cockpit')} /> : <div id="cockpit-shown" />;
+    };
+    const { container } = await render(<Pages />);
+    await flush();
+    await act(async () => {
+      container.querySelector('.page-back')!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 }));
+    });
+    expect(document.querySelector('[role="alertdialog"]')).toBeNull();
+    expect(container.querySelector('#cockpit-shown')).not.toBeNull();
   });
 
   it('lays out as the mockup: the parts, the picked one, its detail', async () => {

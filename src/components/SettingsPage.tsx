@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   Grants,
   grantsOf,
@@ -10,6 +10,8 @@ import {
   withGrants,
 } from "../data/settings";
 import { ColHead, PageFrame } from "./PageFrame";
+import { Seg, Switch } from "./Controls";
+import { setLeaveGuard } from "../page";
 
 // The Settings page (/settings): control's settings, one global set for every machine.
 // The grants (files a session gets, the sandbox, the network, and two
@@ -49,8 +51,12 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ api, onBack }) => {
 
   // read reads the settings' state, and the parts named: each part read
   // resets its own drafts, and leaves the other part's as they are.
+  // Which parts hold changes not saved, as of the last render: a read
+  // after one part's save leaves another part's unsaved draft as it is.
+  const dirtyRef = useRef<Record<Part, boolean>>({ grants: false, policy: false, instructions: false });
   const read = useCallback(
-    async (parts: { policy: boolean; instructions: boolean }) => {
+    async (parts: { policy: boolean; instructions: boolean }, saved?: Part | "all") => {
+      const keep = (p: Part) => saved !== "all" && p !== saved && dirtyRef.current[p];
       const [info, policy, ins] = await Promise.all([
         api.getSettings(),
         parts.policy ? api.getPolicy() : undefined,
@@ -62,21 +68,23 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ api, onBack }) => {
         instructions: ins ?? cur!.instructions,
       }));
       if (policy) {
-        const g = grantsOf(policy.value);
-        setGrants(g);
-        setReadText(g.read.join("\n"));
-        setHostsText(g.hosts.join("\n"));
-        setPolicyText(json(policy.value));
+        if (!keep("grants")) {
+          const g = grantsOf(policy.value);
+          setGrants(g);
+          setReadText(g.read.join("\n"));
+          setHostsText(g.hosts.join("\n"));
+        }
+        if (!keep("policy")) setPolicyText(json(policy.value));
       }
-      if (ins) setInstructions(ins.value);
+      if (ins && !keep("instructions")) setInstructions(ins.value);
     },
     [api],
   );
 
-  // load reads everything again.
+  // load reads everything again, and drops every draft.
   const load = useCallback(async () => {
     try {
-      await read({ policy: true, instructions: true });
+      await read({ policy: true, instructions: true }, "all");
       setLoadError(null);
     } catch (err) {
       setLoadError((err as Error).message);
@@ -90,7 +98,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ api, onBack }) => {
   // save runs one part's write, then reads the settings' state and what the
   // write changed. A draft of a part it did not change stays.
   const save = async (
-    part: string,
+    part: Part,
     write: () => Promise<unknown>,
     changes: { policy: boolean; instructions: boolean },
   ) => {
@@ -100,7 +108,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ api, onBack }) => {
     try {
       await write();
       setMessage({ part, text: "Saved.", ok: true });
-      await read(changes);
+      await read(changes, part);
     } catch (err) {
       const e = err as Error & { status?: number };
       const text =
@@ -158,6 +166,45 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ api, onBack }) => {
   const info = loaded?.info.value;
   const ready = !!(loaded && grants && info);
 
+  // What each part holds that is not saved: its draft against what was read.
+  const grantsDraft = grants && { ...grants, read: lines(readText), hosts: lines(hostsText) };
+  const dirty: Record<Part, boolean> = {
+    grants:
+      !!loaded &&
+      !!grantsDraft &&
+      JSON.stringify(withGrants(loaded.policy.value, grantsDraft)) !==
+        JSON.stringify(withGrants(loaded.policy.value, grantsOf(loaded.policy.value))),
+    policy: !!loaded && policyText !== json(loaded.policy.value),
+    instructions: !!loaded && instructions !== loaded.instructions.value,
+  };
+  dirtyRef.current = dirty;
+  const unsaved = PART_NAMES.filter(([k]) => dirty[k]).map(([, n]) => n);
+
+  // Leaving with changes not saved asks first: a move within the cockpit
+  // through the page guard, a reload or a closed tab through the browser.
+  const [asking, setAsking] = useState<(() => void) | null>(null);
+  const anyDirty = unsaved.length > 0;
+  // Asked while a save was landing, and nothing is unsaved now: nothing
+  // would be lost, so the move goes on.
+  useEffect(() => {
+    if (anyDirty || !asking) return;
+    setAsking(null);
+    asking();
+  }, [anyDirty, asking]);
+  useEffect(() => {
+    if (!anyDirty) return;
+    setLeaveGuard((leave) => setAsking(() => leave));
+    const onUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", onUnload);
+    return () => {
+      setLeaveGuard(null);
+      window.removeEventListener("beforeunload", onUnload);
+    };
+  }, [anyDirty]);
+
   // The left column: the three parts, each saved on its own.
   const parts: [Part, string, string][] = [
     ["grants", "Grants", "Files, sandbox, network and two actions"],
@@ -176,15 +223,20 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ api, onBack }) => {
       <span className="pr-n">
         {name}
         {k === "grants" && <span className="pl-n">{GRANTS.length}</span>}
+        {dirty[k] && <span className="pr-dirty">Unsaved</span>}
       </span>
       <span className="pr-m2">{sub}</span>
     </button>
   ));
 
+  // Save is open only while the part on screen holds a change.
   const saveBtn = (label: string, onClick: () => void) => (
-    <button type="button" className="head-btn pg-save" disabled={!ready || !!busy} onClick={onClick}>
-      {busy === part ? "Saving…" : label}
-    </button>
+    <span className="pg-save-at">
+      {dirty[part] && <span className="pg-dirty">Unsaved changes</span>}
+      <button type="button" className="head-btn pg-save" disabled={!ready || !!busy || !dirty[part]} onClick={onClick}>
+        {busy === part ? "Saving…" : label}
+      </button>
+    </span>
   );
 
   const head = (title: string, action?: React.ReactNode) => <ColHead title={title} action={action} />;
@@ -274,38 +326,38 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ api, onBack }) => {
                 </label>
               )}
               {sel[0] === "sandbox" && (
-                <label>
+                <div className="pg-field">
                   <span className="pg-note">On, each session runs in a sandbox with its own home.</span>
                   <Seg
-                    name="Sandbox"
+                    label="Sandbox"
                     value={g.sandbox}
                     options={[
-                      ["off", "Off"],
-                      ["on", "On"],
+                      { value: "off", label: "Off" },
+                      { value: "on", label: "On" },
                     ]}
                     onChange={(v) => setGrants({ ...g, sandbox: v as Grants["sandbox"] })}
                   />
-                </label>
+                </div>
               )}
               {sel[0] === "network" && (
                 <>
-                  <label>
+                  <div className="pg-field">
                     <span className="pg-note">
                       {g.network === "off" && "Agents reach only their runner and control."}
                       {g.network === "list" && "Agents reach their runner, control and these hosts. An empty list is off."}
                       {g.network === "on" && "Agents reach any host."}
                     </span>
                     <Seg
-                      name="Network"
+                      label="Network"
                       value={g.network}
                       options={[
-                        ["off", "Off"],
-                        ["list", "A list"],
-                        ["on", "On"],
+                        { value: "off", label: "Off" },
+                        { value: "list", label: "A list" },
+                        { value: "on", label: "On" },
                       ]}
                       onChange={(v) => setGrants({ ...g, network: v as Grants["network"] })}
                     />
-                  </label>
+                  </div>
                   {g.network === "list" && (
                     <label>
                       <span className="sub-h">Hosts</span>
@@ -442,7 +494,40 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ api, onBack }) => {
     );
   }
 
+  const leaveAsk = asking && (
+    <div className="modal-back" onMouseDown={(e) => e.target === e.currentTarget && setAsking(null)}>
+      <div
+        className="new-dialog leave-ask"
+        role="alertdialog"
+        aria-label="Unsaved changes"
+        onKeyDown={(e) => e.key === "Escape" && setAsking(null)}
+      >
+        <div className="nd-title">Unsaved changes</div>
+        <div className="nd-note">Your changes to {unsaved.join(" and ").replace(/ and (?=.* and )/g, ", ")} are not saved. Leave and lose them?</div>
+        <div className="nd-actions">
+          <button type="button" className="connect-go" onClick={() => setAsking(null)} autoFocus>
+            Stay
+          </button>
+          <button
+            type="button"
+            className="use-recorded"
+            onClick={() => {
+              const leave = asking;
+              setAsking(null);
+              setLeaveGuard(null);
+              leave();
+            }}
+          >
+            Leave without saving
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
   return (
+    <>
+    {leaveAsk}
     <PageFrame
       title="Settings"
       onBack={onBack}
@@ -456,10 +541,16 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ api, onBack }) => {
       main={main}
       side={side}
     />
+    </>
   );
 };
 
 type Part = "grants" | "policy" | "instructions";
+const PART_NAMES: [Part, string][] = [
+  ["grants", "Grants"],
+  ["policy", "Policy"],
+  ["instructions", "Instructions"],
+];
 type GrantKey = "read" | "sandbox" | "network" | "apply";
 
 // The grants as rows: the key, its name, and the policy key it writes.
@@ -497,39 +588,3 @@ function grantValue(k: GrantKey, g: Grants, readText: string, hostsText: string)
       return g.agentsApply ? "Yes" : "No";
   }
 }
-
-// Switch is an on/off control in the mockup's look, over a checkbox.
-const Switch: React.FC<{ name: string; label: string; on: boolean; onChange: (v: boolean) => void }> = ({
-  name,
-  label,
-  on,
-  onChange,
-}) => (
-  <label className="pg-switch">
-    <input type="checkbox" name={name} checked={on} onChange={(e) => onChange(e.target.checked)} />
-    <span className={`sw${on ? " on" : ""}`} aria-hidden="true" />
-    <span>{label}</span>
-  </label>
-);
-
-const Seg: React.FC<{
-  name: string;
-  value: string;
-  options: [string, string][];
-  onChange: (v: string) => void;
-}> = ({ name, value, options, onChange }) => (
-  <span className="nd-seg" role="radiogroup" aria-label={name}>
-    {options.map(([v, label]) => (
-      <button
-        type="button"
-        role="radio"
-        key={v}
-        aria-checked={value === v}
-        className={value === v ? "on" : ""}
-        onClick={() => onChange(v)}
-      >
-        {label}
-      </button>
-    ))}
-  </span>
-);
