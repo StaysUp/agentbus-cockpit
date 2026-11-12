@@ -329,7 +329,7 @@ describe('New session', () => {
     expect((dialog.querySelector('button[type="submit"]') as HTMLButtonElement).disabled).toBe(true);
     expect(dialog.textContent).toContain('Pick a folder to start.');
     await click(picks[1]);
-    expect(picks[1].className).toBe('on');
+    expect(picks[1].classList.contains('on')).toBe(true);
     expect((dialog.querySelector('button[type="submit"]') as HTMLButtonElement).disabled).toBe(false);
     await setValue(dialog.querySelector('textarea[name="prompt"]'), 'read the README');
     await submitForm(dialog);

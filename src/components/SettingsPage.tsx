@@ -10,7 +10,7 @@ import {
   withGrants,
 } from "../data/settings";
 import { ColHead, PageFrame } from "./PageFrame";
-import { Seg, Switch } from "./Controls";
+import { Button, Seg, Switch } from "./Controls";
 import { setLeaveGuard } from "../page";
 
 // The Settings page (/settings): control's settings, one global set for every machine.
@@ -128,7 +128,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ api, onBack }) => {
         {!message.ok && (
           <>
             {" "}
-            <button type="button" className="use-recorded" onClick={load}>
+            <button type="button" className="link-btn" onClick={load}>
               Read again
             </button>
           </>
@@ -215,7 +215,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ api, onBack }) => {
     <button
       type="button"
       key={k}
-      className={`prow${part === k ? " on" : ""}`}
+      className={`prow pick${part === k ? " on" : ""}`}
       data-part={k}
       aria-current={part === k}
       onClick={() => setPart(k)}
@@ -233,9 +233,9 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ api, onBack }) => {
   const saveBtn = (label: string, onClick: () => void) => (
     <span className="pg-save-at">
       {dirty[part] && <span className="pg-dirty">Unsaved changes</span>}
-      <button type="button" className="head-btn pg-save" disabled={!ready || !!busy || !dirty[part]} onClick={onClick}>
+      <Button kind="quiet" className="pg-save" disabled={!ready || !!busy || !dirty[part]} onClick={onClick}>
         {busy === part ? "Saving…" : label}
-      </button>
+      </Button>
     </span>
   );
 
@@ -245,7 +245,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ api, onBack }) => {
       {loadError && (
         <div className="form-error">
           {loadError}{" "}
-          <button type="button" className="use-recorded" onClick={load}>
+          <button type="button" className="link-btn" onClick={load}>
             Read again
           </button>
         </div>
@@ -326,18 +326,15 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ api, onBack }) => {
                 </label>
               )}
               {sel[0] === "sandbox" && (
-                <div className="pg-field">
-                  <span className="pg-note">On, each session runs in a sandbox with its own home.</span>
-                  <Seg
-                    label="Sandbox"
-                    value={g.sandbox}
-                    options={[
-                      { value: "off", label: "Off" },
-                      { value: "on", label: "On" },
-                    ]}
-                    onChange={(v) => setGrants({ ...g, sandbox: v as Grants["sandbox"] })}
+                <>
+                  <p className="pg-note">On, each session runs in a sandbox with its own home.</p>
+                  <Switch
+                    name="sandbox"
+                    label="Run each session in a sandbox"
+                    on={g.sandbox === "on"}
+                    onChange={(v) => setGrants({ ...g, sandbox: v ? "on" : "off" })}
                   />
-                </div>
+                </>
               )}
               {sel[0] === "network" && (
                 <>
@@ -505,12 +502,12 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ api, onBack }) => {
         <div className="nd-title">Unsaved changes</div>
         <div className="nd-note">Your changes to {unsaved.join(" and ").replace(/ and (?=.* and )/g, ", ")} are not saved. Leave and lose them?</div>
         <div className="nd-actions">
-          <button type="button" className="connect-go" onClick={() => setAsking(null)} autoFocus>
+          <Button kind="primary" className="leave-stay" onClick={() => setAsking(null)} autoFocus>
             Stay
-          </button>
-          <button
-            type="button"
-            className="use-recorded"
+          </Button>
+          <Button
+            kind="secondary"
+            className="leave-go"
             onClick={() => {
               const leave = asking;
               setAsking(null);
@@ -519,7 +516,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ api, onBack }) => {
             }}
           >
             Leave without saving
-          </button>
+          </Button>
         </div>
       </div>
     </div>
@@ -585,6 +582,6 @@ function grantValue(k: GrantKey, g: Grants, readText: string, hostsText: string)
     case "network":
       return g.network === "list" ? `A list · ${plural(lines(hostsText).length, "host")}` : g.network === "on" ? "On" : "Off";
     case "apply":
-      return g.agentsApply ? "Yes" : "No";
+      return g.agentsApply ? "On" : "Off";
   }
 }

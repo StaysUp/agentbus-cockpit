@@ -11,7 +11,7 @@ interface McpTabProps {
 export const McpTab: React.FC<McpTabProps> = ({ box, running }) => {
   if (!box) {
     return (
-      <p className="dim mcp-off">
+      <p className="empty mcp-off">
         {running ? 'No tool list served to this turn yet.' : 'AgentBus tools are off for this turn ([agent_api] tools).'}
       </p>
     );

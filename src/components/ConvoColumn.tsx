@@ -10,7 +10,7 @@ import { folderLabel, sessionFolderRef, useFolders } from '../data/folders';
 import { LiveLine } from './LiveLine';
 import { PencilIcon, TitleEdit } from './TitleEdit';
 import { ShellEntry } from './ShellEntry';
-import { Checkbox, Select } from './Controls';
+import { Select, Switch } from './Controls';
 import { commandsAfter } from '../data/shell';
 
 interface ConvoColumnProps {
@@ -474,7 +474,7 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
             return (
               <React.Fragment key={turn.id}>
                 {ti > 0 && <div className="tsep" />}
-                <div className={`tb ${mark}`} onClick={() => onSelectTurn(turn)}>
+                <div className={`tb pick ${mark}`} onClick={() => onSelectTurn(turn)}>
                   <div className="tb-h">
                     <b>Turn {turn.turnNumber}</b>
                     {facts.length > 0 && (
@@ -666,7 +666,7 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
             {why ? (
               <span className="reply-why">{why}</span>
             ) : (
-              <Checkbox className="reply-ro" name="read_only" label="Read only" checked={readOnly} onChange={setReadOnly} />
+              <Switch className="reply-ro" name="read_only" label="Read only" on={readOnly} onChange={setReadOnly} />
             )}
           </div>
         )}

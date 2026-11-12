@@ -163,7 +163,7 @@ export const ReviewBar: React.FC<ReviewBarProps> = ({ turn, row, reviews, loadAg
         </label>
         <button
           type="button"
-          className="rb-go"
+          className="btn btn-primary rb-go"
           onClick={press}
           disabled={!canReview || busy}
           title={canReview ? undefined : 'Review opens when the turn ends'}
@@ -180,7 +180,7 @@ export const ReviewBar: React.FC<ReviewBarProps> = ({ turn, row, reviews, loadAg
           {canFix && (
             <button
               type="button"
-              className="rb-fix"
+              className="btn btn-secondary btn-sm rb-fix"
               onClick={() => onFix!(fixPrompt(newest.findings ?? [], turn.turnNumber))}
               title="Put the findings in the message box, to edit and send"
             >

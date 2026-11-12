@@ -60,7 +60,7 @@ export const SessionsColumn: React.FC<SessionsColumnProps> = ({
         {/* No cost total here, as in the mockup: each card and the panel carry the cost. */}
         <div className="colhead-title">Sessions</div>
         {onNewSession && !empty && (
-          <button className="new-session head-btn" onClick={onNewSession} aria-label="New session" title="New session">
+          <button className="new-session btn btn-quiet" onClick={onNewSession} aria-label="New session" title="New session">
             <PlusIcon />
             Session
           </button>
@@ -69,9 +69,9 @@ export const SessionsColumn: React.FC<SessionsColumnProps> = ({
       <div className="colbody">
         {empty && (
           <div className="empty-state">
-            <p>No sessions yet.</p>
+            <p className="empty">No sessions yet.</p>
             {onNewSession && (
-              <button className="new-session head-btn" onClick={onNewSession}>
+              <button className="new-session btn btn-quiet" onClick={onNewSession}>
                 New session
               </button>
             )}
@@ -130,7 +130,7 @@ export const SessionsColumn: React.FC<SessionsColumnProps> = ({
           if (isSelected || isEditing) {
             return (
               <div key={s.id} className="sess-row">
-                <div className={`sess ${isSelected ? 'on' : ''}`} data-session={s.id}>
+                <div className={`sess pick${isSelected ? ' on' : ''}`} data-session={s.id}>
                   {title}
                   {meta}
                   {isSelected && (
@@ -146,7 +146,7 @@ export const SessionsColumn: React.FC<SessionsColumnProps> = ({
           }
           return (
             <div key={s.id} className="sess-row">
-              <button className="sess" data-session={s.id} onClick={() => onSelectSession(s.id)}>
+              <button className="sess pick" data-session={s.id} onClick={() => onSelectSession(s.id)}>
                 {title}
                 {meta}
               </button>

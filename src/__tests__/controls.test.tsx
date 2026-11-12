@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React, { act, useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { Checkbox, Combo, Select, Switch } from '../components/Controls';
+import { Button, Combo, Select, Switch } from '../components/Controls';
 import { click, render, selectIn, unmountAll } from './helpers';
 
 afterEach(() => {
@@ -98,7 +98,7 @@ describe('Select', () => {
   });
 });
 
-describe('Combo, Checkbox and Switch', () => {
+describe('Combo, Switch and Button', () => {
   it('Combo suggests what matches the text, and a suggestion fills it', async () => {
     const Box: React.FC = () => {
       const [v, setV] = useState('');
@@ -134,26 +134,28 @@ describe('Combo, Checkbox and Switch', () => {
     expect(menu()).toBeNull();
   });
 
-  it('Checkbox and Switch say their state and flip on a click', async () => {
-    const Both: React.FC = () => {
-      const [a, setA] = useState(false);
+  it('Switch says its state and flips on a click', async () => {
+    const One: React.FC = () => {
       const [b, setB] = useState(true);
-      return (
-        <>
-          <Checkbox name="a" label="Read only" checked={a} onChange={setA} />
-          <Switch name="b" label="On" on={b} onChange={setB} />
-        </>
-      );
+      return <Switch name="b" label="On" on={b} onChange={setB} />;
     };
-    const r = await render(<Both />);
-    const a = r.container.querySelector('[name="a"]')!;
+    const r = await render(<One />);
     const b = r.container.querySelector('[name="b"]')!;
-    expect([a.getAttribute('role'), a.getAttribute('aria-checked')]).toEqual(['checkbox', 'false']);
     expect([b.getAttribute('role'), b.getAttribute('aria-checked')]).toEqual(['switch', 'true']);
-    await click(a);
     await click(b);
-    expect(a.getAttribute('aria-checked')).toBe('true');
     expect(b.getAttribute('aria-checked')).toBe('false');
+  });
+
+  it('Button is a plain button in one of the three looks', async () => {
+    const r = await render(
+      <>
+        <Button kind="primary" className="go-x">Go</Button>
+        <Button kind="secondary" small>Back</Button>
+      </>,
+    );
+    const [a, b] = Array.from(r.container.querySelectorAll('button'));
+    expect([a.getAttribute('type'), a.className]).toEqual(['button', 'btn btn-primary go-x']);
+    expect(b.className).toBe('btn btn-secondary btn-sm');
   });
 });
 

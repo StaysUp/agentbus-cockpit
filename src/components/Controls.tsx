@@ -292,50 +292,23 @@ export const Combo: React.FC<{
   );
 };
 
-// Checkbox is a box with a tick and its words.
-export const Checkbox: React.FC<{
-  name?: string;
-  label: React.ReactNode;
-  checked: boolean;
-  onChange: (v: boolean) => void;
-  disabled?: boolean;
-  className?: string;
-}> = ({ name, label, checked, onChange, disabled, className }) => (
-  <button
-    type="button"
-    role="checkbox"
-    name={name}
-    aria-checked={checked}
-    disabled={disabled}
-    className={`ctl-check${checked ? ' on' : ''}${className ? ` ${className}` : ''}`}
-    onClick={() => onChange(!checked)}
-  >
-    <span className="cb" aria-hidden="true">
-      {checked && (
-        <svg viewBox="0 0 12 12" width="9" height="9" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M2.5 6.2l2.3 2.3 4.7-4.9" />
-        </svg>
-      )}
-    </span>
-    <span>{label}</span>
-  </button>
-);
-
-// Switch is on or off, in the mockup's look.
+// Switch is on or off, in the mockup's look. It is the cockpit's one
+// control for a yes or a no: never a select, a checkbox or a two-way Seg.
 export const Switch: React.FC<{
   name?: string;
   label: React.ReactNode;
   on: boolean;
   onChange: (v: boolean) => void;
   disabled?: boolean;
-}> = ({ name, label, on, onChange, disabled }) => (
+  className?: string;
+}> = ({ name, label, on, onChange, disabled, className }) => (
   <button
     type="button"
     role="switch"
     name={name}
     aria-checked={on}
     disabled={disabled}
-    className="ctl-switch"
+    className={`ctl-switch${className ? ` ${className}` : ''}`}
     onClick={() => onChange(!on)}
   >
     <span className={`sw${on ? ' on' : ''}`} aria-hidden="true" />
@@ -376,4 +349,21 @@ export const Seg: React.FC<{
       </button>
     ))}
   </span>
+);
+
+// Button is every button with words in the cockpit, in one of three looks:
+// "primary" is the one main action of a form or a step (ink), "secondary"
+// any other action beside it (white, outlined), "quiet" an action in a
+// column header (no fill until hovered). small is for a button inside a
+// line of text or a card. A link that looks like a button takes the same
+// classes through buttonClass.
+export type ButtonKind = 'primary' | 'secondary' | 'quiet';
+
+export const buttonClass = (kind: ButtonKind, small?: boolean, className?: string) =>
+  `btn btn-${kind}${small ? ' btn-sm' : ''}${className ? ` ${className}` : ''}`;
+
+export const Button: React.FC<
+  React.ButtonHTMLAttributes<HTMLButtonElement> & { kind: ButtonKind; small?: boolean }
+> = ({ kind, small, className, type = 'button', ...rest }) => (
+  <button type={type} className={buttonClass(kind, small, className)} {...rest} />
 );

@@ -53,10 +53,10 @@ export const ConnectScreen: React.FC<ConnectScreenProps> = ({
         </label>
         {error && <div className="connect-error">{error}</div>}
         <div className="connect-actions">
-          <button type="submit" className="connect-go" disabled={checking}>
+          <button type="submit" className="btn btn-primary connect-go" disabled={checking}>
             {checking ? 'Checking…' : 'Connect'}
           </button>
-          <button type="button" className="use-recorded" onClick={onUseRecorded}>
+          <button type="button" className="btn btn-secondary use-recorded" onClick={onUseRecorded}>
             Use recorded data
           </button>
         </div>

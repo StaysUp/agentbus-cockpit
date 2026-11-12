@@ -162,7 +162,7 @@ describe('the Settings page', () => {
     // The first grant's editor is open; each other grant opens on a click.
     await setValue(container.querySelector('textarea[name="read"]'), '~/.aws/config\n');
     await pick(container, '[data-grant="sandbox"]');
-    await click(container.querySelector('[aria-label="Sandbox"] [role="radio"]:nth-child(2)'));
+    await click(container.querySelector('button[name="sandbox"]'));
     await pick(container, '[data-grant="network"]');
     await click(container.querySelector('[aria-label="Network"] [role="radio"]:nth-child(2)'));
     await setValue(container.querySelector('textarea[name="hosts"]'), 'github.com\nregistry.npmjs.org');
@@ -175,7 +175,7 @@ describe('the Settings page', () => {
     expect(row('read')).toContain('1 file');
     expect(row('sandbox')).toContain('On');
     expect(row('network')).toContain('A list · 2 hosts');
-    expect(row('apply')).toContain('No');
+    expect(row('apply')).toContain('Off');
     await click(button(container, 'Save grants'));
     await flush();
     expect(api.putPolicy).toHaveBeenCalledTimes(1);

@@ -131,11 +131,11 @@ export const ChangesDialog: React.FC<ChangesDialogProps> = ({ turnNumber, loadDi
         {error && <div className="form-error">{error}</div>}
         <div className="nd-actions">
           {apply && (
-            <button type="button" className="connect-go" disabled={!canApply} onClick={doApply}>
+            <button type="button" className="btn btn-primary connect-go" disabled={!canApply} onClick={doApply}>
               {applying ? 'Applying…' : 'Apply to my folder'}
             </button>
           )}
-          <button type="button" className="use-recorded" onClick={onClose}>
+          <button type="button" className="btn btn-secondary nd-cancel" onClick={onClose}>
             Close
           </button>
         </div>

@@ -356,14 +356,14 @@ export const AgentsDialog: React.FC<AgentsDialogProps> = ({
               <div className="nd-actions">
                 <button
                   type="submit"
-                  className="connect-go"
+                  className="btn btn-primary connect-go"
                   disabled={busy || !form.harness || !form.access}
                 >
                   {editing ? "Save" : "Create agent"}
                 </button>
                 <button
                   type="button"
-                  className="use-recorded"
+                  className="btn btn-secondary nd-cancel"
                   onClick={onClose}
                 >
                   Cancel

@@ -228,7 +228,7 @@ export const NewSessionDialog: React.FC<NewSessionDialogProps> = ({
               <button
                 type="button"
                 key={f.ref}
-                className={where && 'ref' in where && where.ref === f.ref ? 'on' : ''}
+                className={`pick${where && 'ref' in where && where.ref === f.ref ? ' on' : ''}`}
                 title={f.ref}
                 onClick={() => pick({ ref: f.ref, connector: f.connector })}
               >
@@ -236,7 +236,7 @@ export const NewSessionDialog: React.FC<NewSessionDialogProps> = ({
               </button>
             ))}
             {recent.map((f) => (
-              <button type="button" key={f} className={f === path ? 'on' : ''} onClick={() => pick({ path: f })}>
+              <button type="button" key={f} className={`pick${f === path ? ' on' : ''}`} onClick={() => pick({ path: f })}>
                 <code>{f}</code>
               </button>
             ))}
@@ -270,10 +270,10 @@ export const NewSessionDialog: React.FC<NewSessionDialogProps> = ({
         {prompt.trim() === '' && <div className="nd-note">Leave it empty to write it in the conversation.</div>}
         {error && <div className="form-error">{error}</div>}
         <div className="nd-actions">
-          <button type="submit" className="connect-go" disabled={!ready}>
+          <button type="submit" className="btn btn-primary connect-go" disabled={!ready}>
             {starting ? 'Starting…' : 'Start'}
           </button>
-          <button type="button" className="use-recorded" onClick={onClose}>
+          <button type="button" className="btn btn-secondary nd-cancel" onClick={onClose}>
             Cancel
           </button>
         </div>

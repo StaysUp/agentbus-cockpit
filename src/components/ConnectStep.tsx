@@ -234,7 +234,7 @@ export const ConnectStep: React.FC<{ harness: string; api: SubscriptionApi }> = 
         <span>On your runners</span>
         <span className={`cs-status ${phase === 'connected' ? 'ok' : 'off'}`}>{status}</span>
         {phase === 'connected' && until && <span className="cs-until">{until}</span>}
-        <button type="button" className="cs-btn cs-connect" onClick={connect} disabled={phase === 'connecting'}>
+        <button type="button" className="btn btn-secondary btn-sm cs-btn cs-connect" onClick={connect} disabled={phase === 'connecting'}>
           {label}
         </button>
       </div>
@@ -242,7 +242,7 @@ export const ConnectStep: React.FC<{ harness: string; api: SubscriptionApi }> = 
       {phase === 'connecting' && (
         <div className="cs-login">
           {link ? (
-            <a className="cs-btn cs-open" href={link} target="_blank" rel="noreferrer noopener">
+            <a className="btn btn-primary btn-sm cs-btn cs-open" href={link} target="_blank" rel="noreferrer noopener">
               Open sign-in page
             </a>
           ) : (
@@ -273,7 +273,7 @@ export const ConnectStep: React.FC<{ harness: string; api: SubscriptionApi }> = 
                     if (e.key === 'Enter') send(e);
                   }}
                 />
-                <button type="button" className="cs-btn" onClick={send} disabled={!code.trim() || closed}>
+                <button type="button" className="btn btn-secondary btn-sm cs-btn" onClick={send} disabled={!code.trim() || closed}>
                   {sending ? 'Sending' : 'Send'}
                 </button>
               </div>
@@ -290,7 +290,7 @@ export const ConnectStep: React.FC<{ harness: string; api: SubscriptionApi }> = 
       {!list.on && (
         <button
           type="button"
-          className="cs-btn cs-on"
+          className="btn btn-secondary btn-sm cs-btn cs-on"
           disabled={turningOn}
           onClick={() => {
             if (turningOn) return;

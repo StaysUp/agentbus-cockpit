@@ -74,8 +74,8 @@ export const RunnersList: React.FC<RunnersState & { selected?: string; onSelect?
   if (runners === null || (runners === undefined && !error)) return null;
   return (
     <div className="runners" aria-label="Runners">
-      {error && <p className="dim runners-err">{error}</p>}
-      {runners && runners.length === 0 && <p className="dim runners-none">No runner has enrolled.</p>}
+      {error && <p className="empty bad runners-err">{error}</p>}
+      {runners && runners.length === 0 && <p className="empty runners-none">No runners yet.</p>}
       {runners?.map((r) => {
         const found = r.harnesses.filter((h) => h.found);
         const on = selected === r.id;
@@ -83,7 +83,7 @@ export const RunnersList: React.FC<RunnersState & { selected?: string; onSelect?
           <button
             type="button"
             key={r.id}
-            className={`prow runner ${r.online ? 'online' : 'offline'}${on ? ' on' : ''}`}
+            className={`prow pick runner ${r.online ? 'online' : 'offline'}${on ? ' on' : ''}`}
             data-runner={r.id}
             aria-current={on}
             title={r.id}

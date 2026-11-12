@@ -50,8 +50,8 @@ export const RunnersPage: React.FC<RunnersPageProps> = ({ runners, error, pendin
       list={
         <>
           {waiting.length > 0 && <PendingList pending={waiting} selected={shownPending?.id} onSelect={setPicked} />}
-          {runners === undefined && !error && <p className="dim runners-none">Reading…</p>}
-          {runners === null && <p className="dim runners-none">This service keeps no runners.</p>}
+          {runners === undefined && !error && <p className="empty runners-none">Reading…</p>}
+          {runners === null && <p className="empty runners-none">This service keeps no runners.</p>}
           <RunnersList runners={runners} error={error} selected={shown?.id} onSelect={setPicked} />
         </>
       }
@@ -66,7 +66,7 @@ export const RunnersPage: React.FC<RunnersPageProps> = ({ runners, error, pendin
         ) : shown ? (
           <RunnerDetail key={shown.id} r={shown} actions={actions} onDone={after} />
         ) : (
-          <ColHead title="No runner" />
+          <ColHead title="No runners yet" />
         )
       }
       side={<Queue queue={queue} />}
@@ -99,7 +99,7 @@ const PendingList: React.FC<{ pending: PendingMachine[]; selected?: string; onSe
         <button
           type="button"
           key={p.id}
-          className={`prow runner pending${on ? ' on' : ''}`}
+          className={`prow pick runner pending${on ? ' on' : ''}`}
           data-pending={p.id}
           aria-current={on}
           title={p.id}
@@ -198,10 +198,10 @@ const PendingDetail: React.FC<{ p: PendingMachine; actions?: RunnerActions; onDo
                 maxLength={16}
               />
             </label>{' '}
-            <button type="submit" className="rn-btn primary" disabled={busy || !code.trim()}>
+            <button type="submit" className="btn btn-primary rn-approve-go" disabled={busy || !code.trim()}>
               Approve
             </button>{' '}
-            <button type="button" className="rn-btn" disabled={busy} onClick={() => act(() => actions.refuse(p.id))}>
+            <button type="button" className="btn btn-secondary rn-refuse" disabled={busy} onClick={() => act(() => actions.refuse(p.id))}>
               Refuse
             </button>
           </form>
@@ -337,7 +337,7 @@ const RunnerDetail: React.FC<{ r: RunnerInfo; actions?: RunnerActions; onDone: (
         )}
         {actions && !r.online && (
           <p className="rn-remove">
-            <button type="button" className="rn-btn" disabled={busy} onClick={remove}>
+            <button type="button" className="btn btn-secondary rn-remove-go" disabled={busy} onClick={remove}>
               Remove
             </button>{' '}
             <span className="dim">Offline. Removing it revokes its credential; run agentbus login on it to add it again.</span>

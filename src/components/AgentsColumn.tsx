@@ -71,14 +71,14 @@ export const AgentsColumn: React.FC<AgentsColumnProps> = ({
       <header className="colhead">
         <div className="colhead-title">Agents</div>
         {onAddAgent && (
-          <button className="add-agent head-btn" onClick={onAddAgent} aria-label="Add agent" title="Add agent">
+          <button className="add-agent btn btn-quiet" onClick={onAddAgent} aria-label="Add agent" title="Add agent">
             <PlusIcon />
             Agent
           </button>
         )}
       </header>
       <div className="colbody">
-        {agents.length === 0 && <p className="dim agents-empty">No agents yet.</p>}
+        {agents.length === 0 && <p className="empty agents-empty">No agents yet.</p>}
         {agents.map((a) => {
           const isSelected = selectedAgentId === a.id;
           const count = `${a.sessionCount} ${a.sessionCount === 1 ? 'session' : 'sessions'}`;
@@ -100,30 +100,30 @@ export const AgentsColumn: React.FC<AgentsColumnProps> = ({
           // not a button itself.
           if (isSelected && canChange) {
             return (
-              <div key={a.id} className="side-chat agent on" data-agent={a.id}>
+              <div key={a.id} className="side-chat agent pick on" data-agent={a.id}>
                 {body}
                 <span className="ag-act">
                   {confirming === a.id ? (
                     <>
                       <span>Remove?</span>
-                      <button type="button" className="ag-yes" disabled={busy} onClick={() => remove(a.id)}>
+                      <button type="button" className="btn btn-secondary btn-sm ag-yes" disabled={busy} onClick={() => remove(a.id)}>
                         Remove
                       </button>
-                      <button type="button" className="ag-keep" disabled={busy} onClick={() => setConfirming(null)}>
+                      <button type="button" className="btn btn-secondary btn-sm ag-keep" disabled={busy} onClick={() => setConfirming(null)}>
                         Keep
                       </button>
                     </>
                   ) : (
                     <>
                       {onEditAgent && (
-                        <button type="button" className="ag-edit" onClick={() => onEditAgent(a)}>
+                        <button type="button" className="btn btn-secondary btn-sm ag-edit" onClick={() => onEditAgent(a)}>
                           Edit
                         </button>
                       )}
                       {onRemoveAgent && (
                         <button
                           type="button"
-                          className="ag-remove"
+                          className="btn btn-secondary btn-sm ag-remove"
                           onClick={() => {
                             setError(null);
                             setConfirming(a.id);
@@ -142,7 +142,7 @@ export const AgentsColumn: React.FC<AgentsColumnProps> = ({
           return (
             <button
               key={a.id}
-              className={`side-chat agent ${isSelected ? 'on' : ''}`}
+              className={`side-chat agent pick${isSelected ? ' on' : ''}`}
               data-agent={a.id}
               onClick={() => {
                 setConfirming(null);
