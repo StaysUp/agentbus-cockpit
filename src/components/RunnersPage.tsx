@@ -218,8 +218,8 @@ const RunnerDetail: React.FC<{ r: RunnerInfo; actions?: RunnerActions; onDone: (
   const [err, setErr] = useState<string | null>(null);
   useEffect(() => setErr(null), [r.id]);
   const remove = () => {
+    // Remove takes one click, with no confirm.
     if (!actions) return;
-    if (!window.confirm(`Remove ${r.name}? Its credential stops working, so it takes no more work. Its sessions stay in the record.`)) return;
     setBusy(true);
     setErr(null);
     actions.remove(r.id).then(
@@ -340,7 +340,10 @@ const RunnerDetail: React.FC<{ r: RunnerInfo; actions?: RunnerActions; onDone: (
             <button type="button" className="btn btn-secondary rn-remove-go" disabled={busy} onClick={remove}>
               Remove
             </button>{' '}
-            <span className="dim">Offline. Removing it revokes its credential; run agentbus login on it to add it again.</span>
+            <span className="dim">
+              Offline. Remove takes it off this list, and it gets no more work. Its sessions stay in the record but take
+              no more turns. To add it back, move runner.json out of its data folder, then run agentbus login on it.
+            </span>
           </p>
         )}
         {err && <p className="form-error">{err}</p>}

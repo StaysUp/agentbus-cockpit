@@ -367,9 +367,9 @@ describe('signing a machine in, and removing one', () => {
     expect(a.refuse).toHaveBeenCalledWith('lgn_0123456789abcdef');
   });
 
-  it('shows whether a runner can sandbox, and Remove only for one offline', async () => {
+  it('shows whether a runner can sandbox, and Remove only for one offline, in one click', async () => {
     const a = actions();
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const confirm = vi.spyOn(window, 'confirm');
     const list: RunnerInfo[] = [{ ...runners[0], sandbox: { can: true } }, { ...runners[2], sandbox: { can: false, why: 'bwrap is missing' } }];
     const r = await render(<RunnersPage runners={list} error={null} onBack={() => {}} actions={a} />);
     const main = () => r.container.querySelector('.pg-main')!;
@@ -377,9 +377,11 @@ describe('signing a machine in, and removing one', () => {
     expect([...main().querySelectorAll('button')].some((b) => b.textContent === 'Remove')).toBe(false);
     await click(r.container.querySelector('[data-runner="run_c"]'));
     expect(main().textContent).toContain('cannot: bwrap is missing');
+    expect(main().textContent).toContain('move runner.json out of its data folder, then run agentbus login on it');
+    expect(main().textContent).not.toContain('credential');
     await click([...main().querySelectorAll('button')].find((b) => b.textContent === 'Remove')!);
     await flush();
-    expect(confirm).toHaveBeenCalled();
+    expect(confirm).not.toHaveBeenCalled();
     expect(a.remove).toHaveBeenCalledWith('run_c');
     confirm.mockRestore();
   });
