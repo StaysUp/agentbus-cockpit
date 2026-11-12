@@ -301,3 +301,120 @@ describe('the Runners page in the app', () => {
     expect(r.container.querySelectorAll('#page[aria-label="Runners"] .runner')).toHaveLength(3);
   });
 });
+
+describe('signing a machine in, and removing one', () => {
+  const pending = [
+    {
+      id: 'lgn_0123456789abcdef',
+      name: 'vm',
+      os: 'linux',
+      arch: 'arm64',
+      labels: ['agentbus'],
+      capacity: 4,
+      sandbox: { can: false, why: 'AppArmor refuses user namespaces' },
+      asked: new Date().toISOString(),
+      expires: new Date(Date.now() + 15 * 60_000).toISOString(),
+    },
+  ];
+  async function type(el: Element | null, value: string) {
+    if (!el) throw new Error('no input');
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+    await act(async () => {
+      setter.call(el, value);
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+  }
+  const actions = () => ({
+    approve: vi.fn(async () => {}),
+    refuse: vi.fn(async () => {}),
+    remove: vi.fn(async () => {}),
+  });
+
+  it('lists a waiting machine apart, and approves it only with the code typed', async () => {
+    const a = actions();
+    const reload = vi.fn();
+    const r = await render(<RunnersPage runners={runners} pending={pending} reload={reload} error={null} onBack={() => {}} actions={a} />);
+    const row = r.container.querySelector('[data-pending="lgn_0123456789abcdef"]');
+    expect(r.container.querySelector('[aria-label="Waiting for approval"]')!.textContent).toContain('vm');
+    await click(row);
+    const main = r.container.querySelector('.pg-main')!;
+    expect(main.querySelector('.colhead')!.textContent).toBe('vmwaiting for approval');
+    expect(main.textContent).toContain('cannot: AppArmor refuses user namespaces');
+    const approve = [...main.querySelectorAll('button')].find((b) => b.textContent === 'Approve')!;
+    expect(approve.disabled).toBe(true);
+    await type(main.querySelector('input[aria-label="Code shown on the machine"]'), ' bcdf-ghjk ');
+    await click(approve);
+    await flush();
+    expect(a.approve).toHaveBeenCalledWith('lgn_0123456789abcdef', 'bcdf-ghjk');
+    expect(reload).toHaveBeenCalled();
+  });
+
+  it('shows the API’s words when the code is wrong, and refuses', async () => {
+    const a = actions();
+    a.approve.mockRejectedValueOnce(new Error('that is not the code the machine shows'));
+    const r = await render(<RunnersPage runners={[]} pending={pending} error={null} onBack={() => {}} actions={a} />);
+    await click(r.container.querySelector('[data-pending]'));
+    const main = r.container.querySelector('.pg-main')!;
+    await type(main.querySelector('input'), 'BBBB-BBBB');
+    await click([...main.querySelectorAll('button')].find((b) => b.textContent === 'Approve')!);
+    await flush();
+    expect(main.querySelector('.form-error')!.textContent).toBe('that is not the code the machine shows');
+    await click([...main.querySelectorAll('button')].find((b) => b.textContent === 'Refuse')!);
+    await flush();
+    expect(a.refuse).toHaveBeenCalledWith('lgn_0123456789abcdef');
+  });
+
+  it('shows whether a runner can sandbox, and Remove only for one offline', async () => {
+    const a = actions();
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const list: RunnerInfo[] = [{ ...runners[0], sandbox: { can: true } }, { ...runners[2], sandbox: { can: false, why: 'bwrap is missing' } }];
+    const r = await render(<RunnersPage runners={list} error={null} onBack={() => {}} actions={a} />);
+    const main = () => r.container.querySelector('.pg-main')!;
+    expect(main().textContent).toContain('can build it');
+    expect([...main().querySelectorAll('button')].some((b) => b.textContent === 'Remove')).toBe(false);
+    await click(r.container.querySelector('[data-runner="run_c"]'));
+    expect(main().textContent).toContain('cannot: bwrap is missing');
+    await click([...main().querySelectorAll('button')].find((b) => b.textContent === 'Remove')!);
+    await flush();
+    expect(confirm).toHaveBeenCalled();
+    expect(a.remove).toHaveBeenCalledWith('run_c');
+    confirm.mockRestore();
+  });
+
+  it('falls back to the first runner when the picked one leaves the list', async () => {
+    const r = await render(<RunnersPage runners={runners} pending={pending} error={null} onBack={() => {}} />);
+    await click(r.container.querySelector('[data-pending]'));
+    expect(r.container.querySelector('.pg-main .colhead')!.textContent).toBe('vmwaiting for approval');
+    await act(async () => r.root.render(<RunnersPage runners={runners} pending={[]} error={null} onBack={() => {}} />));
+    expect(r.container.querySelector('.pg-main .colhead')!.textContent).toBe('macrunner');
+  });
+
+  it('shows no buttons for a source that cannot decide', async () => {
+    const r = await render(<RunnersPage runners={[runners[2]]} pending={pending} error={null} onBack={() => {}} />);
+    expect(r.container.querySelectorAll('.pg-main button')).toHaveLength(0);
+  });
+
+  it('calls the routes with the token', async () => {
+    const calls: [string, RequestInit | undefined][] = [];
+    const fetch = vi.fn(async (u: string, init?: RequestInit) => {
+      calls.push([u, init]);
+      if (u.endsWith('/api/v0/runners')) return new Response(JSON.stringify({ runners: [], pending }), { status: 200 });
+      return new Response(null, { status: u.endsWith('/approve') ? 200 : 204 });
+    });
+    vi.stubGlobal('fetch', fetch);
+    const src = new LiveDataSource({ baseUrl: 'http://127.0.0.1:8787', token: 'tok' });
+    expect((await src.readRunners())!.pending[0].name).toBe('vm');
+    await src.approveMachine('lgn_0123456789abcdef', 'BCDF-GHJK');
+    await src.refuseMachine('lgn_0123456789abcdef');
+    await src.removeRunner('run_c');
+    vi.unstubAllGlobals();
+    expect(calls.map(([u, i]) => `${i?.method ?? 'GET'} ${u.replace('http://127.0.0.1:8787', '')}`)).toEqual([
+      'GET /api/v0/runners',
+      'POST /api/v0/runners/pending/lgn_0123456789abcdef/approve',
+      'POST /api/v0/runners/pending/lgn_0123456789abcdef/refuse',
+      'POST /api/v0/runners/run_c/remove',
+    ]);
+    expect(calls[1][1]!.body).toBe('{"code":"BCDF-GHJK"}');
+    expect((calls[1][1]!.headers as Record<string, string>).Authorization).toBe('Bearer tok');
+  });
+});

@@ -1,22 +1,32 @@
-import React, { useEffect, useState } from 'react';
-import { RunnerInfo } from '../types';
+import React, { useCallback, useEffect, useState } from 'react';
+import { PendingMachine, RunnerInfo, RunnersRead } from '../types';
 import { formatAgo } from '../utils/format';
 
 // How often the list is read again: the online count stays current.
 export const RUNNERS_POLL_MS = 30_000;
+// How often on the Runners page, so a machine that runs agentbus login shows
+// up while the person waits to approve it.
+export const RUNNERS_PAGE_POLL_MS = 3_000;
 
 // What useRunners holds: undefined before the first read, null when the
-// service has no such route, else the list; and the last read's error.
+// service has no such route, else the list; the machines waiting for
+// approval; the last read's error; and a read now, after a decision.
 export interface RunnersState {
   runners: RunnerInfo[] | null | undefined;
   error: string | null;
+  pending?: PendingMachine[];
+  reload?: () => void;
 }
 
-// useRunners reads the runners, and again every RUNNERS_POLL_MS. No load
-// (a source without the route) reads nothing.
-export function useRunners(load?: () => Promise<RunnerInfo[] | null>): RunnersState {
+// useRunners reads the runners, and again every RUNNERS_POLL_MS (or every
+// fast ms when given). No load (a source without the route) reads nothing.
+// A load may answer the runners alone, or with the machines waiting.
+export function useRunners(load?: () => Promise<RunnerInfo[] | RunnersRead | null>, fast?: number): RunnersState {
   const [runners, setRunners] = useState<RunnerInfo[] | null | undefined>(load ? undefined : null);
+  const [pending, setPending] = useState<PendingMachine[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [tick, setTick] = useState(0);
+  const reload = useCallback(() => setTick((n) => n + 1), []);
 
   useEffect(() => {
     if (!load) {
@@ -26,9 +36,15 @@ export function useRunners(load?: () => Promise<RunnerInfo[] | null>): RunnersSt
     let live = true;
     const read = () =>
       load().then(
-        (list) => {
+        (got) => {
           if (!live) return;
-          setRunners(list);
+          if (got === null || Array.isArray(got)) {
+            setRunners(got);
+            setPending([]);
+          } else {
+            setRunners(got.runners);
+            setPending(got.pending);
+          }
           setError(null);
         },
         (e: unknown) => {
@@ -36,13 +52,13 @@ export function useRunners(load?: () => Promise<RunnerInfo[] | null>): RunnersSt
         }
       );
     read();
-    const timer = setInterval(read, RUNNERS_POLL_MS);
+    const timer = setInterval(read, fast ?? RUNNERS_POLL_MS);
     return () => {
       live = false;
       clearInterval(timer);
     };
-  }, [load]);
-  return { runners, error };
+  }, [load, fast, tick]);
+  return { runners, error, pending, reload };
 }
 
 // The machines control knows, one runner each, as the Runners page's list:

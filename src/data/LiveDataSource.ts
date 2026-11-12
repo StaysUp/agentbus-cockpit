@@ -12,6 +12,7 @@ import {
   SavedAgent,
   RunRequest,
   RunnerInfo,
+  RunnersRead,
   VersionInfo,
   SessionList,
   SessionSummary,
@@ -508,6 +509,48 @@ export class LiveDataSource implements DataSource {
     if (!res.ok) throw new Error(await apiError(res));
     const body = await res.json();
     return Array.isArray(body?.runners) ? body.runners : [];
+  }
+
+  // GET /api/v0/runners whole: the runners and the machines waiting for
+  // approval. null on a service that has no such route (404).
+  async readRunners(): Promise<RunnersRead | null> {
+    const res = await fetch(`${this.baseUrl}/api/v0/runners`, { headers: this.headers() });
+    if (res.status === 404) return null;
+    if (!res.ok) throw new Error(await apiError(res));
+    const body = await res.json();
+    return {
+      runners: Array.isArray(body?.runners) ? body.runners : [],
+      pending: Array.isArray(body?.pending) ? body.pending : [],
+    };
+  }
+
+  // POST /api/v0/runners/pending/{id}/approve, with the code the machine shows.
+  async approveMachine(id: string, code: string): Promise<void> {
+    const res = await fetch(`${this.baseUrl}/api/v0/runners/pending/${encodeURIComponent(id)}/approve`, {
+      method: 'POST',
+      headers: { ...this.headers(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code }),
+    });
+    if (!res.ok) throw new Error(await apiError(res));
+  }
+
+  // POST /api/v0/runners/pending/{id}/refuse
+  async refuseMachine(id: string): Promise<void> {
+    const res = await fetch(`${this.baseUrl}/api/v0/runners/pending/${encodeURIComponent(id)}/refuse`, {
+      method: 'POST',
+      headers: this.headers(),
+    });
+    if (!res.ok) throw new Error(await apiError(res));
+  }
+
+  // POST /api/v0/runners/{id}/remove: an offline runner leaves the list, and
+  // its token works no more.
+  async removeRunner(id: string): Promise<void> {
+    const res = await fetch(`${this.baseUrl}/api/v0/runners/${encodeURIComponent(id)}/remove`, {
+      method: 'POST',
+      headers: this.headers(),
+    });
+    if (!res.ok) throw new Error(await apiError(res));
   }
 
   async getVersion(): Promise<VersionInfo> {

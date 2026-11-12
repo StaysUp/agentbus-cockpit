@@ -5,7 +5,7 @@ import { ConvoColumn, Pending, PendingUpdate } from './components/ConvoColumn';
 import { AgentsDialog } from './components/AgentsDialog';
 import { SettingsPage } from './components/SettingsPage';
 import { RunnersPage } from './components/RunnersPage';
-import { useRunners } from './components/RunnersList';
+import { RUNNERS_PAGE_POLL_MS, useRunners } from './components/RunnersList';
 import { usePage } from './page';
 import type { SettingsApi } from './data/settings';
 import { SubscriptionApi } from './components/ConnectStep';
@@ -564,10 +564,28 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
       putInstructions: (t, etag) => d.putInstructions!(t, etag),
     };
   }, [dataSource]);
-  const loadRunners = useMemo(() => (dataSource.listRunners ? () => dataSource.listRunners!() : undefined), [dataSource]);
+  const loadRunners = useMemo(
+    () =>
+      dataSource.readRunners
+        ? () => dataSource.readRunners!()
+        : dataSource.listRunners
+          ? () => dataSource.listRunners!()
+          : undefined,
+    [dataSource]
+  );
   // The runners, read for the online count beside the Runners link and for
-  // the Runners page.
-  const runners = useRunners(loadRunners);
+  // the Runners page, with the machines waiting for approval; read often
+  // while the Runners page is shown.
+  const runners = useRunners(loadRunners, page === 'runners' ? RUNNERS_PAGE_POLL_MS : undefined);
+  const runnerActions = useMemo(() => {
+    const d = dataSource;
+    if (!d.approveMachine || !d.refuseMachine || !d.removeRunner) return undefined;
+    return {
+      approve: (id: string, code: string) => d.approveMachine!(id, code),
+      refuse: (id: string) => d.refuseMachine!(id),
+      remove: (id: string) => d.removeRunner!(id),
+    };
+  }, [dataSource]);
   const runnersOnline = runners.runners ? runners.runners.filter((r) => r.online).length : undefined;
   // Which build the service is, read once: it is fixed for the life of the
   // process. A source without the route, or a read that fails, shows none.
@@ -960,6 +978,9 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
       <RunnersPage
         runners={runners.runners}
         error={runners.error}
+        pending={runners.pending}
+        reload={runners.reload}
+        actions={runnerActions}
         queue={queueView ? { turns: queueView.turns, error: queueView.error } : undefined}
         onBack={() => goPage('cockpit')}
       />

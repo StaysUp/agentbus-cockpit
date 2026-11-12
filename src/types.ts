@@ -284,6 +284,35 @@ export interface RunnerInfo {
   os?: string;
   arch?: string;
   harnesses: RunnerHarness[];
+  // Whether it can build a session's wall (the sandbox setting), and why
+  // not. Absent from a runner of a build before it reported it.
+  sandbox?: SandboxInfo;
+}
+
+export interface SandboxInfo {
+  can: boolean;
+  why?: string;
+}
+
+// A machine that ran agentbus login and waits for the person, from pending
+// in GET /api/v0/runners. Its code is never in the list: the person types
+// the one the machine shows.
+export interface PendingMachine {
+  id: string;
+  name: string;
+  os?: string;
+  arch?: string;
+  labels: string[];
+  capacity: number;
+  sandbox?: SandboxInfo;
+  asked: string;
+  expires: string;
+}
+
+// GET /api/v0/runners whole: the runners and the machines waiting.
+export interface RunnersRead {
+  runners: RunnerInfo[];
+  pending: PendingMachine[];
 }
 
 // Which build the service is, from GET /api/v0/version.
@@ -476,6 +505,14 @@ export interface DataSource {
   // The machines control knows, one runner each (GET /api/v0/runners). null
   // when the service has no such route.
   listRunners?(): Promise<RunnerInfo[] | null>;
+  // The same read with the machines waiting for approval, and the person's
+  // decisions on the Runners page: approve a waiting machine with the code
+  // it shows, refuse it, or remove an offline runner. Each rejects with the
+  // API's own words.
+  readRunners?(): Promise<RunnersRead | null>;
+  approveMachine?(id: string, code: string): Promise<void>;
+  refuseMachine?(id: string): Promise<void>;
+  removeRunner?(id: string): Promise<void>;
   // GET /api/v0/version: which build the service is. Read once.
   getVersion?(): Promise<VersionInfo>;
   listAgents?(): Promise<SavedAgent[]>;
