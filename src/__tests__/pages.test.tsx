@@ -148,10 +148,19 @@ describe('the Runners page in three columns', () => {
     await click(r.container.querySelector('[data-runner="run_b"]'));
     expect(main().querySelector('.colhead')!.textContent).toBe('macconnector');
     expect(main().textContent).not.toContain('Harnesses');
+    expect(main().textContent).toContain('takes no work now');
     await click(r.container.querySelector('[data-runner="run_c"]'));
     expect(main().textContent).toContain('Offline');
     expect(main().textContent).toContain('last seen 3 min ago');
     expect(main().textContent).toContain('not reported yet');
+  });
+
+  it('says one runner per machine, and shows the machine a session names', async () => {
+    const r = await render(<RunnersPage runners={[{ ...full, connector: 'con_8a7b6c5d4e3f2a10' }]} error={null} onBack={() => {}} />);
+    const machine = [...r.container.querySelectorAll('.pg-main .pg-kv tr')].find((x) => x.textContent!.startsWith('Machine'))!;
+    expect(machine.textContent).toBe('Machinecon_8a7b6c5d4e3f2a10');
+    expect(r.container.textContent).toContain('One runner per machine.');
+    expect(r.container.textContent).not.toContain('A connector owns');
   });
 
   it('shows the queue: what waits and why, and what runs', async () => {

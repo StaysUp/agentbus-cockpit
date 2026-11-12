@@ -1,26 +1,49 @@
 import { createContext, useContext } from 'react';
 
 // The last few folders a session was started in, kept in localStorage so they
-// survive the tab. Folders only: never a token or anything else.
+// survive the tab: one list per machine (its id, a runner's connector), and
+// one for a service that names no machine. Folders only: never a token or
+// anything else. Recents are history, not settings.
 
 const KEY = 'agentbus.folders';
 const KEEP = 5;
 
-export function recentFolders(): string[] {
+const keyOf = (machine?: string) => (machine ? `${KEY}.${machine}` : KEY);
+
+export function recentFolders(machine?: string): string[] {
   try {
-    const list: unknown = JSON.parse(localStorage.getItem(KEY) ?? '[]');
+    const list: unknown = JSON.parse(localStorage.getItem(keyOf(machine)) ?? '[]');
     return Array.isArray(list) ? list.filter((f): f is string => typeof f === 'string').slice(0, KEEP) : [];
   } catch {
     return [];
   }
 }
 
-export function rememberFolder(folder: string): void {
+export function rememberFolder(folder: string, machine?: string): void {
   try {
-    const list = [folder, ...recentFolders().filter((f) => f !== folder)].slice(0, KEEP);
-    localStorage.setItem(KEY, JSON.stringify(list));
+    const list = [folder, ...recentFolders(machine).filter((f) => f !== folder)].slice(0, KEEP);
+    localStorage.setItem(keyOf(machine), JSON.stringify(list));
   } catch {
     // Storage blocked: the field just starts empty next time.
+  }
+}
+
+// The machine a session was last started on, so the dialog offers it first.
+const MACHINE_KEY = 'agentbus.machine';
+
+export function lastMachine(): string | undefined {
+  try {
+    return localStorage.getItem(MACHINE_KEY) ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function rememberMachine(machine: string): void {
+  try {
+    localStorage.setItem(MACHINE_KEY, machine);
+  } catch {
+    // Storage blocked: the first online machine is offered next time.
   }
 }
 

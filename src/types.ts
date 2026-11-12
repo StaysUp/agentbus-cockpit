@@ -269,12 +269,16 @@ export interface RunnerHarness {
   signed_in?: boolean;
 }
 
-// One runner or connector control knows, from GET /api/v0/runners.
+// One machine's runner, from GET /api/v0/runners: one row per machine.
 export interface RunnerInfo {
   id: string;
   name: string;
-  // runner runs turns; connector owns folders.
+  // runner: the one program of its machine, which holds its folders and runs
+  // their sessions. connector: one from before 0.5, which takes no work.
   role: string;
+  // The machine's id: a new session on it names it as connector. Absent
+  // before its first report, and from a service before 0.5.
+  connector?: string;
   // It asked control for work in the last minute.
   online: boolean;
   last_seen: string;
@@ -314,8 +318,8 @@ export interface SavedAgent extends AgentFields {
 
 // POST /api/v0/turns: a saved agent and a folder, with the first message.
 // The service gives the session its own copy of the folder. The folder is a
-// path (agentbus up), or a listed folder by folder_ref and connector (GET
-// /api/v0/folders), which agentbus server needs.
+// path typed for the machine in connector, or a listed folder by folder_ref
+// and connector (GET /api/v0/folders). The session runs on that machine.
 export interface RunRequest {
   agent: string;
   folder?: string;
@@ -475,7 +479,7 @@ export interface DataSource {
   // The folders the runners own (GET /api/v0/folders), each by its
   // reference and name.
   listFolders?(): Promise<FolderInfo[]>;
-  // The runners and connectors control knows (GET /api/v0/runners). null
+  // The machines control knows, one runner each (GET /api/v0/runners). null
   // when the service has no such route.
   listRunners?(): Promise<RunnerInfo[] | null>;
   // GET /api/v0/version: which build the service is. Read once.

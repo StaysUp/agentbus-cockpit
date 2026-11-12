@@ -13,7 +13,7 @@ import { NewSessionDialog } from './components/NewSessionDialog';
 import { ChangesDialog } from './components/ChangesDialog';
 import { RightPanel } from './components/RightPanel';
 import { SessionsColumn } from './components/SessionsColumn';
-import { FolderInfo, FoldersContext, rememberFolder } from './data/folders';
+import { FolderInfo, FoldersContext, rememberFolder, rememberMachine } from './data/folders';
 import { ReplayDataSource } from './data/ReplayDataSource';
 import { applyList, countedIn, isNewerList, ListCursor, StreamedCost, streamedCost } from './data/sessionList';
 import { addLiveEvent, LiveTurns, mergeLive, noteEventTime } from './data/liveStatus';
@@ -592,14 +592,17 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
   // A session's first turn: POST /api/v0/turns with no session. A name the
   // person gave is set right after, with PATCH /api/v0/sessions/<id>.
   const launch = async (req: RunRequest, title: string | undefined, gen: number): Promise<Started> => {
-    // A listed folder goes by its reference, which agentbus server needs; a
-    // path only agentbus up takes.
-    const at = req.folder_ref ? { folder_ref: req.folder_ref, connector: req.connector, isolate: true } : { folder: req.folder };
+    // A listed folder goes by its reference; a typed path goes with the
+    // machine picked, whose runner checks it. The session runs there.
+    const at = req.folder_ref
+      ? { folder_ref: req.folder_ref, connector: req.connector, isolate: true }
+      : { folder: req.folder, ...(req.connector ? { connector: req.connector } : {}) };
     // POST /api/v0/turns names the turn at once, even while it waits for a
     // runner. With the queue, the session gets its own copy of the folder.
     const started = await dataSource.startRun!(queue ? { ...req, ...at, isolate: true } : { ...req, ...at });
     refreshQueue?.();
-    if (req.folder) rememberFolder(req.folder);
+    if (req.folder) rememberFolder(req.folder, req.connector);
+    if (req.connector) rememberMachine(req.connector);
     if (title && dataSource.renameSession) {
       // The session runs either way; a refused name leaves the first message as its title.
       dataSource
@@ -1137,6 +1140,7 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
           loadHarnesses={dataSource.getHarnesses ? loadHarnesses : undefined}
           onStart={startRun}
           folders={folders}
+          machines={runners.runners ?? []}
           onClose={() => setNewSession(null)}
           initialAgent={newSession.agent}
           onAddAgent={

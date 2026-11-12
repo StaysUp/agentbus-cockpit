@@ -45,7 +45,7 @@ export function useRunners(load?: () => Promise<RunnerInfo[] | null>): RunnersSt
   return { runners, error };
 }
 
-// The runners and connectors control knows, as the Runners page's list:
+// The machines control knows, one runner each, as the Runners page's list:
 // each one's name, an online dot, its role, when it was last seen, and the
 // harnesses it found. A click picks one.
 export const RunnersList: React.FC<RunnersState & { selected?: string; onSelect?: (id: string) => void }> = ({

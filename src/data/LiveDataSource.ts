@@ -506,7 +506,7 @@ export class LiveDataSource implements DataSource {
     return Array.isArray(body?.folders) ? body.folders : [];
   }
 
-  // GET /api/v0/runners: the runners and connectors control knows. null
+  // GET /api/v0/runners: the machines control knows, one runner each. null
   // on a service that has no such route (404).
   async listRunners(): Promise<RunnerInfo[] | null> {
     const res = await fetch(`${this.baseUrl}/api/v0/runners`, { headers: this.headers() });

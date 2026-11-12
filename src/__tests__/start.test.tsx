@@ -103,6 +103,8 @@ function fakeService(opts: {
   rename?: (id: string, body: unknown) => Response | Promise<Response>;
   // GET /folders. Without it the service has no such path (404).
   folders?: unknown[];
+  // GET /runners: the machines, one runner each. Without it, 404.
+  runners?: unknown[];
   // GET /sessions/<id>. Without it the service answers 404.
   oneSession?: (id: string) => Response;
   // Fields added to a turn's GET /turns row, by turn id.
@@ -129,6 +131,7 @@ function fakeService(opts: {
     if (p === '/api/v0/sessions') return json({ store: 'st_1', seq, sessions: state.sessions });
     if (p === '/api/v0/harnesses') return json({ harnesses: opts.agents ?? [] });
     if (p === '/api/v0/folders' && opts.folders) return json({ folders: opts.folders });
+    if (p === '/api/v0/runners' && opts.runners) return json({ runners: opts.runners });
     if (p === '/api/v0/agents' && method === 'GET') return json({ agents: state.saved });
     if (p === '/api/v0/agents' && method === 'POST') {
       const f = body as Record<string, unknown>;
@@ -1720,6 +1723,116 @@ describe('The sessions list and rename', () => {
     await svc.push(ev({ session: 's1', kind: 'session.renamed', title: 'Named elsewhere', old_title: 'first words' }));
     await settle();
     expect(r.container.querySelector('#sessions .sess.on .s-tt')?.textContent).toBe('Named elsewhere');
+    r.unmount();
+  });
+});
+
+describe('New session: the machine, then a folder on it', () => {
+  const machine = (name: string, connector: string, online: boolean) => ({
+    id: `run_${name}`,
+    name,
+    role: 'runner',
+    connector,
+    online,
+    last_seen: '2026-11-12T08:00:00Z',
+    labels: [],
+    harnesses: [],
+  });
+  const MACHINES = [
+    machine('mac', 'con_a', true),
+    machine('vm', 'con_c', true),
+    machine('box', 'con_b', false),
+    // A connector from before 0.5 is never a machine to pick.
+    { ...machine('old', 'con_d', true), role: 'connector' },
+  ];
+  const FOLDERS = [
+    { ref: 'fld_00000000000000a1', name: 'app', connector: 'con_a', runner: 'run_mac' },
+    { ref: 'fld_00000000000000c1', name: 'infra', connector: 'con_c', runner: 'run_vm' },
+  ];
+  async function openDialog(svc: ReturnType<typeof fakeService>) {
+    const r = await mount(svc);
+    await click(r.container.querySelector('#sessions button.new-session'));
+    await settle();
+    return { r, dialog: r.container.querySelector('.new-dialog')! };
+  }
+  const picks = (dialog: Element) => Array.from(dialog.querySelectorAll('.nd-recent button')).map((b) => b.textContent);
+  const choose = async (dialog: Element, v: string) =>
+    act(async () => {
+      const sel = dialog.querySelector('select[name="machine"]') as HTMLSelectElement;
+      sel.value = v;
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+
+  it('lists the machines, offline ones disabled, and shows only the picked machine\'s folders and recents', async () => {
+    localStorage.setItem('agentbus.folders.con_a', JSON.stringify(['/Users/ana/web']));
+    localStorage.setItem('agentbus.folders.con_c', JSON.stringify(['/work/ops']));
+    const svc = fakeService({ sessions: [row('s1')], events: { s1: oneTurn('s1', 'hi') }, agents: AGENTS, folders: FOLDERS, runners: MACHINES });
+    const { r, dialog } = await openDialog(svc);
+    const select = dialog.querySelector('select[name="machine"]') as HTMLSelectElement;
+    const options = Array.from(select.options).map((o) => [o.value, o.textContent, o.disabled]);
+    expect(options).toEqual([
+      ['con_a', 'mac', false],
+      ['con_c', 'vm', false],
+      ['con_b', 'box (offline)', true],
+    ]);
+    expect(select.value).toBe('con_a');
+    expect(picks(dialog)).toEqual(['app', '/Users/ana/web']);
+    await choose(dialog, 'con_c');
+    expect(picks(dialog)).toEqual(['infra', '/work/ops']);
+    expect(dialog.querySelector('.nd-recent button.on')?.textContent).toBe('infra');
+    r.unmount();
+  });
+
+  it('a typed path goes with the machine picked, and is remembered for that machine', async () => {
+    const svc = fakeService({ sessions: [row('s1')], events: { s1: oneTurn('s1', 'hi') }, agents: AGENTS, folders: FOLDERS, runners: MACHINES });
+    const { r, dialog } = await openDialog(svc);
+    await choose(dialog, 'con_c');
+    await setValue(dialog.querySelector('input[name="folder"]'), '/work/new');
+    await setValue(dialog.querySelector('textarea[name="prompt"]'), 'x');
+    await submitForm(dialog);
+    expect(sentBody(svc)).toEqual({ agent: 'claude', folder: '/work/new', connector: 'con_c', prompt: 'x' });
+    expect(JSON.parse(localStorage.getItem('agentbus.folders.con_c') ?? '[]')).toEqual(['/work/new']);
+    expect(localStorage.getItem('agentbus.folders')).toBeNull();
+    expect(localStorage.getItem('agentbus.machine')).toBe('con_c');
+    r.unmount();
+  });
+
+  it('offers the machine used last first, while it is online', async () => {
+    localStorage.setItem('agentbus.machine', 'con_c');
+    const svc = fakeService({ sessions: [row('s1')], events: { s1: oneTurn('s1', 'hi') }, agents: AGENTS, folders: FOLDERS, runners: MACHINES });
+    const { r, dialog } = await openDialog(svc);
+    expect((dialog.querySelector('select[name="machine"]') as HTMLSelectElement).value).toBe('con_c');
+    r.unmount();
+  });
+
+  it('with no machine online, it says so and Start stays off', async () => {
+    const svc = fakeService({
+      sessions: [row('s1')],
+      events: { s1: oneTurn('s1', 'hi') },
+      agents: AGENTS,
+      runners: [machine('box', 'con_b', false)],
+    });
+    const { r, dialog } = await openDialog(svc);
+    await setValue(dialog.querySelector('input[name="folder"]'), '/x');
+    expect(dialog.textContent).toContain('No machine is online. Start agentbus runner on one.');
+    expect((dialog.querySelector('button[type="submit"]') as HTMLButtonElement).disabled).toBe(true);
+    r.unmount();
+  });
+
+  it('a machine gone offline is said in plain words', async () => {
+    const svc = fakeService({
+      sessions: [row('s1')],
+      events: { s1: oneTurn('s1', 'hi') },
+      agents: AGENTS,
+      runners: MACHINES,
+      runs: () => json({ error: 'machine con_a is offline; start agentbus runner there, or name another' }, 503),
+    });
+    const { r, dialog } = await openDialog(svc);
+    await setValue(dialog.querySelector('input[name="folder"]'), '/x');
+    await setValue(dialog.querySelector('textarea[name="prompt"]'), 'x');
+    await submitForm(dialog);
+    await settle();
+    expect(dialog.querySelector('.form-error')?.textContent).toBe('That machine is offline. Start agentbus runner on it, or pick another machine.');
     r.unmount();
   });
 });

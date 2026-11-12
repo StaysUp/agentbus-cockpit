@@ -1,6 +1,6 @@
-import React, { useEffect, useState } from 'react';
-import { FolderInfo, recentFolders } from '../data/folders';
-import { Harness, RunRequest, SavedAgent } from '../types';
+import React, { useEffect, useMemo, useState } from 'react';
+import { FolderInfo, lastMachine, recentFolders } from '../data/folders';
+import { Harness, RunRequest, RunnerInfo, SavedAgent } from '../types';
 import { agentLine } from './AgentsDialog';
 
 interface NewSessionDialogProps {
@@ -16,9 +16,13 @@ interface NewSessionDialogProps {
   initialAgent?: string;
   // Opens the agents dialog, to add one.
   onAddAgent?: () => void;
-  // The folders the service lists (GET /api/v0/folders), by reference. On
-  // agentbus server they are the only folders a session can start in.
+  // The folders the service lists (GET /api/v0/folders), by reference, each
+  // with its machine.
   folders?: FolderInfo[];
+  // The machines, one runner each (GET /api/v0/runners). A session runs on
+  // the machine picked, in a folder on it. Empty or absent: a service that
+  // names no machine, where the folder is a path on the one AgentBus runs on.
+  machines?: RunnerInfo[];
 }
 
 // A refused typed folder, in plain words. The service's own text is written
@@ -26,13 +30,15 @@ interface NewSessionDialogProps {
 // person can do instead. Any other refusal shows the service's words.
 export function folderRefusal(message: string): string | null {
   if (/not an existing directory|absolute path|no such file|does not exist/i.test(message)) return 'That folder does not exist.';
-  if (/has no folders of its own|folder_ref|connector is not connected/i.test(message))
+  if (/machine is offline|machine .* is offline|no machine is online/i.test(message))
+    return 'That machine is offline. Start agentbus runner on it, or pick another machine.';
+  if (/has no folders of its own|folder_ref|connector is not connected|machines are online/i.test(message))
     return 'This service cannot use that folder. Pick one of the folders listed under the field.';
   return null;
 }
 
 // The folder a new session starts in: a listed folder by its reference, or
-// a path on the machine where AgentBus runs (agentbus up).
+// a path typed for the machine picked.
 type Where = { ref: string; connector?: string } | { path: string };
 
 // A new session is a saved agent and a folder, with an optional name and an
@@ -45,27 +51,58 @@ export const NewSessionDialog: React.FC<NewSessionDialogProps> = ({
   onClose,
   initialAgent,
   onAddAgent,
-  folders = [],
+  folders: allFolders = [],
+  machines = [],
 }) => {
   const [agents, setAgents] = useState<SavedAgent[] | null>(null);
   const [harnesses, setHarnesses] = useState<Harness[] | undefined>(undefined);
   const [agentsError, setAgentsError] = useState<string | null>(null);
   const [agent, setAgent] = useState(initialAgent ?? '');
-  // At most five, newest first (recentFolders keeps no more).
-  const [recent] = useState(() => recentFolders());
-  // A listed folder first, as the service knows it; else the last path.
-  // Picked once, when the list first has one, unless the person chose.
-  const [where, setWhere] = useState<Where | null>(() =>
-    folders[0] ? { ref: folders[0].ref, connector: folders[0].connector } : recent[0] ? { path: recent[0] } : null
-  );
-  const [touched, setTouched] = useState(false);
+  // The machines a session can start on: each runner that reports its
+  // machine. A connector from before 0.5 takes no work.
+  const usable = machines.filter((m) => m.role !== 'connector' && !!m.connector);
+  const byMachine = usable.length > 0;
+  // The machine: the one used last while it is online, else the first online
+  // one. Picked once, when the list first has one, unless the person chose.
+  const firstMachine = (list: RunnerInfo[]) => {
+    const on = list.filter((m) => m.online);
+    const last = lastMachine();
+    return (on.find((m) => m.connector === last) ?? on[0])?.connector ?? '';
+  };
+  const [machine, setMachine] = useState(() => firstMachine(usable));
+  const [machineTouched, setMachineTouched] = useState(false);
   useEffect(() => {
-    if (touched || folders.length === 0) return;
-    setWhere((cur) => (cur && 'ref' in cur ? cur : { ref: folders[0].ref, connector: folders[0].connector }));
-  }, [folders, touched]);
+    if (machineTouched || machine !== '') return;
+    const m = firstMachine(usable);
+    if (m) setMachine(m);
+    // usable is derived from machines each render.
+  }, [machines, machineTouched, machine]);
+  const picked = usable.find((m) => m.connector === machine);
+  // The listed folders and the recent paths of the machine picked; all of
+  // them on a service that names no machine. At most five recent paths,
+  // newest first (recentFolders keeps no more).
+  const folders = byMachine ? allFolders.filter((f) => f.connector === machine) : allFolders;
+  const recent = useMemo(() => recentFolders(byMachine ? machine : undefined), [byMachine, machine]);
+  // A listed folder first, as the service knows it; else the last path.
+  // Picked again when the machine changes, unless the person chose a folder.
+  const firstWhere = (): Where | null =>
+    folders[0] ? { ref: folders[0].ref, connector: folders[0].connector } : recent[0] ? { path: recent[0] } : null;
+  const [where, setWhere] = useState<Where | null>(firstWhere);
+  const [touched, setTouched] = useState(false);
+  const folderKey = folders.map((f) => f.ref).join(',');
+  useEffect(() => {
+    if (touched) return;
+    setWhere((cur) => (cur && 'ref' in cur && folders.some((f) => f.ref === cur.ref) ? cur : firstWhere()));
+    // firstWhere reads folders and recent, named by folderKey and recent.
+  }, [folderKey, recent, touched]);
   const pick = (w: Where) => {
     setTouched(true);
     setWhere(w);
+  };
+  const pickMachine = (m: string) => {
+    setMachineTouched(true);
+    setTouched(false);
+    setMachine(m);
   };
   const path = where && 'path' in where ? where.path : '';
   const [prompt, setPrompt] = useState('');
@@ -102,7 +139,8 @@ export const NewSessionDialog: React.FC<NewSessionDialogProps> = ({
 
   const chosen = agents?.find((a) => a.id === agent);
   const hasWhere = !!where && ('ref' in where || where.path.trim() !== '');
-  const ready = agent !== '' && hasWhere && !starting;
+  const machineOk = !byMachine || (!!picked && picked.online);
+  const ready = agent !== '' && hasWhere && machineOk && !starting;
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -110,7 +148,10 @@ export const NewSessionDialog: React.FC<NewSessionDialogProps> = ({
     setStarting(true);
     setError(null);
     try {
-      const at = 'ref' in where! ? { folder_ref: where!.ref, connector: where!.connector } : { folder: where!.path.trim() };
+      const at =
+        'ref' in where!
+          ? { folder_ref: where!.ref, connector: where!.connector }
+          : { folder: where!.path.trim(), ...(byMachine ? { connector: machine } : {}) };
       await onStart({ agent, ...at, prompt: prompt.trim() === '' ? '' : prompt }, name.trim() || undefined);
     } catch (err) {
       const msg = (err as Error).message;
@@ -146,6 +187,22 @@ export const NewSessionDialog: React.FC<NewSessionDialogProps> = ({
             )}
           </div>
         )}
+        {byMachine && (
+          <label>
+            <span>Machine</span>
+            <select name="machine" value={machine} onChange={(e) => pickMachine(e.target.value)}>
+              {!picked && <option value="">Pick a machine</option>}
+              {usable.map((m) => (
+                <option key={m.connector} value={m.connector} disabled={!m.online}>
+                  {m.online ? m.name : `${m.name} (offline)`}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        {byMachine && !usable.some((m) => m.online) && (
+          <div className="nd-note">No machine is online. Start agentbus runner on one.</div>
+        )}
         <label>
           <span>Folder</span>
           <input
@@ -179,9 +236,11 @@ export const NewSessionDialog: React.FC<NewSessionDialogProps> = ({
           </div>
         )}
         <div className="nd-note">
-          {folders.length > 0
-            ? 'A folder the service lists, or a path on the machine where AgentBus runs. '
-            : 'A folder on the machine where AgentBus runs. '}
+          {byMachine
+            ? `A folder on ${picked?.name ?? 'the machine picked'}: pick a recent one or type its path. The session runs on that machine. `
+            : folders.length > 0
+              ? 'A folder the service lists, or a path on the machine where AgentBus runs. '
+              : 'A folder on the machine where AgentBus runs. '}
           The conversation works on its own copy of it, so your folder is not changed until you apply a turn's changes.
         </div>
         <label>

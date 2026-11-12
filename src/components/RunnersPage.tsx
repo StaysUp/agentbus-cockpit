@@ -15,9 +15,8 @@ interface RunnersPageProps extends RunnersState {
 const Sep = () => <span className="sep">·</span>;
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
-// The runners page (/runners), in the mockup's three columns: every runner
-// and connector control knows; the picked one, with what it reported; and
-// the queue.
+// The runners page (/runners), in the mockup's three columns: every machine,
+// one runner each; the picked one, with what it reported; and the queue.
 export const RunnersPage: React.FC<RunnersPageProps> = ({ runners, error, onBack, queue }) => {
   const [picked, setPicked] = useState<string | null>(null);
   const shown = runners?.find((r) => r.id === picked) ?? runners?.[0];
@@ -34,8 +33,8 @@ export const RunnersPage: React.FC<RunnersPageProps> = ({ runners, error, onBack
       }
       foot={
         <>
-          A runner runs turns. A connector owns the folders on its machine. <code>agentbus up</code> starts one of
-          each.
+          One runner per machine. It holds the machine's folders, runs their sessions and applies their changes.{' '}
+          <code>agentbus up</code> starts one; <code>agentbus runner</code> joins another machine.
         </>
       }
       main={shown ? <RunnerDetail r={shown} /> : <ColHead title="No runner" />}
@@ -75,8 +74,8 @@ const RunnerDetail: React.FC<{ r: RunnerInfo }> = ({ r }) => {
         </div>
         <p className="pg-note">
           {connector
-            ? 'Owns the folders on its machine. It takes only their snapshot and apply jobs.'
-            : 'Runs turns. It asks control for work, and reports the harnesses it finds.'}
+            ? 'A connector from before 0.5. It takes no work now: run agentbus runner on this machine instead.'
+            : "This machine's one program. It holds the machine's folders, runs their sessions and applies their changes. It asks control for work, and reports the harnesses it finds."}
         </p>
         <table className="grid pg-kv">
           <tbody>
@@ -104,6 +103,14 @@ const RunnerDetail: React.FC<{ r: RunnerInfo }> = ({ r }) => {
               <tr>
                 <td>Enrolled</td>
                 <td>{new Date(r.enrolled).toLocaleString()}</td>
+              </tr>
+            )}
+            {r.connector && (
+              <tr>
+                <td>Machine</td>
+                <td>
+                  <code>{r.connector}</code>
+                </td>
               </tr>
             )}
             <tr>
