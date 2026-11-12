@@ -13,6 +13,8 @@ import {
 import { ColHead, PageFrame } from "./PageFrame";
 import { Button, Seg, Switch } from "./Controls";
 import { setLeaveGuard } from "../page";
+import { ConnectStep, SubscriptionApi } from "./ConnectStep";
+import { SubscriptionList } from "../types";
 
 // The Settings page (/settings): control's settings, one global set for every machine.
 // The grants (files a session gets, the sandbox, the network, and two
@@ -27,6 +29,9 @@ interface SettingsPageProps {
   // Whether this setup can honour the sandbox switch, from the machines'
   // own reports (sandboxOffer). Absent: the switch is offered as it is.
   sandbox?: SandboxOffer;
+  // The subscriptions control keeps, which every turn uses. Absent: a
+  // service that keeps none, and no Subscriptions part.
+  subscriptions?: SubscriptionApi;
 }
 
 interface Loaded {
@@ -37,7 +42,7 @@ interface Loaded {
 
 const json = (p: Policy) => JSON.stringify(p, null, 2);
 
-export const SettingsPage: React.FC<SettingsPageProps> = ({ api, onBack, sandbox }) => {
+export const SettingsPage: React.FC<SettingsPageProps> = ({ api, onBack, sandbox, subscriptions }) => {
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   // The drafts, reset from what was read.
@@ -57,7 +62,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ api, onBack, sandbox
   // resets its own drafts, and leaves the other part's as they are.
   // Which parts hold changes not saved, as of the last render: a read
   // after one part's save leaves another part's unsaved draft as it is.
-  const dirtyRef = useRef<Record<Part, boolean>>({ grants: false, policy: false, instructions: false });
+  const dirtyRef = useRef<Record<Part, boolean>>({ grants: false, policy: false, instructions: false, subscriptions: false });
   const read = useCallback(
     async (parts: { policy: boolean; instructions: boolean }, saved?: Part | "all") => {
       const keep = (p: Part) => saved !== "all" && p !== saved && dirtyRef.current[p];
@@ -180,6 +185,8 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ api, onBack, sandbox
         JSON.stringify(withGrants(loaded.policy.value, grantsOf(loaded.policy.value))),
     policy: !!loaded && policyText !== json(loaded.policy.value),
     instructions: !!loaded && instructions !== loaded.instructions.value,
+    // Each connect is done at once, so nothing waits to be saved.
+    subscriptions: false,
   };
   dirtyRef.current = dirty;
   const unsaved = PART_NAMES.filter(([k]) => dirty[k]).map(([, n]) => n);
@@ -215,6 +222,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ api, onBack, sandbox
     ["policy", "Policy", "All of it, as JSON"],
     ["instructions", "Instructions", "What every turn is told"],
   ];
+  if (subscriptions) parts.push(["subscriptions", "Subscriptions", "The sign-in every turn uses"]);
   const list = parts.map(([k, name, sub]) => (
     <button
       type="button"
@@ -260,7 +268,28 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ api, onBack, sandbox
 
   let main: React.ReactNode;
   let side: React.ReactNode;
-  if (part === "grants") {
+  if (part === "subscriptions" && subscriptions) {
+    main = (
+      <>
+        {head("Subscriptions")}
+        <div className="colbody pg-body">
+          <SubscriptionsPart api={subscriptions} />
+        </div>
+      </>
+    );
+    side = (
+      <>
+        {head("How it applies")}
+        <div className="colbody pg-body">
+          <p className="pg-note">
+            Every turn uses the subscription connected here, on this machine and on your runners. A tool&apos;s own
+            sign-in on a machine is not used.
+          </p>
+          <p className="f-note first">A turn whose tool is not connected is refused, and says so.</p>
+        </div>
+      </>
+    );
+  } else if (part === "grants") {
     const g = grants;
     const sel = GRANTS.find((x) => x[0] === grant) ?? GRANTS[0];
     main = (
@@ -558,7 +587,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ api, onBack, sandbox
   );
 };
 
-type Part = "grants" | "policy" | "instructions";
+type Part = "grants" | "policy" | "instructions" | "subscriptions";
 const PART_NAMES: [Part, string][] = [
   ["grants", "Grants"],
   ["policy", "Policy"],
@@ -601,3 +630,29 @@ function grantValue(k: GrantKey, g: Grants, readText: string, hostsText: string)
       return g.agentsApply ? "On" : "Off";
   }
 }
+
+// SubscriptionsPart is one Connect step per subscription control can keep.
+const SubscriptionsPart: React.FC<{ api: SubscriptionApi }> = ({ api }) => {
+  const [list, setList] = useState<SubscriptionList | null | undefined>(undefined);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    api.list().then(
+      (l) => alive && setList(l),
+      (e: Error) => alive && setError(e.message),
+    );
+    return () => {
+      alive = false;
+    };
+  }, [api]);
+  if (error) return <div className="form-error">{error}</div>;
+  if (list === undefined) return <div className="nd-note">Reading…</div>;
+  if (list === null) return <div className="nd-note">This service keeps no subscriptions.</div>;
+  return (
+    <>
+      {list.subscriptions.map((s) => (
+        <ConnectStep key={s.harness} harness={s.harness} api={api} />
+      ))}
+    </>
+  );
+};

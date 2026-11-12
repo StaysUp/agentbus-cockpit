@@ -137,6 +137,36 @@ describe('the settings routes', () => {
 });
 
 describe('the Settings page', () => {
+  // Every turn uses the subscriptions control keeps: Settings has a part
+  // with a Connect step for each, and none where the service keeps none.
+  it('has a Subscriptions part with a Connect step for each subscription', async () => {
+    const { api } = fakeApi();
+    const subs = {
+      list: vi.fn(async () => ({
+        subscriptions: [
+          { harness: 'claude', connected: true, expired: false, expires_at: '2027-11-10T00:00:00Z' },
+          { harness: 'codex', connected: false, expired: false },
+        ],
+      })),
+      connect: vi.fn(),
+      get: vi.fn(),
+      input: vi.fn(),
+    };
+    const { container } = await render(<SettingsPage api={api} onBack={() => {}} subscriptions={subs} />);
+    await flush();
+    await click(container.querySelector('[data-part="subscriptions"]'));
+    await flush();
+    await flush();
+    const steps = [...container.querySelectorAll('.connect-step')];
+    expect(steps.map((s) => s.getAttribute('data-harness'))).toEqual(['claude', 'codex']);
+    expect(steps.map((s) => s.getAttribute('data-phase'))).toEqual(['connected', 'not-connected']);
+    expect(container.textContent).toContain('Every turn uses the subscription connected here');
+
+    const { container: none } = await render(<SettingsPage api={api} onBack={() => {}} />);
+    await flush();
+    expect(none.querySelector('[data-part="subscriptions"]')).toBeNull();
+  });
+
   it('shows no versions, only when the settings last changed', async () => {
     const { api } = fakeApi({ version: 3, changed: '2026-11-12T09:00:00Z' });
     const { container } = await render(<SettingsPage api={api} onBack={() => {}} />);

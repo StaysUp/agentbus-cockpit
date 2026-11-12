@@ -449,8 +449,9 @@ export interface CallContext {
   pieces: ContextPiece[];
 }
 
-// The person's own subscription for a harness, kept on control for their
-// runners (GET /api/v0/subscriptions). Never the token.
+// The person's own subscription for a harness, kept on control: every turn
+// uses it, on one machine as on many (GET /api/v0/subscriptions). Never the
+// token.
 export interface ConnectView {
   harness: string;
   state: 'running' | 'connected' | 'failed';
@@ -462,6 +463,10 @@ export interface ConnectView {
   // While it runs: the login waits for the code the sign-in page shows
   // (claude, agy).
   paste: boolean;
+  // Why a failed one ended: the login did not take the code sent, or it was
+  // cancelled. error says it in full.
+  rejected?: boolean;
+  cancelled?: boolean;
   error?: string;
 }
 export interface SubscriptionState {
@@ -528,6 +533,8 @@ export interface DataSource {
   connectSubscription?(harness: string): Promise<ConnectView>;
   getConnect?(harness: string): Promise<ConnectView>;
   connectInput?(harness: string, line: string): Promise<void>;
+  // DELETE /api/v0/subscriptions/<harness>/connect: stop a running login.
+  cancelConnect?(harness: string): Promise<void>;
   // The settings routes (/api/v0/settings), for the Settings page.
   getSettings?(): Promise<Versioned<SettingsInfo>>;
   getPolicy?(): Promise<Versioned<Policy>>;

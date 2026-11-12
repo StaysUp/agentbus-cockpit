@@ -98,6 +98,8 @@ export function connectView(data: Partial<ConnectView>): ConnectView {
     output: Array.isArray(data.output) ? data.output : [],
     code: data.code,
     paste: data.paste === true,
+    rejected: data.rejected === true,
+    cancelled: data.cancelled === true,
     error: data.error,
   };
 }
@@ -333,6 +335,16 @@ export class LiveDataSource implements DataSource {
       method: 'POST',
       headers: { ...this.headers(), 'Content-Type': 'application/json' },
       body: JSON.stringify({ line }),
+    });
+    if (!res.ok) throw new Error(await apiError(res));
+  }
+
+  // DELETE /api/v0/subscriptions/<harness>/connect: stop the running login.
+  // 204; 409 when none runs.
+  async cancelConnect(harness: string): Promise<void> {
+    const res = await fetch(`${this.baseUrl}/api/v0/subscriptions/${encodeURIComponent(harness)}/connect`, {
+      method: 'DELETE',
+      headers: this.headers(),
     });
     if (!res.ok) throw new Error(await apiError(res));
   }

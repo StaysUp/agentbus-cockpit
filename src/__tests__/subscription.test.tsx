@@ -265,11 +265,78 @@ describe('ConnectStep', () => {
     await act(async () => release({ harness: 'claude', state: 'running', output: ['https://claude.example/a'], paste: true }));
   });
 
-  it('says a harness without a login cannot use its subscription on a runner', async () => {
+  it('says a harness without a login cannot be connected on control', async () => {
     const api = fakeApi();
     const { container } = await render(<ConnectStep harness="codex" api={api} />);
     await flush();
-    expect(container.textContent).toContain('cannot be used yet');
+    expect(container.textContent).toContain('cannot be connected on control yet');
+  });
+
+  // A code the login did not take ends the connect at once, as rejected,
+  // with control's words, and Try again starts a new one.
+  it('says a rejected code was rejected, and offers to try again', async () => {
+    const api = fakeApi();
+    const why = 'the code was rejected: it may be incomplete, expired, already used, or from an earlier sign-in; try again, Connect gives a new link';
+    api.input = vi.fn(async () => {
+      (api as { get: SubscriptionApi['get'] }).get = vi.fn(async () => ({
+        harness: 'claude',
+        state: 'failed' as const,
+        output: [],
+        paste: false,
+        rejected: true,
+        error: why,
+      }));
+    });
+    const { container } = await render(<ConnectStep harness="claude" api={api} />);
+    await flush();
+    await click(container.querySelector('.cs-connect'));
+    await flush();
+    await type(container.querySelector('.cs-input input') as HTMLInputElement, 'wrong');
+    await click(container.querySelector('.cs-input button'));
+    await waitFor(() => phase(container) === 'failed', 'failed');
+    expect(container.querySelector('.cs-status')?.textContent).toBe('code rejected');
+    expect(container.querySelector('.cs-why')?.textContent).toBe(why);
+    expect(container.querySelector('.cs-connect')?.textContent).toBe('Try again');
+    noLogin(container, 'claude.example');
+  });
+
+  // While it connects, Cancel stops the login on control; once control says
+  // it ended as cancelled, the step is as it was before, with no error.
+  it('cancels a running connect', async () => {
+    const api = fakeApi();
+    api.cancel = vi.fn(async () => {
+      (api as { get: SubscriptionApi['get'] }).get = vi.fn(async () => ({
+        harness: 'claude',
+        state: 'failed' as const,
+        output: [],
+        paste: false,
+        cancelled: true,
+        error: 'the connect was cancelled',
+      }));
+    });
+    const { container } = await render(<ConnectStep harness="claude" api={api} />);
+    await flush();
+    expect(container.querySelector('.cs-cancel')).toBeNull();
+    await click(container.querySelector('.cs-connect'));
+    await flush();
+    expect(phase(container)).toBe('connecting');
+    expect(container.querySelector('.cs-connect')).toBeNull();
+    await click(container.querySelector('.cs-cancel'));
+    expect(api.cancel).toHaveBeenCalledWith('claude');
+    await waitFor(() => phase(container) === 'not-connected', 'not connected');
+    expect(container.querySelector('.cs-why')).toBeNull();
+    expect(container.querySelector('.cs-connect')?.textContent).toBe('Connect');
+    noLogin(container, 'claude.example');
+  });
+
+  it('offers no Cancel where the service cannot cancel', async () => {
+    const api = fakeApi();
+    const { container } = await render(<ConnectStep harness="claude" api={api} />);
+    await flush();
+    await click(container.querySelector('.cs-connect'));
+    await flush();
+    expect(container.querySelector('.cs-cancel')).toBeNull();
+    expect(container.querySelector('.cs-connect')).not.toBeNull();
   });
 });
 

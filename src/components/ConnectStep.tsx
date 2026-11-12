@@ -1,15 +1,16 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ConnectView, SubscriptionList } from '../types';
 
-// The Connect step of a subscription agent: control adds the person's own
-// subscription to the model calls of agents on their runners, which hold no
-// sign-in. The person connects it once, here, with the harness's own login,
-// run on control. One machine (agentbus up) needs none of this: its runner
-// uses the harness's own sign-in.
+// The Connect step of a subscription, in an agent's form and in Settings:
+// control adds the person's own subscription to the model calls of every
+// turn, on one machine (agentbus up) as on every runner; none of them uses a
+// sign-in of its own. The person connects it once, here, with the harness's
+// own login, run on control.
 //
 // One layout for every harness, in four states: not connected, connecting
 // (a button to the sign-in page, a one-time code to enter there, or a field
-// for the code the page shows), connected, and failed. A link or a code is
+// for the code the page shows, and Cancel), connected, and failed. A code
+// the login did not take fails at once, as rejected. A link or a code is
 // shown only while the login runs: control no longer returns them after.
 
 export interface SubscriptionApi {
@@ -17,6 +18,8 @@ export interface SubscriptionApi {
   connect: (harness: string) => Promise<ConnectView>;
   get: (harness: string) => Promise<ConnectView>;
   input: (harness: string, line: string) => Promise<void>;
+  // Stops the running login. Absent: a service without it, and no Cancel.
+  cancel?: (harness: string) => Promise<void>;
 }
 
 // pollMs is how often a running login is read again.
@@ -42,6 +45,10 @@ export const ConnectStep: React.FC<{ harness: string; api: SubscriptionApi }> = 
   // The login took the code: nothing more is sent while it checks it.
   const [sent, setSent] = useState(false);
   const [starting, setStarting] = useState(false);
+  // The last connect failed because the login did not take the code.
+  const [rejected, setRejected] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+  const [cancelError, setCancelError] = useState<string | null>(null);
   // Refs as well as state: a second click in the same moment, before a
   // render, is ignored.
   const sendingRef = useRef(false);
@@ -95,10 +102,14 @@ export const ConnectStep: React.FC<{ harness: string; api: SubscriptionApi }> = 
               return;
             }
             // Ended: it shows as connected or failed at once, and the list
-            // read again says until when.
+            // read again says until when. A cancelled one shows as it was
+            // before.
             setView(null);
-            if (v.state === 'failed') setFailed(v.error || 'the login ended without connecting');
-            else setConnected(true);
+            setCancelling(false);
+            if (v.state === 'failed' && !v.cancelled) {
+              setFailed(v.error || 'the login ended without connecting');
+              setRejected(!!v.rejected);
+            } else if (v.state !== 'failed') setConnected(true);
             reload();
           },
           // The login can no longer be read (control restarted, say): it
@@ -130,7 +141,7 @@ export const ConnectStep: React.FC<{ harness: string; api: SubscriptionApi }> = 
   if (!sub) {
     return (
       <div className="connect-step" data-harness={harness}>
-        <span className="nd-note">On a runner this subscription cannot be used yet; this agent runs where its harness is signed in.</span>
+        <span className="nd-note">This subscription cannot be connected on control yet.</span>
       </div>
     );
   }
@@ -155,11 +166,13 @@ export const ConnectStep: React.FC<{ harness: string; api: SubscriptionApi }> = 
     startingRef.current = true;
     setStarting(true);
     setFailed(null);
+    setRejected(false);
     setConnected(false);
     setView(null);
     setCode('');
     setSent(false);
     setSendError(null);
+    setCancelError(null);
     api.connect(harness).then(
       (v) => {
         startingRef.current = false;
@@ -207,13 +220,28 @@ export const ConnectStep: React.FC<{ harness: string; api: SubscriptionApi }> = 
     );
   };
 
+  // Cancel stops the login on control; the next read sees it end.
+  const cancel = () => {
+    if (!api.cancel || cancelling) return;
+    setCancelling(true);
+    setCancelError(null);
+    api.cancel(harness).then(
+      () => undefined,
+      (e: Error) => {
+        if (!alive.current) return;
+        setCancelling(false);
+        setCancelError(e.message);
+      },
+    );
+  };
+
   // A sign-in that expired failed too, but no connect of this step did.
   const expired = phase === 'failed' && failed === null;
   const status = {
     'not-connected': 'not connected',
     connecting: 'connecting',
     connected: 'connected',
-    failed: expired ? 'expired' : 'failed',
+    failed: expired ? 'expired' : rejected ? 'code rejected' : 'failed',
   }[phase];
   const label = {
     'not-connected': 'Connect',
@@ -229,13 +257,20 @@ export const ConnectStep: React.FC<{ harness: string; api: SubscriptionApi }> = 
   return (
     <div className="connect-step" data-harness={harness} data-phase={phase}>
       <div className="cs-head">
-        <span>On your runners</span>
+        <span>{harness}</span>
         <span className={`cs-status ${phase === 'connected' ? 'ok' : 'off'}`}>{status}</span>
         {phase === 'connected' && until && <span className="cs-until">{until}</span>}
-        <button type="button" className="btn btn-secondary btn-sm cs-btn cs-connect" onClick={connect} disabled={phase === 'connecting'}>
-          {label}
-        </button>
+        {phase === 'connecting' && api.cancel ? (
+          <button type="button" className="btn btn-secondary btn-sm cs-btn cs-cancel" onClick={cancel} disabled={cancelling || starting}>
+            {cancelling ? 'Cancelling' : 'Cancel'}
+          </button>
+        ) : (
+          <button type="button" className="btn btn-secondary btn-sm cs-btn cs-connect" onClick={connect} disabled={phase === 'connecting'}>
+            {label}
+          </button>
+        )}
       </div>
+      {cancelError && <div className="form-error">{cancelError}</div>}
       {phase === 'failed' && <div className="form-error cs-why">{why}</div>}
       {phase === 'connecting' && (
         <div className="cs-login">
@@ -281,8 +316,8 @@ export const ConnectStep: React.FC<{ harness: string; api: SubscriptionApi }> = 
         </div>
       )}
       <span className="nd-note">
-        Runners hold no sign-in. Control adds your subscription to their calls once you connect it here. The token
-        stays on control and is never shown.
+        Every turn uses this sign-in, on this machine and on your runners. Connect it once here. The token stays on
+        control and is never shown.
       </span>
       {listError && <div className="form-error">{listError}</div>}
     </div>

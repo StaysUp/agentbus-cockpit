@@ -521,8 +521,9 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
   const loadHarnesses = useCallback(() => dataSource.getHarnesses!(), [dataSource]);
   const loadSaved = useCallback(() => dataSource.listAgents!(), [dataSource]);
   const canKeepAgents = !!(dataSource.listAgents && dataSource.getHarnesses && dataSource.createAgent);
-  // The Connect step of a subscription agent, where control keeps the
-  // person's own subscriptions for their runners.
+  // The Connect step of a subscription agent and the Subscriptions part of
+  // Settings, where control keeps the person's own subscriptions: every
+  // turn uses them.
   const subscriptionApi = useMemo<SubscriptionApi | undefined>(
     () =>
       dataSource.listSubscriptions && dataSource.connectSubscription && dataSource.getConnect &&
@@ -532,6 +533,7 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
             connect: (h) => dataSource.connectSubscription!(h),
             get: (h) => dataSource.getConnect!(h),
             input: (h, line) => dataSource.connectInput!(h, line),
+            cancel: dataSource.cancelConnect ? (h) => dataSource.cancelConnect!(h) : undefined,
           }
         : undefined,
     [dataSource],
@@ -1017,6 +1019,7 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
         api={settingsApi!}
         onBack={() => goPage('cockpit')}
         sandbox={loadRunners ? sandboxOffer(runners.runners, runners.error) : undefined}
+        subscriptions={subscriptionApi}
       />
     );
   }
