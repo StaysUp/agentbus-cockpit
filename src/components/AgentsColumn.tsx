@@ -47,8 +47,8 @@ export const AgentsColumn: React.FC<AgentsColumnProps> = ({
   onSettings,
   version,
 }) => {
-  // The row asking "Remove?", and a remove in flight or refused.
-  const [confirming, setConfirming] = useState<string | null>(null);
+  // A remove in flight, or refused. Remove takes one click: a saved agent
+  // can be made again, and its sessions stay.
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<{ id: string; msg: string } | null>(null);
 
@@ -58,7 +58,6 @@ export const AgentsColumn: React.FC<AgentsColumnProps> = ({
     setError(null);
     try {
       await onRemoveAgent(id);
-      setConfirming(null);
     } catch (err) {
       setError({ id, msg: (err as Error).message });
     } finally {
@@ -103,36 +102,15 @@ export const AgentsColumn: React.FC<AgentsColumnProps> = ({
               <div key={a.id} className="side-chat agent pick on" data-agent={a.id}>
                 {body}
                 <span className="ag-act">
-                  {confirming === a.id ? (
-                    <>
-                      <span>Remove?</span>
-                      <button type="button" className="btn btn-secondary btn-sm ag-yes" disabled={busy} onClick={() => remove(a.id)}>
-                        Remove
-                      </button>
-                      <button type="button" className="btn btn-secondary btn-sm ag-keep" disabled={busy} onClick={() => setConfirming(null)}>
-                        Keep
-                      </button>
-                    </>
-                  ) : (
-                    <>
-                      {onEditAgent && (
-                        <button type="button" className="btn btn-secondary btn-sm ag-edit" onClick={() => onEditAgent(a)}>
-                          Edit
-                        </button>
-                      )}
-                      {onRemoveAgent && (
-                        <button
-                          type="button"
-                          className="btn btn-secondary btn-sm ag-remove"
-                          onClick={() => {
-                            setError(null);
-                            setConfirming(a.id);
-                          }}
-                        >
-                          Remove
-                        </button>
-                      )}
-                    </>
+                  {onEditAgent && (
+                    <button type="button" className="btn btn-secondary btn-sm ag-edit" disabled={busy} onClick={() => onEditAgent(a)}>
+                      Edit
+                    </button>
+                  )}
+                  {onRemoveAgent && (
+                    <button type="button" className="btn btn-secondary btn-sm ag-remove" disabled={busy} onClick={() => remove(a.id)}>
+                      Remove
+                    </button>
                   )}
                 </span>
                 {error?.id === a.id && <span className="form-error">{error.msg}</span>}
@@ -145,7 +123,6 @@ export const AgentsColumn: React.FC<AgentsColumnProps> = ({
               className={`side-chat agent pick${isSelected ? ' on' : ''}`}
               data-agent={a.id}
               onClick={() => {
-                setConfirming(null);
                 setError(null);
                 onSelectAgent(a.id);
               }}

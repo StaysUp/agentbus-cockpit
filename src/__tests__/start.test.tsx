@@ -1264,7 +1264,7 @@ describe('Agents', () => {
     r.unmount();
   });
 
-  it('while a remove is in flight, Remove and Keep wait; then the row is gone', async () => {
+  it('while a remove is in flight, Edit and Remove wait; then the row is gone', async () => {
     let finish: () => void = () => {};
     const svc = fakeService({ sessions: [row('s1')], events: { s1: oneTurn('s1', 'hi') }, agents: AGENTS });
     const inner = svc.fn.getMockImplementation()!;
@@ -1277,9 +1277,8 @@ describe('Agents', () => {
     await settle();
     await click(r.container.querySelector('#agents [data-agent="codex"]'));
     await click(r.container.querySelector('#agents [data-agent="codex"] .ag-remove'));
-    await click(r.container.querySelector('#agents [data-agent="codex"] .ag-yes'));
-    expect((r.container.querySelector('#agents [data-agent="codex"] .ag-keep') as HTMLButtonElement).disabled).toBe(true);
-    expect((r.container.querySelector('#agents [data-agent="codex"] .ag-yes') as HTMLButtonElement).disabled).toBe(true);
+    expect((r.container.querySelector('#agents [data-agent="codex"] .ag-edit') as HTMLButtonElement).disabled).toBe(true);
+    expect((r.container.querySelector('#agents [data-agent="codex"] .ag-remove') as HTMLButtonElement).disabled).toBe(true);
     await act(async () => finish());
     await settle();
     expect(svc.reqs.find((q) => q.method === 'DELETE')?.path).toBe('/api/v0/agents/codex');
@@ -1287,7 +1286,7 @@ describe('Agents', () => {
     r.unmount();
   });
 
-  it('a row edits its agent with PUT, and a remove asks first', async () => {
+  it('a row edits its agent with PUT, and one click on Remove removes it', async () => {
     const svc = fakeService({ sessions: [row('s1')], events: { s1: oneTurn('s1', 'hi') }, agents: AGENTS });
     const r = await mount(svc);
     await settle();
@@ -1304,14 +1303,13 @@ describe('Agents', () => {
     expect(r.container.querySelector('.agent-form')).toBeNull();
 
     await click(r.container.querySelector('#agents [data-agent="codex"]'));
+    const confirm = vi.spyOn(window, 'confirm');
     await click(r.container.querySelector('#agents [data-agent="codex"] .ag-remove'));
-    expect(svc.reqs.some((q) => q.method === 'DELETE')).toBe(false);
-    await click(r.container.querySelector('#agents [data-agent="codex"] .ag-keep'));
-    expect(r.container.querySelector('#agents [data-agent="codex"] .ag-yes')).toBeNull();
-    await click(r.container.querySelector('#agents [data-agent="codex"] .ag-remove'));
-    await click(r.container.querySelector('#agents [data-agent="codex"] .ag-yes'));
     await settle();
-    expect(svc.reqs.find((q) => q.method === 'DELETE')?.path).toBe('/api/v0/agents/codex');
+    expect(confirm).not.toHaveBeenCalled();
+    confirm.mockRestore();
+    expect(svc.reqs.filter((q) => q.method === 'DELETE').map((q) => q.path)).toEqual(['/api/v0/agents/codex']);
+    expect(r.container.querySelector('#agents [data-agent="codex"]')).toBeNull();
     r.unmount();
   });
 });
