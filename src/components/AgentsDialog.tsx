@@ -57,13 +57,22 @@ function autoName(f: FormState, harnesses: Harness[]): string {
   return f.model ? `${label} · ${f.model}` : label;
 }
 
+// startModel is a new agent's model on acc: none on a subscription, so the
+// harness uses its own default (a fixed name can be one the account
+// refuses, as gpt-5.5 on a ChatGPT sign-in); the first offered on
+// OpenRouter, which needs one.
+function startModel(acc: AccessOption | undefined): string {
+  if (!acc || acc.kind === "subscription") return "";
+  return acc.models[0] ?? "";
+}
+
 function freshForm(harnesses: Harness[]): FormState {
   const h = harnesses.find(usable);
   const acc = firstAccess(h);
   const f: FormState = {
     harness: h?.name ?? "",
     access: acc?.kind ?? "",
-    model: acc?.models[0] ?? "",
+    model: startModel(acc),
     keyEnv: acc?.key_env ?? "",
     name: "",
     named: false,
@@ -159,7 +168,7 @@ export const AgentsDialog: React.FC<AgentsDialogProps> = ({
         const keep =
           acc?.any_model && cur.access === f.access && f.model !== "";
         if (acc && !keep && !acc.models.includes(f.model))
-          f.model = acc.models[0] ?? "";
+          f.model = startModel(acc);
         if (acc?.kind === "openrouter" && !f.keyEnv)
           f.keyEnv = acc.key_env ?? "";
       }
@@ -285,7 +294,11 @@ export const AgentsDialog: React.FC<AgentsDialogProps> = ({
                     label="Model"
                     value={form.model}
                     onChange={(v) => update({ model: v })}
-                    placeholder="an OpenRouter model id"
+                    placeholder={
+                      access.kind === "subscription"
+                        ? `empty: ${harness?.label ?? form.harness}'s default`
+                        : "an OpenRouter model id"
+                    }
                     suggestions={access.models}
                   />
                 ) : (
@@ -304,9 +317,19 @@ export const AgentsDialog: React.FC<AgentsDialogProps> = ({
                   />
                 )}
                 <span className="nd-note">
-                  Only what {harness?.label ?? form.harness} offers for this
-                  access
-                  {access?.any_model ? ", or any OpenRouter model id" : ""}.
+                  {access?.kind === "subscription" && access.any_model ? (
+                    <>
+                      Empty uses {harness?.label ?? form.harness}&apos;s own
+                      default. A name your account does not offer fails the
+                      turn with the vendor&apos;s words.
+                    </>
+                  ) : (
+                    <>
+                      Only what {harness?.label ?? form.harness} offers for this
+                      access
+                      {access?.any_model ? ", or any OpenRouter model id" : ""}.
+                    </>
+                  )}
                 </span>
               </label>
               {openRouter && (

@@ -1149,10 +1149,37 @@ describe('Agents', () => {
     expect((form.querySelector('[data-access="api"]') as HTMLButtonElement).disabled).toBe(true);
     expect(Array.from(form.querySelectorAll('.f-off [role="combobox"]')).every((x) => (x as HTMLButtonElement).disabled)).toBe(true);
     expect(form.querySelector('select')).toBeNull();
-    // The name follows harness and model.
-    expect((form.querySelector('input[name="name"]') as HTMLInputElement).value).toBe('Claude Code · sonnet');
+    // A subscription agent starts with no model, so the harness picks its
+    // own; the name follows harness and model.
+    expect((form.querySelector('input[name="name"]') as HTMLInputElement).value).toBe('Claude Code');
     const models = (await optionsOf(form, 'model')).map((o) => o[0]);
     expect(models).toEqual(['sonnet', 'opus', 'haiku', '']);
+    r.unmount();
+  });
+
+  // A subscription that takes any model name: the field is free text, a
+  // new agent names none (the tool's default), and none is saved when the
+  // field stays empty.
+  it('a subscription agent starts with no model and takes a typed name', async () => {
+    const codex = {
+      name: 'codex',
+      label: 'Codex',
+      found: true,
+      access: [{ kind: 'subscription', label: 'ChatGPT sign-in', models: [], any_model: true }, ...ACCESS([]).slice(1)],
+    };
+    const svc = fakeService({ sessions: [row('s1')], events: { s1: oneTurn('s1', 'hi') }, agents: [codex] });
+    const r = await mount(svc);
+    await click(r.container.querySelector('#agents button.add-agent'));
+    await settle();
+    const form = () => r.container.querySelector('.agent-form')!;
+    expect(selectIn(form(), 'model')).toBeNull();
+    const model = form().querySelector('input[name="model"]') as HTMLInputElement;
+    expect(model.value).toBe('');
+    expect(model.placeholder).toBe("empty: Codex's default");
+    expect((form().querySelector('input[name="name"]') as HTMLInputElement).value).toBe('Codex');
+    await submitForm(form());
+    const post = svc.reqs.find((q) => q.path === '/api/v0/agents' && q.method === 'POST');
+    expect(post?.body).toEqual({ name: 'Codex', harness: 'codex', access: 'subscription' });
     r.unmount();
   });
 

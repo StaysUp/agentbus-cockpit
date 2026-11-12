@@ -235,9 +235,11 @@ export interface AccessOption {
   kind: string; // subscription, openrouter or api
   label: string;
   disabled?: boolean;
-  // Models to offer, first the one to start from.
+  // Models to offer. A new subscription agent names none, so the harness
+  // picks its own; an OpenRouter one starts with the first.
   models: string[];
-  // Any model name is accepted, as an OpenRouter model id.
+  // Any model name is accepted: an OpenRouter model id, or any name for a
+  // subscription. A name the vendor refuses fails the turn in its words.
   any_model?: boolean;
   key_env?: string;
   // Whether key_env is set where the service runs. Never its value.
