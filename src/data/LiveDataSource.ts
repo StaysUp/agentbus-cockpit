@@ -16,7 +16,6 @@ import {
   SessionList,
   SessionSummary,
   ShellRun,
-  CommandQueued,
   Started,
   ApplyState,
   Turn,
@@ -397,14 +396,9 @@ export class LiveDataSource implements DataSource {
     await this.send('PATCH', `/api/v0/sessions/${encodeURIComponent(sessionId)}`, { title });
   }
 
-  // POST /api/v0/sessions/<id>/commands: the person's shell command, queued
-  // in the session's copy. 202 at once with its id; its events say the rest.
-  async runCommand(sessionId: string, command: string): Promise<CommandQueued> {
-    return this.send('POST', `/api/v0/sessions/${encodeURIComponent(sessionId)}/commands`, { command });
-  }
-
   // GET /api/v0/sessions/<id>/events?kind=<the command kinds>: the session's
-  // command events, oldest first, paged by next_after until it is null.
+  // "!" command events from before AgentBus 0.5, read-only, oldest first,
+  // paged by next_after until it is null.
   async getCommands(sessionId: string): Promise<ShellRun[]> {
     const out: ShellRun[] = [];
     let cursor: { store: string; after: number } | null = null;

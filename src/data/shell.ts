@@ -1,5 +1,9 @@
 import { CockpitEvent, ShellRun, Turn } from '../types';
 
+// The "!" commands of AgentBus 0.4, read-only: a session from before 0.5 may
+// hold their events, and shows them between its turns. 0.5 writes none: a
+// "!" message goes to the agent, which runs it with its own shell tool.
+
 // The four kinds of a command's events, oldest to newest state.
 export const COMMAND_KINDS = ['command.queued', 'command.started', 'command.ran', 'command.failed'];
 
@@ -46,13 +50,6 @@ export function addRun(list: ShellRun[] | undefined, run: ShellRun): ShellRun[] 
   if (next === held) return cur;
   const out = i < 0 ? [...cur, next] : cur.map((r, k) => (k === i ? next : r));
   return out.sort((a, b) => ms(a.queuedAt ?? a.time) - ms(b.queuedAt ?? b.time));
-}
-
-// The text of a message box that runs a command: what follows "!", or null
-// when the text is a message for the agent.
-export function bangCommand(text: string): string | null {
-  const t = text.trimStart();
-  return t.startsWith('!') ? t.slice(1).trim() : null;
 }
 
 // Where each command goes in the conversation: after the last turn that

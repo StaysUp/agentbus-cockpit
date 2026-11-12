@@ -21,7 +21,6 @@ export interface SettingsInfo {
 // filled. Only the keys the page shows as grants are named; the rest pass
 // through untouched.
 export interface Policy {
-  commands?: boolean;
   agent_api?: { apply?: boolean; [k: string]: unknown };
   network?: { contain?: string; allow?: string[] };
   sandbox?: { mode?: string; read?: string[] };
@@ -40,7 +39,6 @@ export interface Grants {
   network: NetworkGrant;
   hosts: string[];
   agentsApply: boolean;
-  commands: boolean;
 }
 
 export function networkOf(p: Policy): NetworkGrant {
@@ -55,7 +53,6 @@ export function grantsOf(p: Policy): Grants {
     network: networkOf(p),
     hosts: [...(p.network?.allow ?? [])],
     agentsApply: p.agent_api?.apply !== false,
-    commands: p.commands !== false,
   };
 }
 
@@ -66,7 +63,6 @@ export function withGrants(p: Policy, g: Grants): Policy {
   const allow = g.network === 'off' ? [] : g.network === 'list' ? g.hosts : (p.network?.allow ?? []);
   return {
     ...p,
-    commands: g.commands,
     agent_api: { ...(p.agent_api ?? {}), apply: g.agentsApply },
     network: { ...(p.network ?? {}), contain: g.network === 'on' ? 'off' : 'on', allow },
     sandbox: { ...(p.sandbox ?? {}), mode: g.sandbox, read: g.read },

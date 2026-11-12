@@ -161,7 +161,7 @@ describe('Connect screen', () => {
     const paths = svc.calls.map((c) => new URL(c.url).pathname);
     expect(paths).toContain('/api/v0/events');
     expect(paths).toContain('/api/v0/turns');
-    // One turn's events, or only the session's "!" commands, never the
+    // One turn's events, or only the session's "!" commands from before 0.5, never the
     // whole session's.
     const eventReads = svc.calls.map((c) => new URL(c.url)).filter((u) => u.pathname === '/api/v0/sessions/live-abc/events');
     expect(eventReads.length).toBeGreaterThan(0);

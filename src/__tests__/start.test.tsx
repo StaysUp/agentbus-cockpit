@@ -1378,7 +1378,7 @@ describe('The turn list from the API', () => {
     expect(eventReads(svc, 'T1-s1')).toBe(1);
     expect(eventReads(svc, 'T2-s1')).toBe(0);
     // Every read of a session's events names one turn, or only its "!"
-    // commands (kind command.ran).
+    // commands from before 0.5 (the command.* kinds).
     expect(
       svc.reqs.some((q) => {
         const p = new URLSearchParams(q.query);

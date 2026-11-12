@@ -333,12 +333,6 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ api, onBack }) => {
                   />
                 </>
               )}
-              {sel[0] === "commands" && (
-                <>
-                  <p className="pg-note">May the ! commands you type in a session run.</p>
-                  <Switch name="commands" label="! commands run" on={g.commands} onChange={(v) => setGrants({ ...g, commands: v })} />
-                </>
-              )}
               <p className="f-note">A change here is kept on this page until you save the grants.</p>
             </fieldset>
           )}
@@ -466,7 +460,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ api, onBack }) => {
 };
 
 type Part = "grants" | "policy" | "instructions";
-type GrantKey = "read" | "sandbox" | "network" | "apply" | "commands";
+type GrantKey = "read" | "sandbox" | "network" | "apply";
 
 // The grants as rows: the key, its name, and the policy key it writes.
 const GRANTS: [GrantKey, string, string][] = [
@@ -474,7 +468,6 @@ const GRANTS: [GrantKey, string, string][] = [
   ["sandbox", "Sandbox", "sandbox.mode"],
   ["network", "Network", "network"],
   ["apply", "Agents may apply changes", "agent_api.apply"],
-  ["commands", "! commands run", "commands"],
 ];
 
 // flatKeys is the policy as rows: a nested key as its dotted path
@@ -502,8 +495,6 @@ function grantValue(k: GrantKey, g: Grants, readText: string, hostsText: string)
       return g.network === "list" ? `A list · ${plural(lines(hostsText).length, "host")}` : g.network === "on" ? "On" : "Off";
     case "apply":
       return g.agentsApply ? "Yes" : "No";
-    case "commands":
-      return g.commands ? "Yes" : "No";
   }
 }
 

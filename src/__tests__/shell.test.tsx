@@ -1,13 +1,15 @@
 // @vitest-environment jsdom
-// "!" commands: a message that starts with "!" runs in the session's copy
-// (POST /api/v0/sessions/<id>/commands) instead of going to the agent, and
-// shows as a shell entry between the turns. Against a fake client API.
+// "!" commands. Since AgentBus 0.5 a message that starts with "!" is an
+// ordinary message to the session's agent, which runs the command with its
+// own shell tool. The "!" commands of 0.4 (command.* events) a session may
+// still hold show read-only, as shell entries between the turns. Against a
+// fake client API.
 import { act } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../App';
 import { LiveDataSource } from '../data/LiveDataSource';
 import { ReplayDataSource } from '../data/ReplayDataSource';
-import { bangCommand, commandsAfter, shellRun } from '../data/shell';
+import { commandsAfter, shellRun } from '../data/shell';
 import { buildTurns } from '../data/turns';
 import { CockpitEvent, DataSource, Turn } from '../types';
 import { click, ev, flush, jsonl, render } from './helpers';
@@ -69,8 +71,7 @@ function apiTurns(events: CockpitEvent[]) {
     .reverse();
 }
 
-function fakeService(opts: { events: CockpitEvent[]; command?: (line: string) => Response }) {
-  let nextID = 0;
+function fakeService(opts: { events: CockpitEvent[] }) {
   const reqs: { method: string; path: string; body?: string }[] = [];
   const enc = new TextEncoder();
   const streams: ReadableStreamDefaultController<Uint8Array>[] = [];
@@ -83,10 +84,6 @@ function fakeService(opts: { events: CockpitEvent[]; command?: (line: string) =>
     reqs.push({ method, path: p + url.search, body: init?.body as string | undefined });
     if (p === '/api/v0/sessions') return json({ store: 'st_1', seq, sessions: [row] });
     if (p === '/api/v0/turns' && method === 'GET') return json({ store: 'st_1', seq, turns: apiTurns(opts.events), next_before: null });
-    if (p === '/api/v0/sessions/s1/commands' && method === 'POST') {
-      const { command } = JSON.parse(init!.body as string);
-      return opts.command ? opts.command(command) : json({ session: 's1', command: `cmd_${++nextID}`, state: 'queued' }, 202);
-    }
     if (p === '/api/v0/sessions/s1/events') {
       const kinds = url.searchParams.get('kind')?.split(',');
       const turn = url.searchParams.get('turn');
@@ -145,58 +142,64 @@ afterEach(() => {
 const state = (el: Element) => el.getAttribute('data-state');
 
 describe('A "!" message', () => {
-  it('reads Run, is queued as a command instead of a message, then shows running and its result from events', async () => {
+  it('is sent to the agent as an ordinary message: Send, no Run, no command route', async () => {
     const svc = fakeService({ events: finishedTurn() });
     const r = await mount(svc);
-    expect(goBtn(r).textContent).toBe('Send');
     await type(r, '!ls -la');
-    expect(goBtn(r).textContent).toBe('Run');
-    await type(r, 'hello');
     expect(goBtn(r).textContent).toBe('Send');
-    await type(r, '  ! ls -la');
+    expect(goBtn(r).disabled).toBe(false);
+    expect((r.container.querySelector('#input') as HTMLTextAreaElement).placeholder).not.toContain('!');
     await click(goBtn(r));
     await settle();
-    expect(posts(svc, '/api/v0/turns')).toHaveLength(0);
-    const sent = posts(svc, '/api/v0/sessions/s1/commands');
+    expect(svc.reqs.some((q) => q.path.includes('/commands'))).toBe(false);
+    const sent = posts(svc, '/api/v0/turns');
     expect(sent).toHaveLength(1);
-    expect(JSON.parse(sent[0].body!)).toEqual({ command: 'ls -la' });
-    let [entry] = shells(r);
-    expect(entry.querySelector('.sh-line')?.textContent).toBe('$ ls -la');
-    expect(state(entry)).toBe('queued');
-    expect(entry.querySelector('.sh-exit')?.textContent).toBe('queued');
-    // After the turn's block, in the conversation.
-    expect(entry.previousElementSibling?.classList.contains('tb')).toBe(true);
-    expect((r.container.querySelector('#input') as HTMLTextAreaElement).value).toBe('');
-
-    await svc.push(cmdEvent('queued', 'cmd_1', 'ls -la'));
-    await svc.push(cmdEvent('started', 'cmd_1', 'ls -la'));
-    await settle();
-    [entry] = shells(r);
-    expect(shells(r)).toHaveLength(1);
-    expect(entry.querySelector('.sh-exit')?.textContent).toBe('running…');
-    await svc.push(ran('ls -la', { stdout: 'a\nb\n' }, 'cmd_1'));
-    await settle();
-    [entry] = shells(r);
-    expect(state(entry)).toBe('ran');
-    expect(entry.querySelector('.sh-exit')?.textContent).toBe('exit 0');
-    expect(entry.querySelector('.sh-exit')?.classList.contains('ok')).toBe(true);
-    expect(entry.querySelector('.sh-out')?.textContent).toBe('a\nb');
-    // A late started event does not take it back.
-    await svc.push(cmdEvent('started', 'cmd_1', 'ls -la'));
-    await settle();
-    expect(state(shells(r)[0])).toBe('ran');
+    expect(JSON.parse(sent[0].body!)).toMatchObject({ session: 's1', prompt: '!ls -la' });
+    expect(shells(r)).toHaveLength(0);
     r.unmount();
   });
 
-  it('shows a failed exit, stderr after stdout, and folds long output', async () => {
-    const out = Array.from({ length: SHELL_FOLD_LINES + 8 }, (_, i) => `line ${i + 1}`).join('\n') + '\n';
+  it('a bare "!" is a message too', async () => {
     const svc = fakeService({ events: finishedTurn() });
     const r = await mount(svc);
-    await type(r, '!make');
-    await click(goBtn(r));
-    await settle();
-    await svc.push(ran('make', { exit_code: 2, stdout: out, stderr: 'oops\n', output_bytes: 300000, truncated: true }, 'cmd_1'));
-    await settle();
+    await type(r, '!');
+    expect(goBtn(r).textContent).toBe('Send');
+    expect(goBtn(r).disabled).toBe(false);
+    r.unmount();
+  });
+});
+
+describe('Commands from before 0.5', () => {
+  it('are read on load by their four kinds, placed between turns, one entry each, read-only', async () => {
+    const events = finishedTurn();
+    events.push(cmdEvent('queued', 'cmd_9', 'git status'), cmdEvent('started', 'cmd_9', 'git status'), ran('git status', { stdout: 'clean\n' }, 'cmd_9'));
+    events.push(cmdEvent('queued', 'cmd_10', 'sleep 9'));
+    const svc = fakeService({ events });
+    const r = await mount(svc);
+    expect(
+      svc.reqs.some((q) => q.path === '/api/v0/sessions/s1/events?kind=command.queued%2Ccommand.started%2Ccommand.ran%2Ccommand.failed&limit=1000')
+    ).toBe(true);
+    expect(shells(r).map((s) => [s.querySelector('.sh-line')?.textContent, state(s)])).toEqual([
+      ['$ git status', 'ran'],
+      ['$ sleep 9', 'queued'],
+    ]);
+    const [done, open] = shells(r);
+    // After the turn's block, in the conversation.
+    expect(done.previousElementSibling?.classList.contains('tb')).toBe(true);
+    expect(done.querySelector('.sh-exit')?.textContent).toBe('exit 0');
+    expect(done.querySelector('.sh-exit')?.classList.contains('ok')).toBe(true);
+    expect(done.querySelector('.sh-out')?.textContent).toBe('clean');
+    // One with no end in the record gets none now: 0.5 runs no such command.
+    expect(open.querySelector('.sh-exit')?.textContent).toBe('no end recorded');
+    expect(r.container.querySelectorAll('#convo .shell button:not(.sh-fold)')).toHaveLength(0);
+    r.unmount();
+  });
+
+  it('show a failed exit, stderr after stdout, and fold long output', async () => {
+    const out = Array.from({ length: SHELL_FOLD_LINES + 8 }, (_, i) => `line ${i + 1}`).join('\n') + '\n';
+    const events = finishedTurn();
+    events.push(ran('make', { exit_code: 2, stdout: out, stderr: 'oops\n', output_bytes: 300000, truncated: true }, 'cmd_1'));
+    const r = await mount(fakeService({ events }));
     const [entry] = shells(r);
     expect(entry.querySelector('.sh-exit')?.textContent).toBe('exit 2');
     expect(entry.querySelector('.sh-exit')?.classList.contains('bad')).toBe(true);
@@ -210,14 +213,10 @@ describe('A "!" message', () => {
     r.unmount();
   });
 
-  it('shows why a command did not run', async () => {
-    const svc = fakeService({ events: finishedTurn() });
-    const r = await mount(svc);
-    await type(r, '!ls');
-    await click(goBtn(r));
-    await settle();
-    await svc.push(cmdEvent('failed', 'cmd_1', 'ls', {}, { error: "the session's runner stopped answering while the command ran" }));
-    await settle();
+  it('show why a command did not run', async () => {
+    const events = finishedTurn();
+    events.push(cmdEvent('failed', 'cmd_1', 'ls', {}, { error: "the session's runner stopped answering while the command ran" }));
+    const r = await mount(fakeService({ events }));
     const [entry] = shells(r);
     expect(state(entry)).toBe('failed');
     expect(entry.querySelector('.sh-exit')?.textContent).toBe('did not run');
@@ -225,54 +224,9 @@ describe('A "!" message', () => {
     r.unmount();
   });
 
-  it('shows the API words when refused, and Edit puts the command back', async () => {
-    const svc = fakeService({
-      events: finishedTurn(),
-      command: () => json({ error: 'this session is closed; it runs no more commands' }, 409),
-    });
-    const r = await mount(svc);
-    await type(r, '!ls');
-    await click(goBtn(r));
-    await settle();
-    const [entry] = shells(r);
-    expect(entry.classList.contains('failed')).toBe(true);
-    expect(entry.querySelector('.form-error')?.textContent).toBe('this session is closed; it runs no more commands');
-    await click(entry.querySelector('.pend-back'));
-    expect((r.container.querySelector('#input') as HTMLTextAreaElement).value).toBe('!ls');
-    expect(shells(r)).toHaveLength(0);
-    r.unmount();
-  });
-
-  it('a bare "!" runs nothing', async () => {
-    const svc = fakeService({ events: finishedTurn() });
-    const r = await mount(svc);
-    await type(r, '!  ');
-    expect(goBtn(r).textContent).toBe('Run');
-    expect(goBtn(r).disabled).toBe(true);
-    r.unmount();
-  });
-});
-
-describe('Commands already run', () => {
-  it('are read on load by their four kinds, placed between turns, one entry each', async () => {
-    const events = finishedTurn();
-    events.push(cmdEvent('queued', 'cmd_9', 'git status'), cmdEvent('started', 'cmd_9', 'git status'), ran('git status', { stdout: 'clean\n' }, 'cmd_9'));
-    events.push(cmdEvent('queued', 'cmd_10', 'sleep 9'));
-    const svc = fakeService({ events });
-    const r = await mount(svc);
-    expect(
-      svc.reqs.some((q) => q.path === '/api/v0/sessions/s1/events?kind=command.queued%2Ccommand.started%2Ccommand.ran%2Ccommand.failed&limit=1000')
-    ).toBe(true);
-    expect(shells(r).map((s) => [s.querySelector('.sh-line')?.textContent, state(s)])).toEqual([
-      ['$ git status', 'ran'],
-      ['$ sleep 9', 'queued'],
-    ]);
-    r.unmount();
-  });
-
-  it('are not offered for recorded data', async () => {
+  it('are not read from recorded data', async () => {
     const replay = new ReplayDataSource(jsonl(finishedTurn()));
-    expect((replay as DataSource).runCommand).toBeUndefined();
+    expect((replay as DataSource).getCommands).toBeUndefined();
     const r = await render(<App dataSource={replay} />);
     await settle();
     expect(shells(r)).toHaveLength(0);
@@ -281,13 +235,6 @@ describe('Commands already run', () => {
 });
 
 describe('shell helpers', () => {
-  it('bangCommand takes what follows "!"', () => {
-    expect(bangCommand('!ls')).toBe('ls');
-    expect(bangCommand('  ! git status ')).toBe('git status');
-    expect(bangCommand('hello !ls')).toBeNull();
-    expect(bangCommand('!')).toBe('');
-  });
-
   it('shellRun reads the command kinds and nothing else', () => {
     expect(shellRun(ev({ kind: 'turn.started' }))).toBeNull();
     const r = shellRun(ran('ls', { exit_code: 1, timed_out: true }, 'cmd_1'))!;

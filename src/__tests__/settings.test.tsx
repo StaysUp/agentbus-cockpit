@@ -16,7 +16,6 @@ function policy(): Policy {
     forbid: ['git push'],
     edit: 'session',
     subagents: true,
-    commands: true,
     limits: { max_depth: 2 },
     agent_api: { scope: 'tree', apply: true, read: true },
     network: { contain: 'off', allow: [] },
@@ -90,12 +89,11 @@ describe('the grants as policy keys', () => {
   it('writes the grants into their keys and keeps every other key', () => {
     const p = policy();
     const g = { ...grantsOf(p), network: 'list' as const, hosts: ['github.com'], sandbox: 'on' as const,
-      read: ['~/.aws/config'], agentsApply: false, commands: false };
+      read: ['~/.aws/config'], agentsApply: false };
     const out = withGrants(p, g);
     expect(out.network).toEqual({ contain: 'on', allow: ['github.com'] });
     expect(out.sandbox).toEqual({ mode: 'on', read: ['~/.aws/config'] });
     expect(out.agent_api).toEqual({ scope: 'tree', apply: false, read: true });
-    expect(out.commands).toBe(false);
     expect(out.forbid).toEqual(['git push']);
     expect(grantsOf(out)).toEqual(g);
     // Off empties the list; on keeps it.
@@ -126,7 +124,7 @@ describe('the settings routes', () => {
     const got = await src.getPolicy();
     expect(got.etag).toBe('"v1"');
     await src.putPolicy(got.value, got.etag);
-    expect(seen[1]).toMatchObject({ method: 'PUT', ifMatch: '"v1"', body: { commands: true } });
+    expect(seen[1]).toMatchObject({ method: 'PUT', ifMatch: '"v1"', body: { subagents: true } });
     await expect(src.putPolicy(got.value, '"v0"')).rejects.toMatchObject({ status: 412 });
     expect((await src.getInstructions()).value).toBe('hi');
     // No ETag is an error, never a write that overwrites whatever is there.
@@ -169,22 +167,20 @@ describe('the Settings page', () => {
     await setValue(container.querySelector('textarea[name="hosts"]'), 'github.com\nregistry.npmjs.org');
     await pick(container, '[data-grant="apply"]');
     await click(container.querySelector('input[name="agents_apply"]'));
-    await pick(container, '[data-grant="commands"]');
-    await click(container.querySelector('input[name="commands"]'));
+    // There is no "!" commands grant: a "!" message goes to the agent.
+    expect(container.querySelector('[data-grant="commands"]')).toBeNull();
     // The table shows the drafts before they are saved.
     const row = (k: string) => container.querySelector(`[data-grant="${k}"]`)!.textContent;
     expect(row('read')).toContain('1 file');
     expect(row('sandbox')).toContain('On');
     expect(row('network')).toContain('A list · 2 hosts');
     expect(row('apply')).toContain('No');
-    expect(row('commands')).toContain('No');
     await click(button(container, 'Save grants'));
     await flush();
     expect(api.putPolicy).toHaveBeenCalledTimes(1);
     expect(api.putPolicy.mock.calls[0][1]).toBe('"3"');
     expect(state.policy).toMatchObject({
       forbid: ['git push'],
-      commands: false,
       agent_api: { apply: false, scope: 'tree' },
       network: { contain: 'on', allow: ['github.com', 'registry.npmjs.org'] },
       sandbox: { mode: 'on', read: ['~/.aws/config'] },
@@ -193,7 +189,7 @@ describe('the Settings page', () => {
     // The page read the policy again: the JSON shows what is stored now.
     await pick(container, '[data-part="policy"]');
     const json = (container.querySelector('textarea[name="policy"]') as HTMLTextAreaElement).value;
-    expect(JSON.parse(json).commands).toBe(false);
+    expect(JSON.parse(json).agent_api.apply).toBe(false);
   });
 
   it('refuses a stale write and says so', async () => {
@@ -201,15 +197,15 @@ describe('the Settings page', () => {
     const { container } = await render(<SettingsPage api={api} onBack={() => {}} />);
     await flush();
     state.info.version = 9; // changed elsewhere
-    await pick(container, '[data-grant="commands"]');
-    await click(container.querySelector('input[name="commands"]'));
+    await pick(container, '[data-grant="apply"]');
+    await click(container.querySelector('input[name="agents_apply"]'));
     await click(button(container, 'Save grants'));
     await flush();
     expect(container.textContent).toContain('Changed elsewhere since this page read it.');
-    expect(state.policy.commands).toBe(true);
+    expect(state.policy.agent_api?.apply).toBe(true);
     await click(button(container, 'Read again'));
     await flush();
-    expect((container.querySelector('input[name="commands"]') as HTMLInputElement).checked).toBe(true);
+    expect((container.querySelector('input[name="agents_apply"]') as HTMLInputElement).checked).toBe(true);
   });
 
   it('saves the policy as JSON, and refuses JSON that does not parse', async () => {
@@ -236,11 +232,11 @@ describe('the Settings page', () => {
     await pick(container, '[data-part="instructions"]');
     await setValue(container.querySelector('textarea[name="instructions"]'), 'Draft, not saved.');
     await pick(container, '[data-part="grants"]');
-    await pick(container, '[data-grant="commands"]');
-    await click(container.querySelector('input[name="commands"]'));
+    await pick(container, '[data-grant="apply"]');
+    await click(container.querySelector('input[name="agents_apply"]'));
     await click(button(container, 'Save grants'));
     await flush();
-    expect(state.policy.commands).toBe(false);
+    expect(state.policy.agent_api?.apply).toBe(false);
     await pick(container, '[data-part="instructions"]');
     expect((container.querySelector('textarea[name="instructions"]') as HTMLTextAreaElement).value).toBe('Draft, not saved.');
     expect(api.getInstructions).toHaveBeenCalledTimes(1);
@@ -256,7 +252,7 @@ describe('the Settings page', () => {
     expect(parts).toEqual(['grants', 'policy', 'instructions']);
     expect(container.querySelector('.pg-list .on')!.getAttribute('data-part')).toBe('grants');
     expect(container.querySelector('.pg-main .colhead')!.textContent).toContain('Grants');
-    expect(container.querySelectorAll('.pg-main tr[data-grant]')).toHaveLength(5);
+    expect(container.querySelectorAll('.pg-main tr[data-grant]')).toHaveLength(4);
     expect(container.querySelector('.pg-side .colhead')!.textContent).toBe("Files in a session's home");
     await pick(container, '[data-grant="network"]');
     expect(container.querySelector('.pg-side .colhead')!.textContent).toBe('Network');
