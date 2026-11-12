@@ -329,6 +329,55 @@ describe('ConnectStep', () => {
     noLogin(container, 'claude.example');
   });
 
+  // A Cancel the service refuses because the login ended already (409),
+  // here after a connect that succeeded, never sticks: the step shows how
+  // the login ended. Two quick clicks send one cancel.
+  it('a late or doubled Cancel does not stick on how the login ended', async () => {
+    const api = fakeApi();
+    let cancels = 0;
+    api.cancel = vi.fn(async () => {
+      cancels++;
+      (api as { get: SubscriptionApi['get'] }).get = vi.fn(async () => ({ harness: 'claude', state: 'connected' as const, output: [], paste: false }));
+      throw new Error('no login is running for claude');
+    });
+    const { container } = await render(<ConnectStep harness="claude" api={api} />);
+    await flush();
+    await click(container.querySelector('.cs-connect'));
+    await flush();
+    const btn = container.querySelector('.cs-cancel') as HTMLButtonElement;
+    await act(async () => {
+      btn.click();
+      btn.click();
+    });
+    expect(cancels).toBe(1);
+    await waitFor(() => phase(container) === 'connected', 'connected');
+    expect(container.textContent).not.toContain('no login is running');
+  });
+
+  // A read that fails while a cancel is on its way ends that login; the
+  // next connect's Cancel works, not stuck on "Cancelling".
+  it('a poll error during a cancel leaves the next Cancel usable', async () => {
+    const api = fakeApi();
+    let release: () => void = () => {};
+    api.cancel = vi.fn(() => new Promise<void>((r) => (release = r)));
+    const { container } = await render(<ConnectStep harness="claude" api={api} />);
+    await flush();
+    await click(container.querySelector('.cs-connect'));
+    await flush();
+    await click(container.querySelector('.cs-cancel'));
+    (api as { get: SubscriptionApi['get'] }).get = vi.fn(async () => {
+      throw new Error('control could not be reached');
+    });
+    await waitFor(() => phase(container) === 'failed', 'failed');
+    await act(async () => release());
+    (api as { get: SubscriptionApi['get'] }).get = vi.fn(async () => ({ harness: 'claude', state: 'running' as const, output: ['https://claude.example/a'], paste: true }));
+    await click(container.querySelector('.cs-connect'));
+    await flush();
+    const next = container.querySelector('.cs-cancel') as HTMLButtonElement;
+    expect(next.textContent).toBe('Cancel');
+    expect(next.disabled).toBe(false);
+  });
+
   it('offers no Cancel where the service cannot cancel', async () => {
     const api = fakeApi();
     const { container } = await render(<ConnectStep harness="claude" api={api} />);

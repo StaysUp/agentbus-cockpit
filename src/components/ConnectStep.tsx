@@ -53,6 +53,14 @@ export const ConnectStep: React.FC<{ harness: string; api: SubscriptionApi }> = 
   // render, is ignored.
   const sendingRef = useRef(false);
   const startingRef = useRef(false);
+  const cancellingRef = useRef(false);
+  // Cancel's state goes once the login it was for has ended, however it
+  // ended, so it never sticks on the outcome or on the next login.
+  const cancelDone = () => {
+    cancellingRef.current = false;
+    setCancelling(false);
+    setCancelError(null);
+  };
   const alive = useRef(true);
   // Set on every mount: StrictMode mounts twice.
   useEffect(() => {
@@ -87,6 +95,9 @@ export const ConnectStep: React.FC<{ harness: string; api: SubscriptionApi }> = 
   // A running login is read again until it ends; then the list says what is
   // kept. One read at a time: the next is asked for once the last answered.
   const running = view?.state === 'running';
+  // Read by a cancel's answer, which can land after the login ended.
+  const runningRef = useRef(false);
+  runningRef.current = running;
   useEffect(() => {
     if (!running) return;
     let stopped = false;
@@ -105,7 +116,7 @@ export const ConnectStep: React.FC<{ harness: string; api: SubscriptionApi }> = 
             // read again says until when. A cancelled one shows as it was
             // before.
             setView(null);
-            setCancelling(false);
+            cancelDone();
             if (v.state === 'failed' && !v.cancelled) {
               setFailed(v.error || 'the login ended without connecting');
               setRejected(!!v.rejected);
@@ -117,6 +128,7 @@ export const ConnectStep: React.FC<{ harness: string; api: SubscriptionApi }> = 
           (e: Error) => {
             if (!alive.current || stopped) return;
             setView(null);
+            cancelDone();
             setFailed(e.message);
           },
         );
@@ -172,7 +184,7 @@ export const ConnectStep: React.FC<{ harness: string; api: SubscriptionApi }> = 
     setCode('');
     setSent(false);
     setSendError(null);
-    setCancelError(null);
+    cancelDone();
     api.connect(harness).then(
       (v) => {
         startingRef.current = false;
@@ -221,16 +233,22 @@ export const ConnectStep: React.FC<{ harness: string; api: SubscriptionApi }> = 
   };
 
   // Cancel stops the login on control; the next read sees it end.
+  // A second click in the same moment is ignored. A refused cancel (the
+  // login had ended already: 409) shows its words only until the next read
+  // says how the login ended, which clears them (cancelDone).
   const cancel = () => {
-    if (!api.cancel || cancelling) return;
+    if (!api.cancel || cancellingRef.current) return;
+    cancellingRef.current = true;
     setCancelling(true);
     setCancelError(null);
     api.cancel(harness).then(
       () => undefined,
       (e: Error) => {
+        cancellingRef.current = false;
         if (!alive.current) return;
         setCancelling(false);
-        setCancelError(e.message);
+        // The login ended meanwhile: how it ended is what shows.
+        if (runningRef.current) setCancelError(e.message);
       },
     );
   };
