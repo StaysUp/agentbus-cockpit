@@ -18,6 +18,7 @@ import { ReplayDataSource } from './data/ReplayDataSource';
 import { applyList, countedIn, isNewerList, ListCursor, StreamedCost, streamedCost } from './data/sessionList';
 import { addLiveEvent, LiveTurns, mergeLive, noteEventTime } from './data/liveStatus';
 import { refreshNow } from './utils/useNow';
+import { versionLabel } from './utils/format';
 import { ApiTurn, QueueSource } from './data/jobs';
 import { useQueue } from './data/useJobs';
 import { addRun, shellRun } from './data/shell';
@@ -36,6 +37,7 @@ import {
   Started,
   Turn,
   TurnDetail,
+  VersionInfo,
 } from './types';
 
 // No pending messages, the same array each time.
@@ -569,6 +571,20 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
   // the Runners page.
   const runners = useRunners(loadRunners);
   const runnersOnline = runners.runners ? runners.runners.filter((r) => r.online).length : undefined;
+  // Which build the service is, read once: it is fixed for the life of the
+  // process. A source without the route, or a read that fails, shows none.
+  const [version, setVersion] = useState<VersionInfo | null>(null);
+  useEffect(() => {
+    if (!dataSource.getVersion) return;
+    let live = true;
+    dataSource.getVersion().then(
+      (v) => live && setVersion(v),
+      () => {},
+    );
+    return () => {
+      live = false;
+    };
+  }, [dataSource]);
   const removeAgent = async (id: string) => {
     await dataSource.removeAgent!(id);
     setAgentsKey((k) => k + 1);
@@ -954,7 +970,14 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
   // The pages of their own, each at its address. A source without the
   // page's routes shows the cockpit.
   if (pageShown && page === 'runners') {
-    return <RunnersPage runners={runners.runners} error={runners.error} onBack={() => goPage('cockpit')} />;
+    return (
+      <RunnersPage
+        runners={runners.runners}
+        error={runners.error}
+        queue={queueView ? { turns: queueView.turns, error: queueView.error } : undefined}
+        onBack={() => goPage('cockpit')}
+      />
+    );
   }
   if (pageShown && page === 'settings') {
     return <SettingsPage api={settingsApi!} onBack={() => goPage('cockpit')} />;
@@ -977,6 +1000,7 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
         onRemoveAgent={canKeepAgents && dataSource.removeAgent ? removeAgent : undefined}
         onRunners={loadRunners ? () => goPage('runners') : undefined}
         runnersOnline={runnersOnline}
+        version={version ? versionLabel(version) : undefined}
         onSettings={settingsApi ? () => goPage('settings') : undefined}
       />
 

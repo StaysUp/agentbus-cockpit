@@ -9,7 +9,7 @@ import {
   Versioned,
   withGrants,
 } from "../data/settings";
-import { PageFrame } from "./PageFrame";
+import { ColHead, PageFrame } from "./PageFrame";
 
 // The Settings page (/settings): control's settings, one global set for every machine.
 // The grants (files a session gets, the sandbox, the network, and two
@@ -43,6 +43,9 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ api, onBack }) => {
   // Which part is saving, and what the last save said.
   const [busy, setBusy] = useState<string | null>(null);
   const [message, setMessage] = useState<{ part: string; text: string; ok: boolean } | null>(null);
+  // The part on screen, and the grant picked in it.
+  const [part, setPart] = useState<Part>("grants");
+  const [grant, setGrant] = useState<GrantKey>("read");
 
   // read reads the settings' state, and the parts named: each part read
   // resets its own drafts, and leaves the other part's as they are.
@@ -153,160 +156,370 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ api, onBack }) => {
   };
 
   const info = loaded?.info.value;
+  const ready = !!(loaded && grants && info);
 
-  return (
-    <PageFrame title="Settings" onBack={onBack}>
-      <div className="new-dialog settings-dialog settings-page">
-        {loadError && (
-          <div className="form-error">
-            {loadError}{" "}
-            <button type="button" className="use-recorded" onClick={load}>
-              Read again
-            </button>
-          </div>
-        )}
-        {!loaded && !loadError && <div className="nd-note">Reading…</div>}
-        {loaded && grants && info && (
-          <fieldset className="ad-set" disabled={!!busy}>
-            {info.changed && (
-              <div className="nd-note">Last changed {new Date(info.changed).toLocaleString()}.</div>
-            )}
+  // The left column: the three parts, each saved on its own.
+  const parts: [Part, string, string][] = [
+    ["grants", "Grants", "Files, sandbox, network and two actions"],
+    ["policy", "Policy", "All of it, as JSON"],
+    ["instructions", "Instructions", "What every turn is told"],
+  ];
+  const list = parts.map(([k, name, sub]) => (
+    <button
+      type="button"
+      key={k}
+      className={`prow${part === k ? " on" : ""}`}
+      data-part={k}
+      aria-current={part === k}
+      onClick={() => setPart(k)}
+    >
+      <span className="pr-n">
+        {name}
+        {k === "grants" && <span className="pl-n">{GRANTS.length}</span>}
+      </span>
+      <span className="pr-m2">{sub}</span>
+    </button>
+  ));
 
-            <section className="st-part" aria-label="Grants">
-              <div className="st-head">Grants</div>
-              <div className="nd-note">The same on every machine.</div>
-              <label>
-                <span>Files a session gets in its home</span>
-                <textarea
-                  name="read"
-                  rows={3}
-                  value={readText}
-                  onChange={(e) => setReadText(e.target.value)}
-                  placeholder="~/.aws/config"
-                  spellCheck={false}
-                />
-                <span className="nd-note">One per line, each starting with ~/. Used when the sandbox is on.</span>
-              </label>
-              <label>
-                <span>Sandbox</span>
-                <Seg
-                  name="Sandbox"
-                  value={grants.sandbox}
-                  options={[
-                    ["off", "Off"],
-                    ["on", "On"],
-                  ]}
-                  onChange={(v) => setGrants({ ...grants, sandbox: v as Grants["sandbox"] })}
-                />
-              </label>
-              <label>
-                <span>Network</span>
-                <Seg
-                  name="Network"
-                  value={grants.network}
-                  options={[
-                    ["off", "Off"],
-                    ["list", "A list"],
-                    ["on", "On"],
-                  ]}
-                  onChange={(v) => setGrants({ ...grants, network: v as Grants["network"] })}
-                />
-                <span className="nd-note">
-                  {grants.network === "off" && "Agents reach only their runner and control."}
-                  {grants.network === "list" && "Agents reach their runner, control and these hosts. An empty list is off."}
-                  {grants.network === "on" && "Agents reach any host."}
-                </span>
-              </label>
-              {grants.network === "list" && (
-                <label>
-                  <span>Hosts</span>
-                  <textarea
-                    name="hosts"
-                    rows={3}
-                    value={hostsText}
-                    onChange={(e) => setHostsText(e.target.value)}
-                    placeholder="github.com"
-                    spellCheck={false}
-                  />
-                  <span className="nd-note">One per line. *.example.com takes every name under it.</span>
-                </label>
-              )}
-              <label className="st-check">
-                <input
-                  type="checkbox"
-                  name="agents_apply"
-                  checked={grants.agentsApply}
-                  onChange={(e) => setGrants({ ...grants, agentsApply: e.target.checked })}
-                />
-                <span>Agents may apply changes to your folder</span>
-              </label>
-              <label className="st-check">
-                <input
-                  type="checkbox"
-                  name="commands"
-                  checked={grants.commands}
-                  onChange={(e) => setGrants({ ...grants, commands: e.target.checked })}
-                />
-                <span>! commands run</span>
-              </label>
-              <div className="nd-actions">
-                <button type="button" className="connect-go" onClick={saveGrants}>
-                  Save grants
-                </button>
+  const saveBtn = (label: string, onClick: () => void) => (
+    <button type="button" className="head-btn pg-save" disabled={!ready || !!busy} onClick={onClick}>
+      {busy === part ? "Saving…" : label}
+    </button>
+  );
+
+  const head = (title: string, action?: React.ReactNode) => <ColHead title={title} action={action} />;
+  const status = (
+    <>
+      {loadError && (
+        <div className="form-error">
+          {loadError}{" "}
+          <button type="button" className="use-recorded" onClick={load}>
+            Read again
+          </button>
+        </div>
+      )}
+      {!loaded && !loadError && <div className="nd-note">Reading…</div>}
+    </>
+  );
+
+  let main: React.ReactNode;
+  let side: React.ReactNode;
+  if (part === "grants") {
+    const g = grants;
+    const sel = GRANTS.find((x) => x[0] === grant) ?? GRANTS[0];
+    main = (
+      <>
+        {head("Grants", saveBtn("Save grants", saveGrants))}
+        <div className="colbody pg-body">
+          {status}
+          {ready && g && (
+            <>
+              <div className="tab-sum">
+                <b>{GRANTS.length} grants</b>
+                <span className="sep">·</span>the same on every machine
+                <span className="sep">·</span>pick one to change it
               </div>
               {note("grants")}
-            </section>
-
-            <section className="st-part" aria-label="Policy">
-              <div className="st-head">Policy</div>
-              <div className="nd-note">All of it, as JSON. A key left out takes its default.</div>
-              <textarea
-                name="policy"
-                className="st-code"
-                rows={12}
-                value={policyText}
-                onChange={(e) => setPolicyText(e.target.value)}
-                spellCheck={false}
-              />
-              <div className="nd-actions">
-                <button type="button" className="connect-go" onClick={savePolicy}>
-                  Save policy
-                </button>
+              <table className="grid pg-t" aria-label="Grants">
+                <thead>
+                  <tr>
+                    <th />
+                    <th>Grant</th>
+                    <th>Now</th>
+                    <th>Policy key</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {GRANTS.map(([k, name, key]) => (
+                    <tr
+                      key={k}
+                      data-grant={k}
+                      className={k === sel[0] ? "sel" : ""}
+                      aria-selected={k === sel[0]}
+                      onClick={() => setGrant(k)}
+                    >
+                      <td className="c">›</td>
+                      <td>{name}</td>
+                      <td className="nw">{grantValue(k, g, readText, hostsText)}</td>
+                      <td className="nw">
+                        <code>{key}</code>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </>
+          )}
+        </div>
+      </>
+    );
+    side = (
+      <>
+        {head(sel[1])}
+        <div className="colbody pg-body">
+          {ready && g && (
+            <fieldset className="pg-edit" disabled={!!busy}>
+              {sel[0] === "read" && (
+                <label>
+                  <span className="pg-note">Files under ~ a session gets in its own home. Used when the sandbox is on.</span>
+                  <textarea
+                    name="read"
+                    rows={5}
+                    value={readText}
+                    onChange={(e) => setReadText(e.target.value)}
+                    placeholder="~/.aws/config"
+                    spellCheck={false}
+                  />
+                  <span className="nd-note">One per line, each starting with ~/.</span>
+                </label>
+              )}
+              {sel[0] === "sandbox" && (
+                <label>
+                  <span className="pg-note">On, each session runs in a sandbox with its own home.</span>
+                  <Seg
+                    name="Sandbox"
+                    value={g.sandbox}
+                    options={[
+                      ["off", "Off"],
+                      ["on", "On"],
+                    ]}
+                    onChange={(v) => setGrants({ ...g, sandbox: v as Grants["sandbox"] })}
+                  />
+                </label>
+              )}
+              {sel[0] === "network" && (
+                <>
+                  <label>
+                    <span className="pg-note">
+                      {g.network === "off" && "Agents reach only their runner and control."}
+                      {g.network === "list" && "Agents reach their runner, control and these hosts. An empty list is off."}
+                      {g.network === "on" && "Agents reach any host."}
+                    </span>
+                    <Seg
+                      name="Network"
+                      value={g.network}
+                      options={[
+                        ["off", "Off"],
+                        ["list", "A list"],
+                        ["on", "On"],
+                      ]}
+                      onChange={(v) => setGrants({ ...g, network: v as Grants["network"] })}
+                    />
+                  </label>
+                  {g.network === "list" && (
+                    <label>
+                      <span className="sub-h">Hosts</span>
+                      <textarea
+                        name="hosts"
+                        rows={5}
+                        value={hostsText}
+                        onChange={(e) => setHostsText(e.target.value)}
+                        placeholder="github.com"
+                        spellCheck={false}
+                      />
+                      <span className="nd-note">One per line. *.example.com takes every name under it.</span>
+                    </label>
+                  )}
+                </>
+              )}
+              {sel[0] === "apply" && (
+                <>
+                  <p className="pg-note">May a turn's own token apply its changes to your folder. Your own token always may.</p>
+                  <Switch
+                    name="agents_apply"
+                    label="Agents may apply changes to your folder"
+                    on={g.agentsApply}
+                    onChange={(v) => setGrants({ ...g, agentsApply: v })}
+                  />
+                </>
+              )}
+              {sel[0] === "commands" && (
+                <>
+                  <p className="pg-note">May the ! commands you type in a session run.</p>
+                  <Switch name="commands" label="! commands run" on={g.commands} onChange={(v) => setGrants({ ...g, commands: v })} />
+                </>
+              )}
+              <p className="f-note">A change here is kept on this page until you save the grants.</p>
+            </fieldset>
+          )}
+        </div>
+      </>
+    );
+  } else if (part === "policy") {
+    let keys: [string, string][] = [];
+    if (loaded) keys = flatKeys(loaded.policy.value);
+    main = (
+      <>
+        {head("Policy", saveBtn("Save policy", savePolicy))}
+        <div className="colbody pg-body">
+          {status}
+          {ready && (
+            <>
+              <div className="tab-sum">
+                <b>{plural(loaded ? Object.keys(loaded.policy.value).length : 0, "key")}</b>
+                <span className="sep">·</span>all of it, as JSON
+                <span className="sep">·</span>a key left out takes its default
               </div>
               {note("policy")}
-            </section>
-
-            <section className="st-part" aria-label="Instructions">
-              <div className="st-head">Instructions</div>
-              <div className="nd-note">Every turn gets them. {"{session}"} becomes the turn's session id.</div>
               <textarea
-                name="instructions"
-                rows={6}
-                value={instructions}
-                onChange={(e) => setInstructions(e.target.value)}
+                name="policy"
+                className="st-code pg-code"
+                value={policyText}
+                onChange={(e) => setPolicyText(e.target.value)}
+                disabled={!!busy}
+                spellCheck={false}
               />
-              <div className="nd-actions">
-                <button
-                  type="button"
-                  className="connect-go"
-                  onClick={() =>
-                    save("instructions", () => api.putInstructions(instructions, loaded.instructions.etag), {
-                      policy: false,
-                      instructions: true,
-                    })
-                  }
-                >
-                  Save instructions
-                </button>
+            </>
+          )}
+        </div>
+      </>
+    );
+    side = (
+      <>
+        {head("As saved")}
+        <div className="colbody pg-body">
+          {ready && (
+            <>
+              <p className="pg-note">The next turn runs under what you save. No restart.</p>
+              <table className="grid pg-kv" aria-label="Saved policy">
+                <tbody>
+                  {keys.map(([k, v]) => (
+                    <tr key={k}>
+                      <td>
+                        <code>{k}</code>
+                      </td>
+                      <td>
+                        <code className="pg-val">{v}</code>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </>
+          )}
+        </div>
+      </>
+    );
+  } else {
+    const words = instructions.trim() ? instructions.trim().split(/\s+/).length : 0;
+    main = (
+      <>
+        {head(
+          "Instructions",
+          saveBtn("Save instructions", () =>
+            loaded &&
+            save("instructions", () => api.putInstructions(instructions, loaded.instructions.etag), {
+              policy: false,
+              instructions: true,
+            }),
+          ),
+        )}
+        <div className="colbody pg-body">
+          {status}
+          {ready && (
+            <>
+              <div className="tab-sum">
+                <b>{plural(words, "word")}</b>
+                <span className="sep">·</span>every turn gets them
               </div>
               {note("instructions")}
-            </section>
-          </fieldset>
-        )}
-      </div>
-    </PageFrame>
+              <textarea
+                name="instructions"
+                className="pg-text"
+                value={instructions}
+                onChange={(e) => setInstructions(e.target.value)}
+                disabled={!!busy}
+              />
+            </>
+          )}
+        </div>
+      </>
+    );
+    side = (
+      <>
+        {head("How it applies")}
+        <div className="colbody pg-body">
+          <p className="pg-note">
+            Every turn gets these words. <code>{"{session}"}</code> becomes the turn's session id.
+          </p>
+          <p className="f-note first">At most 64 KiB. The next turn gets what you save.</p>
+        </div>
+      </>
+    );
+  }
+
+  return (
+    <PageFrame
+      title="Settings"
+      onBack={onBack}
+      list={list}
+      foot={
+        <>
+          One set for every machine. Each part saves on its own.
+          {info?.changed && <> Last changed {new Date(info.changed).toLocaleString()}.</>}
+        </>
+      }
+      main={main}
+      side={side}
+    />
   );
 };
+
+type Part = "grants" | "policy" | "instructions";
+type GrantKey = "read" | "sandbox" | "network" | "apply" | "commands";
+
+// The grants as rows: the key, its name, and the policy key it writes.
+const GRANTS: [GrantKey, string, string][] = [
+  ["read", "Files in a session's home", "sandbox.read"],
+  ["sandbox", "Sandbox", "sandbox.mode"],
+  ["network", "Network", "network"],
+  ["apply", "Agents may apply changes", "agent_api.apply"],
+  ["commands", "! commands run", "commands"],
+];
+
+// flatKeys is the policy as rows: a nested key as its dotted path
+// (limits.max_depth), each value as JSON, an empty list as "none".
+function flatKeys(v: unknown, at = ""): [string, string][] {
+  if (v && typeof v === "object" && !Array.isArray(v)) {
+    return Object.entries(v as Record<string, unknown>).flatMap(([k, x]) => flatKeys(x, at ? `${at}.${k}` : k));
+  }
+  if (Array.isArray(v) && v.length === 0) return [[at, "none"]];
+  return [[at, Array.isArray(v) ? v.map((x) => (typeof x === "string" ? x : JSON.stringify(x))).join(", ") : typeof v === "string" ? v : JSON.stringify(v)]];
+}
+
+const plural = (n: number, one: string) => `${n} ${n === 1 ? one : `${one}s`}`;
+
+// grantValue is a grant as the draft holds it now, in a few words.
+function grantValue(k: GrantKey, g: Grants, readText: string, hostsText: string): React.ReactNode {
+  switch (k) {
+    case "read": {
+      const n = lines(readText).length;
+      return n ? plural(n, "file") : <span className="dim">none</span>;
+    }
+    case "sandbox":
+      return g.sandbox === "on" ? "On" : "Off";
+    case "network":
+      return g.network === "list" ? `A list · ${plural(lines(hostsText).length, "host")}` : g.network === "on" ? "On" : "Off";
+    case "apply":
+      return g.agentsApply ? "Yes" : "No";
+    case "commands":
+      return g.commands ? "Yes" : "No";
+  }
+}
+
+// Switch is an on/off control in the mockup's look, over a checkbox.
+const Switch: React.FC<{ name: string; label: string; on: boolean; onChange: (v: boolean) => void }> = ({
+  name,
+  label,
+  on,
+  onChange,
+}) => (
+  <label className="pg-switch">
+    <input type="checkbox" name={name} checked={on} onChange={(e) => onChange(e.target.checked)} />
+    <span className={`sw${on ? " on" : ""}`} aria-hidden="true" />
+    <span>{label}</span>
+  </label>
+);
 
 const Seg: React.FC<{
   name: string;

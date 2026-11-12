@@ -278,8 +278,21 @@ export interface RunnerInfo {
   // It asked control for work in the last minute.
   online: boolean;
   last_seen: string;
+  // When it first enrolled, and how many turns it runs at once.
+  enrolled?: string;
+  capacity?: number;
   labels: string[];
+  // From its report; absent before its first one.
+  os?: string;
+  arch?: string;
   harnesses: RunnerHarness[];
+}
+
+// Which build the service is, from GET /api/v0/version.
+export interface VersionInfo {
+  version: string;
+  commit?: string;
+  modified?: boolean;
 }
 
 // What a person sets on a saved agent (POST and PUT /api/v0/agents).
@@ -465,6 +478,8 @@ export interface DataSource {
   // The runners and connectors control knows (GET /api/v0/runners). null
   // when the service has no such route.
   listRunners?(): Promise<RunnerInfo[] | null>;
+  // GET /api/v0/version: which build the service is. Read once.
+  getVersion?(): Promise<VersionInfo>;
   listAgents?(): Promise<SavedAgent[]>;
   // Where a queued message's turn stands, by the session and turn
   // POST /api/v0/turns answered with.

@@ -275,7 +275,7 @@ tr.ev-open > td { background: #FBFBFA; border-bottom: 1px solid var(--line); pad
 #agents .colbody .agent { margin: 0; }
 #sessions .colbody .sess { margin: 0; }
 #sessions .col-lab { padding: 0.75rem 0.75rem 0; }
-.brand-foot { margin-top: auto; padding: 0 0.375rem; display: flex; flex-direction: column; gap: 0.375rem; }
+.brand-foot { flex: none; display: flex; flex-direction: column; gap: 0.375rem; }
 .brand-foot .brand { padding: 0; font-size: 0.9062rem; }
 .brand-foot .gw { padding: 0; margin: 0; }
 #c-head { padding: 0 1.5rem; height: 3.5rem; }
@@ -423,11 +423,6 @@ tr.ev-open > td { background: #FBFBFA; border-bottom: 1px solid var(--line); pad
 #agents .colhead .manage-agents { margin-left: auto; }
 .agents-dialog { width: 28rem; max-height: calc(100vh - 3rem); overflow-y: auto; }
 .settings-dialog { width: 34rem; max-height: calc(100vh - 3rem); overflow-y: auto; }
-.st-part { display: flex; flex-direction: column; gap: 0.5rem; padding-bottom: 0.75rem; border-bottom: 1px solid var(--line2); }
-.st-head { font-size: max(11px, 0.75rem); font-weight: 600; color: var(--ink); }
-.new-dialog label.st-check { flex-direction: row; align-items: center; gap: 0.5rem; }
-.new-dialog label.st-check > span { color: var(--ink2); }
-.new-dialog textarea.st-code, .settings-dialog textarea[name="read"], .settings-dialog textarea[name="hosts"] { font-family: var(--mono); font-size: max(11px, 0.6875rem); }
 .agent-form { display: flex; flex-direction: column; gap: 0.625rem; }
 .ad-set { border: 0; margin: 0; padding: 0; min-width: 0; display: flex; flex-direction: column; gap: 0.625rem; }
 .agent-form label > .nd-seg { margin-top: 1px; }
@@ -592,7 +587,10 @@ label.nd-check > span { font-size: max(11px, 0.75rem); color: var(--ink); }
 .bus-card .bc-a { display: flex; align-items: center; gap: 0.4rem; padding: 0; margin: 0; font-size: max(11px, 0.65rem); color: var(--ink2); }
 .bus-card .bc-a .live { width: 0.35rem; height: 0.35rem; transform: none; }
 .bus-card .disconnect { flex: none; align-self: center; }
-.brand-foot { padding: 0; }
+.brand-foot { padding: 0.6rem 0.75rem 0.8rem; border-top: 1px solid var(--line); }
+#agents { min-height: 0; overflow: hidden; }
+.bus-card .bc-t { min-width: 0; flex: 1; }
+.bus-card .bc-v { display: block; margin-top: 0.15rem; padding-left: 0.75rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); font-size: max(11px, 0.6rem); color: var(--ink3); }
 
 /* ---------- one strip style: every label alike, every value alike ---------- */
 /* Labels are the strip's direct spans only; anything inside a value (a lower-bound
@@ -792,14 +790,6 @@ label.nd-check > span { font-size: max(11px, 0.75rem); color: var(--ink); }
 .ch-cmds summary { font-size: max(11px, 0.6875rem); color: var(--ink3); cursor: pointer; }
 .ch-conflicts { margin: 0.25rem 0 0; padding-left: 1rem; }
 
-/* The runners on the Runners page: a dot, the name, when last seen, the harnesses. */
-.runners { display: flex; flex-direction: column; gap: 0.25rem; }
-.runner { display: flex; align-items: flex-start; gap: 0.5rem; padding: 0.25rem 0; }
-.runner .live, .runner .gone { margin-top: 0.4rem; width: 0.4375rem; height: 0.4375rem; }
-.gone { border-radius: 50%; background: var(--ink3); opacity: .45; display: inline-block; flex: none; }
-.runner .ag-t b { font-size: 0.8125rem; display: flex; align-items: baseline; gap: 0.375rem; }
-.runner .rn-role { font-size: max(11px, 0.6875rem); font-weight: 500; color: var(--ink3); }
-.runner .rn-h { white-space: normal; overflow-wrap: anywhere; }
 .runners-err, .runners-none { font-size: max(11px, 0.75rem); margin: 0; }
 
 /* What AgentBus added to a turn, and the request blocks that hold it. */
@@ -827,11 +817,97 @@ label.nd-check > span { font-size: max(11px, 0.75rem); color: var(--ink); }
 .side-link:hover { background: rgba(0,0,0,.04); color: var(--ink); }
 .side-link .sl-n { margin-left: auto; font-size: max(11px, 0.75rem); color: var(--ink3); font-variant-numeric: tabular-nums; }
 
-/* A page of its own (/runners, /settings): a link back, a title, the body. */
-.page { width: 100vw; height: 100vh; overflow-y: auto; background: var(--bg); }
-.page-head { display: flex; align-items: baseline; gap: 1rem; max-width: 40rem; margin: 0 auto; padding: 1.5rem 1rem 1rem; }
-.page-back { font-size: 0.8125rem; color: var(--ink2); text-decoration: none; }
-.page-back:hover { color: var(--ink); text-decoration: underline; text-underline-offset: 2px; }
-.page-title { margin: 0; font-size: 1.125rem; font-weight: 650; color: var(--ink); }
-.page-body { max-width: 40rem; margin: 0 auto; padding: 0 1rem 2rem; }
-.settings-dialog.settings-page { width: auto; max-height: none; overflow: visible; box-shadow: none; }
+/* ---------- The pages of their own (/runners, /settings) ----------
+   The mockup's three columns (web/mockup-v4 permissions.html and runners.html):
+   a list on the side colour, what was picked, and its detail on the panel colour.
+   Mockup px at 1920 wide are rem here (1rem = 20px there). Each column scrolls on its own. */
+.page { width: 100vw; height: 100vh; display: flex; overflow: hidden; background: var(--bg); }
+.page .colhead { height: 3.6rem; padding: 0 1.6rem; }
+.page .colhead-title { display: flex; align-items: center; height: auto; margin: 0; font-size: 1rem; line-height: 1.4rem; }
+.page .ch-sub { font-size: max(11px, 0.75rem); line-height: 1; font-weight: 400; color: var(--ink3); margin-left: 0.6rem; }
+.pg-list { width: 17rem; flex: none; display: flex; flex-direction: column; min-height: 0; background: var(--side); border-right: 1px solid var(--line); }
+.pg-list .colhead { padding: 0 0.8rem 0 1.2rem; }
+.pg-list .colbody { padding: 1.2rem 0.8rem; gap: 0.4rem; }
+.pg-list .colbody > * { flex: none; }
+.pg-main { flex: 43 1 0; min-width: 0; display: flex; flex-direction: column; min-height: 0; background: var(--bg); border-right: 1px solid var(--line); }
+.pg-side { flex: 36 1 0; min-width: 0; display: flex; flex-direction: column; min-height: 0; background: var(--panel); }
+.pg-body { padding: 1.2rem 1.6rem 1.6rem; gap: 0; }
+.pg-body > * { flex: none; }
+.pg-foot { flex: none; margin: 0; padding: 0.8rem 1.2rem 1rem; font-size: max(11px, 0.675rem); line-height: 1.45; color: var(--ink3); border-top: 1px solid var(--line); }
+.pg-foot code { font-size: max(11px, 0.625rem); }
+.page-back { flex: none; display: inline-flex; align-items: center; gap: 0.2rem; height: 1.8rem; padding: 0 0.7rem 0 0.55rem; border-radius: 0.55rem; border: 1.5px solid var(--line); font-size: max(11px, 0.75rem); font-weight: 500; color: var(--ink2); text-decoration: none; transition: background .15s, color .15s, border-color .15s; }
+.page-back:hover { background: #fff; color: var(--ink); border-color: var(--line2); }
+.page-back svg { flex: none; }
+
+/* The list rows: a name with a count, a quiet line under it; the picked one blue. */
+.pg-list .prow { position: relative; display: flex; flex-direction: column; gap: 2px; padding: 0.4rem 0.6rem; border-radius: var(--sel-r); }
+.pg-list .prow .pr-n { display: flex; justify-content: space-between; align-items: center; gap: 0.4rem; font-size: 0.8rem; font-weight: 600; color: var(--ink); }
+.pg-list .prow .pl-n { font-size: max(11px, 0.675rem); font-weight: 400; color: var(--ink3); }
+.pg-list .prow.on { background: var(--sel-row); box-shadow: inset 3px 0 0 var(--sel-bar); }
+.pg-list .prow.on .pl-n { color: var(--ink); }
+.pr-m2 { font-size: max(11px, 0.675rem); color: var(--ink3); }
+.pr-m2 .sep { margin: 0 0.3rem; }
+:root { --sel-row: #E3ECFC; --sel-bar: #1B5BD1; }
+
+/* The middle and right columns: a summary line, tables, quiet notes. */
+.page .tab-sum { font-size: 0.775rem; margin: 0 0 0.7rem; }
+.page .tab-sum .sep { margin: 0 0.35rem; }
+.pg-note { margin: 0 0 0.8rem; font-size: 0.8rem; line-height: 1.45; color: var(--ink2); }
+.page .f-note { font-size: max(11px, 0.75rem); color: var(--ink3); margin: 0.9rem 0 0; }
+.page .f-note.first { margin-top: 0.2rem; }
+.page .sub-h { font-size: max(11px, 0.725rem); margin: 0.9rem 0 0.2rem; }
+.page .grid { font-size: 0.8rem; }
+.page .grid th { font-size: max(11px, 0.725rem); }
+.page .grid td code { font-size: max(11px, 0.7rem); }
+.page .grid tr.off td { color: var(--ink3); }
+.page .note { font-size: max(11px, 0.75rem); color: var(--ink3); margin-top: 2px; }
+.page .note code { font-size: max(11px, 0.675rem); }
+.page .form-error { margin: 0 0 0.7rem; }
+.page .nd-note.ok { margin: 0 0 0.7rem; color: var(--green); }
+.pg-kv td { vertical-align: top; font-size: 0.775rem; }
+.pg-kv td:first-child { width: 1%; white-space: nowrap; color: var(--ink3); }
+.pg-val { overflow-wrap: anywhere; white-space: pre-wrap; }
+.pg-t tr[data-grant] { cursor: pointer; }
+.pg-t tr[data-grant]:hover td { background: rgba(0,0,0,.025); }
+.pg-t tr.sel td, .pg-t tr.sel:hover td { background: var(--sel-row); }
+.pg-t tr.sel td:first-child { box-shadow: inset 3px 0 0 var(--sel-bar); color: var(--sel-bar); }
+.pg-t tr.sel td:nth-child(2) { font-weight: 600; }
+.colhead .pg-save { height: 1.8rem; padding: 0 0.6rem; font-size: max(11px, 0.775rem); }
+.colhead .pg-save:disabled { opacity: .5; cursor: default; }
+
+/* The Settings page's editors. */
+.pg-edit { border: 0; margin: 0; padding: 0; min-width: 0; display: flex; flex-direction: column; gap: 0.8rem; }
+.pg-edit label { display: flex; flex-direction: column; gap: 0.4rem; }
+.pg-edit label > .pg-note { margin: 0; }
+.pg-edit label > .nd-note { margin-top: 0; }
+.pg-edit label > .sub-h { margin: 0; }
+.pg-edit .nd-seg { align-self: flex-start; }
+.page textarea { width: 100%; box-sizing: border-box; padding: 0.5rem 0.6rem; border: 1.5px solid var(--line); border-radius: var(--sel-r); background: #fff; font: inherit; font-size: 0.775rem; line-height: 1.45; color: var(--ink); resize: vertical; }
+.page textarea:focus { outline: none; border-color: var(--line2); }
+.page textarea[name="read"], .page textarea[name="hosts"], .page textarea.pg-code { font-family: var(--mono); font-size: max(11px, 0.7rem); }
+.page textarea.pg-code, .page textarea.pg-text { min-height: 24rem; height: calc(100vh - 10rem); resize: none; }
+.pg-switch { flex-direction: row !important; align-items: center; gap: 0.5rem !important; font-size: 0.775rem; color: var(--ink2); cursor: pointer; }
+.pg-switch input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.pg-switch input:focus-visible + .sw { outline: 2px solid var(--sel-bar); outline-offset: 2px; }
+.sw { display: inline-block; width: 1.8rem; height: 1.05rem; flex: none; border-radius: 0.55rem; background: var(--line2); position: relative; transition: background .15s; }
+.sw::after { content: ''; position: absolute; top: 0.1rem; left: 0.1rem; width: 0.85rem; height: 0.85rem; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.25); transition: left .15s var(--ease); }
+.sw.on { background: var(--green); }
+.sw.on::after { left: 0.85rem; }
+
+/* The Runners page: a dot, chips for what a runner reported, the queue. */
+.rn-dot { display: inline-block; flex: none; width: 0.45rem; height: 0.45rem; border-radius: 50%; margin-right: 0.4rem; background: #23A56A; }
+.rn-dot.offline { background: var(--line2); }
+.pg-list .runner .pr-n > span { display: flex; align-items: center; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pg-list .runner .rn-h { overflow-wrap: anywhere; }
+.rn-chip { display: inline-block; margin: 0 0.3rem 0.2rem 0; padding: 1px 0.4rem; border-radius: 0.3rem; background: var(--gray-bg); font-family: var(--mono); font-size: max(11px, 0.675rem); color: var(--ink2); }
+.rn-queue td { vertical-align: top; font-size: 0.75rem; }
+.rn-queue .rn-prompt { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.runners { display: flex; flex-direction: column; gap: 0.4rem; }
+
+/* Narrow windows: the columns stack and the page scrolls as one. */
+@media (max-width: 900px) {
+  .page { flex-direction: column; height: auto; min-height: 100vh; overflow: visible; }
+  .pg-list, .pg-main, .pg-side { width: auto; flex: none; border-right: 0; border-bottom: 1px solid var(--line); }
+  .page .colbody { overflow: visible; }
+  .page textarea.pg-code, .page textarea.pg-text { height: 24rem; }
+}

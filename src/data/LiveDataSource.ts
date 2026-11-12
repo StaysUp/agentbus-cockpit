@@ -12,6 +12,7 @@ import {
   SavedAgent,
   RunRequest,
   RunnerInfo,
+  VersionInfo,
   SessionList,
   SessionSummary,
   ShellRun,
@@ -513,6 +514,12 @@ export class LiveDataSource implements DataSource {
     if (!res.ok) throw new Error(await apiError(res));
     const body = await res.json();
     return Array.isArray(body?.runners) ? body.runners : [];
+  }
+
+  async getVersion(): Promise<VersionInfo> {
+    const res = await fetch(`${this.baseUrl}/api/v0/version`, { headers: this.headers() });
+    if (!res.ok) throw new Error(await apiError(res));
+    return res.json();
   }
 
   private async post(path: string, body: unknown): Promise<Started> {

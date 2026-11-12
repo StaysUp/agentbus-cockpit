@@ -32,6 +32,12 @@ async function setValue(el: Element | null, value: string) {
   });
 }
 
+// pick opens a part of the page (grants, policy, instructions), or a grant's
+// editor in the right column.
+async function pick(c: HTMLElement, sel: string) {
+  await click(c.querySelector(sel));
+}
+
 function button(c: HTMLElement, text: string): HTMLElement | undefined {
   return [...c.querySelectorAll('button')].find((b) => b.textContent?.trim() === text) as HTMLElement | undefined;
 }
@@ -154,12 +160,24 @@ describe('the Settings page', () => {
     const { api, state } = fakeApi();
     const { container } = await render(<SettingsPage api={api} onBack={() => {}} />);
     await flush();
+    // The first grant's editor is open; each other grant opens on a click.
     await setValue(container.querySelector('textarea[name="read"]'), '~/.aws/config\n');
+    await pick(container, '[data-grant="sandbox"]');
     await click(container.querySelector('[aria-label="Sandbox"] [role="radio"]:nth-child(2)'));
+    await pick(container, '[data-grant="network"]');
     await click(container.querySelector('[aria-label="Network"] [role="radio"]:nth-child(2)'));
     await setValue(container.querySelector('textarea[name="hosts"]'), 'github.com\nregistry.npmjs.org');
+    await pick(container, '[data-grant="apply"]');
     await click(container.querySelector('input[name="agents_apply"]'));
+    await pick(container, '[data-grant="commands"]');
     await click(container.querySelector('input[name="commands"]'));
+    // The table shows the drafts before they are saved.
+    const row = (k: string) => container.querySelector(`[data-grant="${k}"]`)!.textContent;
+    expect(row('read')).toContain('1 file');
+    expect(row('sandbox')).toContain('On');
+    expect(row('network')).toContain('A list · 2 hosts');
+    expect(row('apply')).toContain('No');
+    expect(row('commands')).toContain('No');
     await click(button(container, 'Save grants'));
     await flush();
     expect(api.putPolicy).toHaveBeenCalledTimes(1);
@@ -173,6 +191,7 @@ describe('the Settings page', () => {
     });
     expect(container.textContent).toContain('Saved.');
     // The page read the policy again: the JSON shows what is stored now.
+    await pick(container, '[data-part="policy"]');
     const json = (container.querySelector('textarea[name="policy"]') as HTMLTextAreaElement).value;
     expect(JSON.parse(json).commands).toBe(false);
   });
@@ -182,6 +201,7 @@ describe('the Settings page', () => {
     const { container } = await render(<SettingsPage api={api} onBack={() => {}} />);
     await flush();
     state.info.version = 9; // changed elsewhere
+    await pick(container, '[data-grant="commands"]');
     await click(container.querySelector('input[name="commands"]'));
     await click(button(container, 'Save grants'));
     await flush();
@@ -196,6 +216,7 @@ describe('the Settings page', () => {
     const { api, state } = fakeApi();
     const { container } = await render(<SettingsPage api={api} onBack={() => {}} />);
     await flush();
+    await pick(container, '[data-part="policy"]');
     const area = container.querySelector('textarea[name="policy"]');
     await setValue(area, '{ not json');
     await click(button(container, 'Save policy'));
@@ -212,21 +233,47 @@ describe('the Settings page', () => {
     const { api, state } = fakeApi();
     const { container } = await render(<SettingsPage api={api} onBack={() => {}} />);
     await flush();
+    await pick(container, '[data-part="instructions"]');
     await setValue(container.querySelector('textarea[name="instructions"]'), 'Draft, not saved.');
+    await pick(container, '[data-part="grants"]');
+    await pick(container, '[data-grant="commands"]');
     await click(container.querySelector('input[name="commands"]'));
     await click(button(container, 'Save grants'));
     await flush();
     expect(state.policy.commands).toBe(false);
+    await pick(container, '[data-part="instructions"]');
     expect((container.querySelector('textarea[name="instructions"]') as HTMLTextAreaElement).value).toBe('Draft, not saved.');
     expect(api.getInstructions).toHaveBeenCalledTimes(1);
     // The page read the state again: it shows when the settings changed.
     expect(container.textContent).toContain('Last changed');
   });
 
+  it('lays out as the mockup: the parts, the picked one, its detail', async () => {
+    const { api } = fakeApi();
+    const { container } = await render(<SettingsPage api={api} onBack={() => {}} />);
+    await flush();
+    const parts = [...container.querySelectorAll('.pg-list [data-part]')].map((x) => x.getAttribute('data-part'));
+    expect(parts).toEqual(['grants', 'policy', 'instructions']);
+    expect(container.querySelector('.pg-list .on')!.getAttribute('data-part')).toBe('grants');
+    expect(container.querySelector('.pg-main .colhead')!.textContent).toContain('Grants');
+    expect(container.querySelectorAll('.pg-main tr[data-grant]')).toHaveLength(5);
+    expect(container.querySelector('.pg-side .colhead')!.textContent).toBe("Files in a session's home");
+    await pick(container, '[data-grant="network"]');
+    expect(container.querySelector('.pg-side .colhead')!.textContent).toBe('Network');
+    expect(container.querySelector('tr[data-grant="network"]')!.getAttribute('aria-selected')).toBe('true');
+    // The policy as saved, nested keys by their dotted path.
+    await pick(container, '[data-part="policy"]');
+    const saved = container.querySelector('[aria-label="Saved policy"]')!.textContent!;
+    expect(saved).toContain('limits.max_depth2');
+    expect(saved).toContain('forbidgit push');
+    expect(saved).toContain('read_foldersnone');
+  });
+
   it('saves the instructions', async () => {
     const { api, state } = fakeApi();
     const { container } = await render(<SettingsPage api={api} onBack={() => {}} />);
     await flush();
+    await pick(container, '[data-part="instructions"]');
     expect((container.querySelector('textarea[name="instructions"]') as HTMLTextAreaElement).value).toBe('Be brief.');
     await setValue(container.querySelector('textarea[name="instructions"]'), 'Be kind.');
     await click(button(container, 'Save instructions'));
@@ -256,7 +303,7 @@ describe('the Settings page in the app', () => {
   const link = (c: HTMLElement, text: string) =>
     [...c.querySelectorAll('a')].find((a) => a.textContent?.trim() === text) as HTMLAnchorElement | undefined;
 
-  it('opens at /settings from the Settings link, and ← Cockpit and Back return', async () => {
+  it('opens at /settings from the Settings link, and Cockpit and Back return', async () => {
     const r = await render(<App dataSource={source()} />);
     await flush();
     await flush();
@@ -266,13 +313,13 @@ describe('the Settings page in the app', () => {
     await flush();
     expect(window.location.pathname).toBe('/settings');
     expect(r.container.querySelector('#page[aria-label="Settings"]')).not.toBeNull();
-    expect(r.container.querySelector('#agents, aside')).toBeNull();
+    expect(r.container.querySelector('#agents, #sessions')).toBeNull();
     // Esc on a page of its own does nothing.
     await act(async () => {
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     });
     expect(r.container.querySelector('#page[aria-label="Settings"]')).not.toBeNull();
-    await follow(link(r.container, '← Cockpit'));
+    await follow(link(r.container, 'Cockpit'));
     await flush();
     expect(window.location.pathname).toBe('/');
     expect(r.container.querySelector('#page')).toBeNull();

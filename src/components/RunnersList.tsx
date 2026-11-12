@@ -45,9 +45,15 @@ export function useRunners(load?: () => Promise<RunnerInfo[] | null>): RunnersSt
   return { runners, error };
 }
 
-// The runners and connectors control knows: each one's name, an online dot,
-// when it was last seen, and the harnesses it found with their versions.
-export const RunnersList: React.FC<RunnersState> = ({ runners, error }) => {
+// The runners and connectors control knows, as the Runners page's list:
+// each one's name, an online dot, its role, when it was last seen, and the
+// harnesses it found. A click picks one.
+export const RunnersList: React.FC<RunnersState & { selected?: string; onSelect?: (id: string) => void }> = ({
+  runners,
+  error,
+  selected,
+  onSelect,
+}) => {
   // A service without the route shows nothing; so does the first read.
   if (runners === null || (runners === undefined && !error)) return null;
   return (
@@ -56,22 +62,37 @@ export const RunnersList: React.FC<RunnersState> = ({ runners, error }) => {
       {runners && runners.length === 0 && <p className="dim runners-none">No runner has enrolled.</p>}
       {runners?.map((r) => {
         const found = r.harnesses.filter((h) => h.found);
+        const on = selected === r.id;
         return (
-          <div key={r.id} className={`runner ${r.online ? 'on' : 'off'}`} data-runner={r.id} title={r.id}>
-            <i className={r.online ? 'live' : 'gone'} aria-label={r.online ? 'online' : 'offline'} />
-            <span className="ag-t">
-              <b>
+          <button
+            type="button"
+            key={r.id}
+            className={`prow runner ${r.online ? 'online' : 'offline'}${on ? ' on' : ''}`}
+            data-runner={r.id}
+            aria-current={on}
+            title={r.id}
+            onClick={() => onSelect?.(r.id)}
+          >
+            <span className="pr-n">
+              <span>
+                <i className={`rn-dot ${r.online ? 'online' : 'offline'}`} aria-label={r.online ? 'online' : 'offline'} />
                 {r.name}
-                {r.role === 'connector' && <span className="rn-role">connector</span>}
-              </b>
-              <span>{r.online ? 'online' : `last seen ${formatAgo(r.last_seen) || 'never'}`}</span>
+              </span>
+            </span>
+            <span className="pr-m2">
+              <span className="rn-role">{r.role}</span>
+              <span className="sep">·</span>
+              {r.online ? 'online' : `last seen ${formatAgo(r.last_seen) || 'never'}`}
               {r.role !== 'connector' && (
-                <span className="rn-h">
-                  {found.length > 0 ? found.map((h) => (h.version ? `${h.name} ${h.version}` : h.name)).join(' · ') : 'no harness found'}
-                </span>
+                <>
+                  <span className="sep">·</span>
+                  <span className="rn-h">
+                    {found.length > 0 ? found.map((h) => h.name).join(', ') : 'no harness found'}
+                  </span>
+                </>
               )}
             </span>
-          </div>
+          </button>
         );
       })}
     </div>

@@ -1,4 +1,4 @@
-import { TurnState, Usage } from '../types';
+import { TurnState, Usage, VersionInfo } from '../types';
 
 // Colour only for status: a failed turn is red, a finished one green.
 export function stateClass(state: TurnState): string {
@@ -104,4 +104,14 @@ export function formatAgo(isoString: string | undefined, now: number = Date.now(
   if (h < 24) return `${h} ${h === 1 ? 'hour' : 'hours'} ago`;
   const d = Math.floor(h / 24);
   return `${d} ${d === 1 ? 'day' : 'days'} ago`;
+}
+
+// versionLabel is the service's build in a few words: a release by its
+// version ("0.5.0"); a dev build by its version and short commit
+// ("dev · 12874bd"), with "+" when the tree had changes.
+export function versionLabel(v: VersionInfo): string {
+  if (!v.version) return '';
+  const dev = /dev/.test(v.version);
+  if (!dev || !v.commit) return v.version;
+  return `${v.version} · ${v.commit.slice(0, 7)}${v.modified ? '+' : ''}`;
 }

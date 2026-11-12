@@ -23,6 +23,8 @@ interface AgentsColumnProps {
   runnersOnline?: number;
   // Given only when the source keeps settings: opens the Settings page.
   onSettings?: () => void;
+  // The service's build, from GET /api/v0/version, shown on the AgentBus card.
+  version?: string;
 }
 
 // The Agents column: every saved agent, even one with no session yet, with
@@ -43,6 +45,7 @@ export const AgentsColumn: React.FC<AgentsColumnProps> = ({
   onRunners,
   runnersOnline,
   onSettings,
+  version,
 }) => {
   // The row asking "Remove?", and a remove in flight or refused.
   const [confirming, setConfirming] = useState<string | null>(null);
@@ -151,44 +154,50 @@ export const AgentsColumn: React.FC<AgentsColumnProps> = ({
             </button>
           );
         })}
+      </div>
 
-        {/* The AgentBus this cockpit reads, as one card at the foot: its name, a
-            live dot and where the data comes from. */}
-        <div className="brand-foot">
-          {/* Quiet links to the cockpit's own pages, each at its address. */}
-          {(onRunners || onSettings) && (
-            <nav className="side-links" aria-label="Pages">
-              {onRunners && (
-                <a className="side-link" href={PAGE_PATHS.runners} onClick={follow(onRunners)}>
-                  <span>Runners</span>
-                  {runnersOnline !== undefined && (
-                    <span className="sl-n" title="online">
-                      {runnersOnline}
-                    </span>
-                  )}
-                </a>
-              )}
-              {onSettings && (
-                <a className="side-link" href={PAGE_PATHS.settings} onClick={follow(onSettings)}>
-                  <span>Settings</span>
-                </a>
-              )}
-            </nav>
-          )}
-          <div className="bus-card">
-            <span className="bc-t">
-              <b className="brand">AgentBus</b>
-              <span className="bc-a gw">
-                <i className="live" />
-                <span>{sourceLabel}</span>
-              </span>
-            </span>
-            {onDisconnect && (
-              <button className="disconnect" onClick={onDisconnect}>
-                {disconnectLabel}
-              </button>
+      {/* The foot stays put while the list above it scrolls: the links to
+          the cockpit's own pages, then the AgentBus this cockpit reads, as one
+          card: its name, its build, a live dot and where the data comes from. */}
+      <div className="brand-foot">
+        {/* Quiet links to the cockpit's own pages, each at its address. */}
+        {(onRunners || onSettings) && (
+          <nav className="side-links" aria-label="Pages">
+            {onRunners && (
+              <a className="side-link" href={PAGE_PATHS.runners} onClick={follow(onRunners)}>
+                <span>Runners</span>
+                {runnersOnline !== undefined && (
+                  <span className="sl-n" title="online">
+                    {runnersOnline}
+                  </span>
+                )}
+              </a>
             )}
-          </div>
+            {onSettings && (
+              <a className="side-link" href={PAGE_PATHS.settings} onClick={follow(onSettings)}>
+                <span>Settings</span>
+              </a>
+            )}
+          </nav>
+        )}
+        <div className="bus-card">
+          <span className="bc-t">
+            <b className="brand">AgentBus</b>
+            <span className="bc-a gw">
+              <i className="live" />
+              <span>{sourceLabel}</span>
+            </span>
+            {version && (
+              <span className="bc-v" title="this service's build">
+                {version}
+              </span>
+            )}
+          </span>
+          {onDisconnect && (
+            <button className="disconnect" onClick={onDisconnect}>
+              {disconnectLabel}
+            </button>
+          )}
         </div>
       </div>
     </aside>
