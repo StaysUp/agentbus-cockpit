@@ -428,7 +428,7 @@ export class LiveDataSource implements DataSource {
   }
 
   // POST /api/v0/turns with session: the next turn of a session, in its own
-  // folder, on its latest agent or the saved agent req.agent names. 202
+  // folder, on the saved agent req.agent names (the service requires one). 202
   // {session, turn, state}, with state queued and ahead when it waits behind
   // the session's running turn; 404 for an unknown session; 409 when the
   // session cannot be continued from here.

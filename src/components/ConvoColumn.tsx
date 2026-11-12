@@ -335,14 +335,11 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
   // lost. There is no automatic retry: a request whose answer was lost may
   // have run, and only the person can tell.
   //
-  // A message names the agent picked for it, so it runs there whatever
-  // runs before it: a queued switch, or a message that fails. Naming the
-  // session's own latest agent keeps the session's model (the service
-  // decides when the turn starts). claude and codex are named too: the
-  // service takes each as its harness when no saved agent has that id. An
-  // agent no longer saved (the session's own, removed since) is not named:
-  // the service would refuse it, and the session keeps it.
-  const nameable = (id?: string) => !!id && (id === 'claude' || id === 'codex' || !!agents?.some((a) => a.id === id));
+  // A message always names the agent in the box (it starts as the
+  // conversation's last agent), so it runs there whatever runs before it: a
+  // conversation keeps no agent of its own (his rule, 2026-11-12). The
+  // service reads that agent as it is now; one removed since is refused in
+  // the service's words ("pick another"), shown on the message.
   const send = async (e: React.FormEvent) => {
     e.preventDefault();
     const prompt = draft;
@@ -353,7 +350,7 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
       turnsAtSend: turnCount,
       state: 'sending',
       readOnly,
-      agent: nameable(nextAgent) ? nextAgent : undefined,
+      agent: nextAgent || undefined,
     };
     setPending((list) => [...list, p]);
     setSendError(null);

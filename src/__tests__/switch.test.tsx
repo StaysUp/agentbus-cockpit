@@ -86,8 +86,8 @@ describe('switching agent per message', () => {
     expect(pick.value).toBe('codex');
     expect((r.container.querySelector('#c-reply textarea') as HTMLTextAreaElement).placeholder).toBe('Message Codex…');
 
-    // The same agent is named too; the service keeps the session's model
-    // for it.
+    // The same agent is named too: every message names the agent in the
+    // box, which starts as the conversation's last.
     await send(r.container, 'one more');
     await waitFor(() => sendMessage.mock.calls.length === 1, 'the first send');
     expect(sendMessage.mock.calls[0]).toEqual(['s1', { prompt: 'one more', read_only: false, agent: 'codex', idempotency_key: expect.stringMatching(/^cockpit-msg-/) }]);
@@ -165,6 +165,24 @@ describe('switching agent per message', () => {
     const pick = r.container.querySelector('#c-reply .next-agent') as HTMLButtonElement;
     expect(pick.value).toBe('a_gone');
     expect((await optionsOf(r.container, 'next_agent'))[0][1]).toBe('Codex');
+    r.unmount();
+  });
+
+  // A conversation keeps no agent of its own: a message names the box's
+  // agent even when it is no longer saved, and the service's refusal ("was
+  // removed, pick another") shows on the message.
+  it('names the box\'s agent even when it was removed, and shows the service\'s words', async () => {
+    const events = mixed().map((e) => (e.turn === 'T2' && e.kind === 'turn.started' ? { ...e, agent_id: 'a_gone' } : e));
+    const { src, sendMessage } = source(events);
+    sendMessage.mockImplementation(async () => {
+      throw new Error('agent "a_gone" was removed; pick another (GET /api/v0/agents lists them)');
+    });
+    const r = await render(<App dataSource={src} />);
+    await waitFor(() => r.container.querySelector('#c-reply .next-agent') !== null, 'the picker');
+    await send(r.container, 'still there?');
+    await waitFor(() => sendMessage.mock.calls.length === 1, 'the send');
+    expect((sendMessage.mock.calls[0] as unknown[])[1]).toMatchObject({ agent: 'a_gone', prompt: 'still there?' });
+    await waitFor(() => (r.container.textContent ?? '').includes('was removed; pick another'), 'the refusal');
     r.unmount();
   });
 });
