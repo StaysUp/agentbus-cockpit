@@ -18,6 +18,8 @@ interface AgentsColumnProps {
   onRemoveAgent?: (agentId: string) => Promise<void>;
   // Given only when the source lists runners (GET /api/v0/runners).
   loadRunners?: () => Promise<RunnerInfo[] | null>;
+  // Given only when the source keeps settings: opens the Settings page.
+  onSettings?: () => void;
 }
 
 // The Agents column: every saved agent, even one with no session yet, with
@@ -36,6 +38,7 @@ export const AgentsColumn: React.FC<AgentsColumnProps> = ({
   onEditAgent,
   onRemoveAgent,
   loadRunners,
+  onSettings,
 }) => {
   // The row asking "Remove?", and a remove in flight or refused.
   const [confirming, setConfirming] = useState<string | null>(null);
@@ -157,6 +160,11 @@ export const AgentsColumn: React.FC<AgentsColumnProps> = ({
                 <span>{sourceLabel}</span>
               </span>
             </span>
+            {onSettings && (
+              <button className="bus-settings" onClick={onSettings}>
+                Settings
+              </button>
+            )}
             {onDisconnect && (
               <button className="disconnect" onClick={onDisconnect}>
                 {disconnectLabel}

@@ -1,3 +1,4 @@
+import type { Policy, SettingsInfo, Versioned } from './data/settings';
 import type { FolderInfo } from './data/folders';
 export interface Usage {
   input_tokens: number;
@@ -480,6 +481,13 @@ export interface DataSource {
   getConnect?(harness: string): Promise<ConnectView>;
   connectInput?(harness: string, line: string): Promise<void>;
   subscriptionsOn?(): Promise<void>;
+  // The settings routes (/api/v0/settings), for the Settings page.
+  getSettings?(): Promise<Versioned<SettingsInfo>>;
+  putDefaults?(version: number, etag: string): Promise<Versioned<SettingsInfo>>;
+  getPolicy?(): Promise<Versioned<Policy>>;
+  putPolicy?(p: Policy, etag: string): Promise<Versioned<Policy>>;
+  getInstructions?(): Promise<Versioned<string>>;
+  putInstructions?(text: string, etag: string): Promise<Versioned<string>>;
   // A source that can start and continue sessions has these two. Each
   // rejects with an Error whose message is the API's own words. Starting
   // resolves with the session id and, from the live API, the new turn's id.

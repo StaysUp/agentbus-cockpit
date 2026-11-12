@@ -24,6 +24,7 @@ import {
   TurnList,
 } from '../types';
 import { FolderInfo } from './folders';
+import { Policy, SettingsInfo, Versioned } from './settings';
 import { COMMAND_KINDS, shellRun } from './shell';
 import { ApiTurn } from './jobs';
 import { buildAgents, extractCleanPrompt, sessionGroup, turnDetail, turnOrigin } from './turns';
@@ -347,6 +348,50 @@ export class LiveDataSource implements DataSource {
       body: JSON.stringify({ ...policy, subscriptions_on_runners: 'own' }),
     });
     if (!put.ok) throw new Error(await apiError(put));
+  }
+
+  // The settings routes, each with the ETag its answer carried. A write
+  // sends it back in If-Match: a change made elsewhere since is a 412.
+  private async versioned<T>(method: string, path: string, etag?: string, body?: unknown): Promise<Versioned<T>> {
+    const headers: Record<string, string> = { ...this.headers() };
+    if (etag !== undefined) headers['If-Match'] = etag;
+    if (body !== undefined) headers['Content-Type'] = 'application/json';
+    const res = await fetch(`${this.baseUrl}${path}`, {
+      method,
+      headers,
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    if (!res.ok) throw Object.assign(new Error(await apiError(res)), { status: res.status });
+    // Never '*' in its place: that would overwrite a change made elsewhere.
+    const tag = res.headers.get('ETag');
+    if (!tag) throw new Error('agentbus sent no ETag (an older control, or a proxy that drops it)');
+    return { value: await res.json(), etag: tag };
+  }
+
+  async getSettings(): Promise<Versioned<SettingsInfo>> {
+    return this.versioned('GET', '/api/v0/settings');
+  }
+
+  async putDefaults(version: number, etag: string): Promise<Versioned<SettingsInfo>> {
+    return this.versioned('PUT', '/api/v0/settings/defaults', etag, { version });
+  }
+
+  async getPolicy(): Promise<Versioned<Policy>> {
+    return this.versioned('GET', '/api/v0/settings/permissions');
+  }
+
+  async putPolicy(p: Policy, etag: string): Promise<Versioned<Policy>> {
+    return this.versioned('PUT', '/api/v0/settings/permissions', etag, p);
+  }
+
+  async getInstructions(): Promise<Versioned<string>> {
+    const r = await this.versioned<{ text: string }>('GET', '/api/v0/settings/instructions');
+    return { value: r.value.text ?? '', etag: r.etag };
+  }
+
+  async putInstructions(text: string, etag: string): Promise<Versioned<string>> {
+    const r = await this.versioned<{ text: string }>('PUT', '/api/v0/settings/instructions', etag, { text });
+    return { value: r.value.text ?? text, etag: r.etag };
   }
 
   // PATCH /api/v0/sessions/<id>: a new name for the session. It answers with

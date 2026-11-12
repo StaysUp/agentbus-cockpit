@@ -3,6 +3,8 @@ import rawSessionsJsonl from '../testdata/sessions-v0.jsonl?raw';
 import { AgentsColumn } from './components/AgentsColumn';
 import { ConvoColumn, Pending, PendingUpdate } from './components/ConvoColumn';
 import { AgentsDialog } from './components/AgentsDialog';
+import { SettingsDialog } from './components/SettingsDialog';
+import type { SettingsApi } from './data/settings';
 import { SubscriptionApi } from './components/ConnectStep';
 import { NewSessionDialog } from './components/NewSessionDialog';
 import { ChangesDialog } from './components/ChangesDialog';
@@ -179,6 +181,7 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
 
   // The agents form: closed (null), or open for a new agent or on one to edit.
   const [agentsDialog, setAgentsDialog] = useState<{ edit?: SavedAgent } | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   // The saved agents: the rows of the Agents column, the picker beside Send
   // and each turn's agent name. Read at the start, whenever the agents form
   // closes, and after a remove (agentsKey).
@@ -545,6 +548,19 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
   // Removes a saved agent from its row, then lists the agents again. A
   // refusal throws the API's words for the row to show.
   // The runners, for the list at the foot of the Agents column.
+  // The Settings page, when the source has every settings route.
+  const settingsApi = useMemo<SettingsApi | undefined>(() => {
+    const d = dataSource;
+    if (!d.getSettings || !d.putDefaults || !d.getPolicy || !d.putPolicy || !d.getInstructions || !d.putInstructions) return undefined;
+    return {
+      getSettings: () => d.getSettings!(),
+      putDefaults: (v, etag) => d.putDefaults!(v, etag),
+      getPolicy: () => d.getPolicy!(),
+      putPolicy: (p, etag) => d.putPolicy!(p, etag),
+      getInstructions: () => d.getInstructions!(),
+      putInstructions: (t, etag) => d.putInstructions!(t, etag),
+    };
+  }, [dataSource]);
   const loadRunners = useMemo(() => (dataSource.listRunners ? () => dataSource.listRunners!() : undefined), [dataSource]);
   const removeAgent = async (id: string) => {
     await dataSource.removeAgent!(id);
@@ -895,7 +911,7 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
   const callShown = !!selectedTurn?.detail?.modelCalls.some((p) => p.requested.id === selectedCallId);
   const shownLevel: Level = !selectedTurn ? 'session' : level === 'call' && !callShown ? 'turn' : level;
   const dialogOpenRef = useRef(false);
-  dialogOpenRef.current = newSession !== null || agentsDialog !== null;
+  dialogOpenRef.current = newSession !== null || agentsDialog !== null || settingsOpen;
 
   // Esc first leaves a focused text box, then collapses an open row in the
   // turn panel, then closes the panel. The panel's Session and Turn links
@@ -940,6 +956,7 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
         onEditAgent={canKeepAgents && dataSource.updateAgent ? (a) => a.saved && setAgentsDialog({ edit: a.saved }) : undefined}
         onRemoveAgent={canKeepAgents && dataSource.removeAgent ? removeAgent : undefined}
         loadRunners={loadRunners}
+        onSettings={settingsApi ? () => setSettingsOpen(true) : undefined}
       />
 
       <SessionsColumn
@@ -1095,6 +1112,9 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
           apply={dataSource.applyTurn ? () => dataSource.applyTurn!(changesTurn.id) : undefined}
           onClose={() => setChangesTurn(null)}
         />
+      )}
+      {settingsOpen && settingsApi && (
+        <SettingsDialog api={settingsApi} onClose={() => setSettingsOpen(false)} />
       )}
       {agentsDialog && canKeepAgents && (
         <AgentsDialog

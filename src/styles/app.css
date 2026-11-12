@@ -409,8 +409,8 @@ tr.ev-open > td { background: #FBFBFA; border-bottom: 1px solid var(--line); pad
 .connect-actions { display: flex; align-items: center; gap: 0.75rem; margin-top: 0.375rem; }
 .connect-go { font-size: 0.8125rem; font-weight: 600; padding: 0.375rem 0.75rem; border-radius: 0.375rem; background: var(--ink); color: #fff; }
 .connect-go:disabled { opacity: .6; cursor: default; }
-.use-recorded, .brand-foot .disconnect { font-size: max(11px, 0.75rem); color: var(--ink2); text-decoration: underline; text-underline-offset: 2px; }
-.brand-foot .disconnect { align-self: flex-start; font-size: max(11px, 0.6875rem); color: var(--ink3); }
+.use-recorded, .brand-foot .disconnect, .brand-foot .bus-settings { font-size: max(11px, 0.75rem); color: var(--ink2); text-decoration: underline; text-underline-offset: 2px; }
+.brand-foot .disconnect, .brand-foot .bus-settings { align-self: flex-start; font-size: max(11px, 0.6875rem); color: var(--ink3); }
 
 /* ---------- starting and continuing sessions ---------- */
 .head-btn { flex: none; display: inline-flex; align-items: center; gap: 0.25rem; height: 1.625rem; font-size: max(11px, 0.75rem); font-weight: 600; padding: 0 0.5rem; border-radius: 0.375rem; border: 1px solid var(--line2); background: var(--panel); color: var(--ink2); }
@@ -422,6 +422,12 @@ tr.ev-open > td { background: #FBFBFA; border-bottom: 1px solid var(--line); pad
 /* The agents dialog: the saved agents, and the + Agent form. */
 #agents .colhead .manage-agents { margin-left: auto; }
 .agents-dialog { width: 28rem; max-height: calc(100vh - 3rem); overflow-y: auto; }
+.settings-dialog { width: 34rem; max-height: calc(100vh - 3rem); overflow-y: auto; }
+.st-part { display: flex; flex-direction: column; gap: 0.5rem; padding-bottom: 0.75rem; border-bottom: 1px solid var(--line2); }
+.st-head { font-size: max(11px, 0.75rem); font-weight: 600; color: var(--ink); }
+.new-dialog label.st-check { flex-direction: row; align-items: center; gap: 0.5rem; }
+.new-dialog label.st-check > span { color: var(--ink2); }
+.new-dialog textarea.st-code, .settings-dialog textarea[name="read"], .settings-dialog textarea[name="hosts"] { font-family: var(--mono); font-size: max(11px, 0.6875rem); }
 .agent-form { display: flex; flex-direction: column; gap: 0.625rem; }
 .ad-set { border: 0; margin: 0; padding: 0; min-width: 0; display: flex; flex-direction: column; gap: 0.625rem; }
 .agent-form label > .nd-seg { margin-top: 1px; }
@@ -585,7 +591,7 @@ label.nd-check > span { font-size: max(11px, 0.75rem); color: var(--ink); }
 .bus-card .brand { padding: 0; font-size: 0.8rem; font-weight: 650; }
 .bus-card .bc-a { display: flex; align-items: center; gap: 0.4rem; padding: 0; margin: 0; font-size: max(11px, 0.65rem); color: var(--ink2); }
 .bus-card .bc-a .live { width: 0.35rem; height: 0.35rem; transform: none; }
-.bus-card .disconnect { flex: none; align-self: center; }
+.bus-card .disconnect, .bus-card .bus-settings { flex: none; align-self: center; }
 .brand-foot { padding: 0; }
 
 /* ---------- one strip style: every label alike, every value alike ---------- */
