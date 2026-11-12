@@ -7,7 +7,8 @@ import { SettingsPage } from './components/SettingsPage';
 import { RunnersPage } from './components/RunnersPage';
 import { RUNNERS_PAGE_POLL_MS, useRunners } from './components/RunnersList';
 import { usePage } from './page';
-import type { SettingsApi } from './data/settings';
+import { sandboxOffer, type SettingsApi } from './data/settings';
+import { useTabShown } from './data/useTabShown';
 import { SubscriptionApi } from './components/ConnectStep';
 import { NewSessionDialog } from './components/NewSessionDialog';
 import { ChangesDialog } from './components/ChangesDialog';
@@ -39,6 +40,15 @@ import {
   TurnDetail,
   VersionInfo,
 } from './types';
+
+// Whether page is a page of its own that the source has the routes for:
+// Runners needs the runners route, Settings every settings route. A source
+// without them shows the cockpit at that address instead.
+function ownPageShown(page: string, d: DataSource): boolean {
+  if (page === 'runners') return !!(d.readRunners || d.listRunners);
+  if (page === 'settings') return !!(d.getSettings && d.getPolicy && d.putPolicy && d.getInstructions && d.putInstructions);
+  return false;
+}
 
 // No pending messages, the same array each time.
 const NO_PENDING: Pending[] = [];
@@ -345,9 +355,16 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
   const knownSessionsRef = useRef<Set<string>>(new Set());
   for (const s of sessions) knownSessionsRef.current.add(s.id);
 
-  // Follow new events for as long as the app is shown.
+  // Follow new events while the cockpit itself is on screen in a tab that is
+  // shown. Settings and Runners need no stream, and a tab left hidden gives
+  // its stream back (useTabShown): each stream holds one of the browser's
+  // few connections to control. Back on the cockpit, the stream starts again
+  // from a new snapshot, which reads the list and the shown session again.
+  const tabShown = useTabShown();
+  const pageShown = ownPageShown(page, dataSource);
+  const streamOn = tabShown && !pageShown;
   useEffect(() => {
-    if (!dataSource.subscribe) return;
+    if (!dataSource.subscribe || !streamOn) return;
     let refreshTimer: ReturnType<typeof setTimeout> | null = null;
     const unsubscribe = dataSource.subscribe(
       (event) => {
@@ -417,7 +434,7 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
       if (refreshTimer) clearTimeout(refreshTimer);
       unsubscribe();
     };
-  }, [dataSource]);
+  }, [dataSource, streamOn]);
 
   // Read the session list. A source that streams hands its first list over
   // with the stream's snapshot, so this only runs for later refreshes there.
@@ -693,10 +710,28 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
   const shownRow = shownId === null ? undefined : allSessions?.find((s) => s.id === shownId);
   // Each session's "!" commands from before AgentBus 0.5, oldest first, read
   // when the session is shown. 0.5 writes none: a "!" message goes to the
-  // agent like any other.
+  // agent like any other. So they are asked for only for a session that
+  // started before this control first ran 0.5, when its settings database
+  // was made (GET /api/v0/settings, created). A source without that route,
+  // or a read of it that fails, asks for every session, as before.
+  const [settingsMade, setSettingsMade] = useState<{ at?: string } | null>(dataSource.getSettings ? null : {});
+  useEffect(() => {
+    if (!dataSource.getSettings) return;
+    let active = true;
+    dataSource.getSettings().then(
+      (got) => active && setSettingsMade({ at: got.value.created }),
+      () => active && setSettingsMade({})
+    );
+    return () => {
+      active = false;
+    };
+  }, [dataSource]);
+  const selectedStarted = selectedSessionId === null ? undefined : allSessions?.find((s) => s.id === selectedSessionId)?.started;
+  const mayHoldCommands =
+    settingsMade !== null && !(settingsMade.at && selectedStarted && Date.parse(selectedStarted) >= Date.parse(settingsMade.at));
   const [commandsBySession, setCommandsBySession] = useState<Record<string, ShellRun[]>>({});
   useEffect(() => {
-    if (selectedSessionId === null || !dataSource.getCommands) return;
+    if (selectedSessionId === null || !dataSource.getCommands || !mayHoldCommands) return;
     let active = true;
     const id = selectedSessionId;
     dataSource
@@ -709,7 +744,7 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
     return () => {
       active = false;
     };
-  }, [dataSource, selectedSessionId, reloadKey]);
+  }, [dataSource, selectedSessionId, reloadKey, mayHoldCommands]);
   // The messages sent from each session that are not turns yet, kept here so
   // they outlive a switch to another session and back.
   const [pendingBySession, setPendingBySession] = useState<Record<string, Pending[]>>({});
@@ -940,7 +975,6 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
   const dialogOpenRef = useRef(false);
   // The page of its own on screen, if any. A source without the page's
   // routes shows the cockpit at that address instead.
-  const pageShown = (page === 'runners' && !!loadRunners) || (page === 'settings' && !!settingsApi);
   // A page of its own counts as a dialog: Esc leaves the cockpit under it as it is.
   dialogOpenRef.current = newSession !== null || agentsDialog !== null || pageShown;
 
@@ -963,14 +997,6 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  if (loading) {
-    return (
-      <div id="app" style={{ alignItems: 'center', justifyContent: 'center' }}>
-        <div style={{ color: 'var(--ink3)' }}>Loading AgentBus Cockpit…</div>
-      </div>
-    );
-  }
-
   // The pages of their own, each at its address. A source without the
   // page's routes shows the cockpit.
   if (pageShown && page === 'runners') {
@@ -987,7 +1013,21 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
     );
   }
   if (pageShown && page === 'settings') {
-    return <SettingsPage api={settingsApi!} onBack={() => goPage('cockpit')} />;
+    return (
+      <SettingsPage
+        api={settingsApi!}
+        onBack={() => goPage('cockpit')}
+        sandbox={loadRunners ? sandboxOffer(runners.runners, runners.error) : undefined}
+      />
+    );
+  }
+
+  if (loading) {
+    return (
+      <div id="app" style={{ alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ color: 'var(--ink3)' }}>Loading AgentBus Cockpit…</div>
+      </div>
+    );
   }
 
   return (

@@ -4,6 +4,7 @@ import {
   grantsOf,
   lines,
   Policy,
+  SandboxOffer,
   SettingsApi,
   SettingsInfo,
   Versioned,
@@ -23,6 +24,9 @@ import { setLeaveGuard } from "../page";
 interface SettingsPageProps {
   api: SettingsApi;
   onBack: () => void;
+  // Whether this setup can honour the sandbox switch, from the machines'
+  // own reports (sandboxOffer). Absent: the switch is offered as it is.
+  sandbox?: SandboxOffer;
 }
 
 interface Loaded {
@@ -33,7 +37,7 @@ interface Loaded {
 
 const json = (p: Policy) => JSON.stringify(p, null, 2);
 
-export const SettingsPage: React.FC<SettingsPageProps> = ({ api, onBack }) => {
+export const SettingsPage: React.FC<SettingsPageProps> = ({ api, onBack, sandbox }) => {
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   // The drafts, reset from what was read.
@@ -328,12 +332,24 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ api, onBack }) => {
               {sel[0] === "sandbox" && (
                 <>
                   <p className="pg-note">On, each session runs in a sandbox with its own home.</p>
+                  {/* Offered only when an online machine can build it. One
+                      that is on can always be turned off. */}
                   <Switch
                     name="sandbox"
                     label="Run each session in a sandbox"
                     on={g.sandbox === "on"}
+                    disabled={!!sandbox && !sandbox.can && g.sandbox !== "on"}
                     onChange={(v) => setGrants({ ...g, sandbox: v ? "on" : "off" })}
                   />
+                  {sandbox && !sandbox.can && (
+                    <p className="pg-why" data-sandbox-why>
+                      {g.sandbox === "on" ? "On, but no machine can build it now, so its turns are refused. " : "Not offered. "}
+                      {sandbox.why}
+                    </p>
+                  )}
+                  {sandbox?.can && sandbox.machines && (
+                    <p className="nd-note">Online and able to build it: {sandbox.machines.join(", ")}.</p>
+                  )}
                 </>
               )}
               {sel[0] === "network" && (

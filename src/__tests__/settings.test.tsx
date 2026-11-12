@@ -5,7 +5,8 @@ import { App } from '../App';
 import { ReplayDataSource } from '../data/ReplayDataSource';
 import { SettingsPage } from '../components/SettingsPage';
 import { LiveDataSource } from '../data/LiveDataSource';
-import { grantsOf, lines, networkOf, Policy, SettingsApi, SettingsInfo, withGrants } from '../data/settings';
+import { grantsOf, lines, networkOf, Policy, sandboxOffer, SettingsApi, SettingsInfo, withGrants } from '../data/settings';
+import { RunnerInfo } from '../types';
 import { click, ev, flush, jsonl, panelOpen, render, unmountAll } from './helpers';
 
 // The policy as GET /api/v0/settings/permissions sends it on the defaults.
@@ -491,5 +492,92 @@ describe('the Settings page in the app', () => {
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     });
     expect(panelOpen(r.container)).toBe(false);
+  });
+});
+
+// One machine as GET /api/v0/runners lists it.
+function machine(name: string, fields: Partial<RunnerInfo> = {}): RunnerInfo {
+  return { id: `r_${name}`, name, role: 'runner', online: true, last_seen: '2026-11-12T10:00:00Z', labels: [], harnesses: [], ...fields };
+}
+
+describe('the sandbox switch offers only what the machines can build', () => {
+  it('reads the offer from the online machines\' own reports', () => {
+    expect(sandboxOffer([machine('mac', { sandbox: { can: true } })])).toEqual({ can: true, machines: ['mac'] });
+    // One online machine that can is enough; an offline one that can is not.
+    expect(sandboxOffer([machine('vm', { sandbox: { can: false, why: 'AppArmor refuses user namespaces' } }), machine('mac', { sandbox: { can: true } })]).can).toBe(true);
+    expect(sandboxOffer([machine('mac', { online: false, sandbox: { can: true } })])).toEqual({ can: false, why: 'No machine is online to build it.' });
+    // A connector from before 0.5 runs no session.
+    expect(sandboxOffer([machine('old', { role: 'connector', sandbox: { can: true } })]).can).toBe(false);
+    expect(sandboxOffer([])).toEqual({ can: false, why: 'No machine is online to build it.' });
+    // Each online machine's reason, or that it has not reported one.
+    expect(sandboxOffer([machine('up', { sandbox: { can: false, why: 'the session has no home of its own on this runner' } }), machine('new')])).toEqual({
+      can: false,
+      why: 'No online machine can build it. up: the session has no home of its own on this runner; new: it has not reported whether it can.',
+    });
+    // Before the first read, and when the read failed.
+    expect(sandboxOffer(undefined)).toEqual({ can: false, why: 'Reading which machines can build it…' });
+    expect(sandboxOffer(undefined, 'agentbus answered 500')).toEqual({ can: false, why: 'The machines could not be read: agentbus answered 500' });
+    expect(sandboxOffer(null).can).toBe(false);
+    // A read that fails after one that worked keeps the machines it read.
+    expect(sandboxOffer([machine('mac', { sandbox: { can: true } })], 'agentbus answered 500').can).toBe(true);
+  });
+
+  const openSandbox = async (sandbox: ReturnType<typeof sandboxOffer>, mode = 'off') => {
+    const f = fakeApi();
+    f.state.policy.sandbox = { mode, read: [] };
+    const r = await render(<SettingsPage api={f.api} onBack={() => {}} sandbox={sandbox} />);
+    await flush();
+    await flush();
+    await pick(r.container, 'tr[data-grant="sandbox"]');
+    return { r, f, sw: () => r.container.querySelector('button[name="sandbox"]') as HTMLButtonElement };
+  };
+
+  it('is disabled, with the reason, when no online machine can build it', async () => {
+    const { r, sw } = await openSandbox({ can: false, why: 'No online machine can build it. up: the session has no home of its own on this runner.' });
+    expect(sw().disabled).toBe(true);
+    expect(r.container.querySelector('[data-sandbox-why]')?.textContent).toBe(
+      'Not offered. No online machine can build it. up: the session has no home of its own on this runner.'
+    );
+    await click(sw());
+    expect(sw().getAttribute('aria-checked')).toBe('false');
+  });
+
+  it('is enabled when at least one online machine can, and names them', async () => {
+    const { r, sw } = await openSandbox({ can: true, machines: ['mac', 'vm'] });
+    expect(sw().disabled).toBe(false);
+    expect(r.container.querySelector('[data-sandbox-why]')).toBeNull();
+    expect(r.container.textContent).toContain('Online and able to build it: mac, vm.');
+    await click(sw());
+    expect(sw().getAttribute('aria-checked')).toBe('true');
+  });
+
+  it('still turns off a sandbox that is on when no machine can build it, and says its turns are refused', async () => {
+    const { r, sw } = await openSandbox({ can: false, why: 'No machine is online to build it.' }, 'on');
+    expect(sw().disabled).toBe(false);
+    expect(r.container.querySelector('[data-sandbox-why]')?.textContent).toBe(
+      'On, but no machine can build it now, so its turns are refused. No machine is online to build it.'
+    );
+    await click(sw());
+    expect(sw().getAttribute('aria-checked')).toBe('false');
+    // Once off, it is not offered again.
+    expect(sw().disabled).toBe(true);
+  });
+
+  it('in the app, reads the offer from GET /api/v0/runners', async () => {
+    window.history.replaceState(null, '', '/settings');
+    try {
+      const replay = new ReplayDataSource(jsonl([ev({ seq: 1, session: 'st', kind: 'session.registered', agent: 'claude', folder: '/w' })]));
+      const src = Object.assign(replay, fakeApi().api, {
+        listRunners: vi.fn(async () => [machine('up', { sandbox: { can: false, why: 'the session has no home of its own on this runner' } })]),
+      });
+      const r = await render(<App dataSource={src} />);
+      await flush();
+      await flush();
+      await pick(r.container, 'tr[data-grant="sandbox"]');
+      expect((r.container.querySelector('button[name="sandbox"]') as HTMLButtonElement).disabled).toBe(true);
+      expect(r.container.querySelector('[data-sandbox-why]')?.textContent).toContain('up: the session has no home of its own on this runner');
+    } finally {
+      window.history.replaceState(null, '', '/');
+    }
   });
 });

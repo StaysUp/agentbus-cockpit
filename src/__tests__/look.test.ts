@@ -68,3 +68,32 @@ describe('one look', () => {
     expect(found).toEqual([]);
   });
 });
+
+describe('one type scale', () => {
+  it('small text takes one of the three steps, never a size of its own', () => {
+    // Every font size under 0.875rem is var(--fs-xs), var(--fs-s) or
+    // var(--fs-m); the steps themselves are set once, on :root.
+    const sizes = rules(css)
+      .filter(([sel]) => sel !== ':root')
+      .flatMap(([sel, body]) => [...body.matchAll(/font-size:\s*([^;]+)/g)].map((m) => [sel, m[1].trim()] as [string, string]));
+    const small = sizes.filter(([, v]) => {
+      if (/max\(/.test(v)) return true;
+      const rem = /^([0-9.]+)rem$/.exec(v);
+      return !!rem && Number(rem[1]) < 0.875;
+    });
+    expect(small).toEqual([]);
+    const steps = new Set(sizes.map(([, v]) => v).filter((v) => v.startsWith('var(')));
+    expect([...steps].sort()).toEqual(['var(--fs-m)', 'var(--fs-s)', 'var(--fs-xs)']);
+  });
+});
+
+describe('the turn header', () => {
+  it('cuts a long title, never "turn 1 of 2"', () => {
+    const all = rules(css);
+    const body = (sel: string) => all.find(([s]) => s === sel)?.[1] ?? '';
+    expect(body('#p-head .colhead-title')).toMatch(/display:\s*flex/);
+    expect(body('#p-head .colhead-title > *')).toMatch(/flex:\s*none/);
+    expect(body('#p-head .colhead-title > .ph-t')).toMatch(/min-width:\s*0.*text-overflow:\s*ellipsis/);
+    expect(tsx['../components/RightPanel.tsx']).toMatch(/<span className="ph-t">[\s\S]*?<\/span>\s*<span className="ch-sub">/);
+  });
+});

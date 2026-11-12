@@ -251,7 +251,9 @@ const TurnPanel: React.FC<TurnPanelProps> = ({
   const head = (
     <>
       <PanelHead up={[{ level: 'session', label: 'Session' }]} onLevel={onLevel} onClose={onClose}>
-        {turn.prompt.length > 50 || turn.promptTruncated ? `${turn.prompt.slice(0, 50)}…` : turn.prompt}
+        <span className="ph-t">
+          {turn.prompt.length > 50 || turn.promptTruncated ? `${turn.prompt.slice(0, 50)}…` : turn.prompt}
+        </span>
         <span className="ch-sub">
           turn {turn.turnNumber} of {totalTurns}
         </span>

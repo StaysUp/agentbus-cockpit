@@ -14,11 +14,16 @@ import { buildTurns } from '../data/turns';
 import { CockpitEvent, DataSource, Turn } from '../types';
 import { click, ev, flush, jsonl, render } from './helpers';
 import { SHELL_FOLD_LINES } from '../components/ShellEntry';
+import { STREAM_HIDDEN_MS, useTabShown } from '../data/useTabShown';
 
 const BASE = 'http://cockpit.test';
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+}
+// A settings route's answer: JSON with the ETag every settings read carries.
+function tagged(body: unknown): Response {
+  return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json', ETag: '"1"' } });
 }
 
 const row = {
@@ -71,10 +76,13 @@ function apiTurns(events: CockpitEvent[]) {
     .reverse();
 }
 
-function fakeService(opts: { events: CockpitEvent[] }) {
+// settingsCreated: when the settings database was made (GET /api/v0/settings);
+// absent, that route answers 404 as a service before 0.5 does.
+function fakeService(opts: { events: CockpitEvent[]; settingsCreated?: string }) {
   const reqs: { method: string; path: string; body?: string }[] = [];
   const enc = new TextEncoder();
   const streams: ReadableStreamDefaultController<Uint8Array>[] = [];
+  const signals: AbortSignal[] = [];
   let seq = 0;
   for (const e of opts.events) e.seq = ++seq;
   const fn = vi.fn(async (input: string, init?: RequestInit) => {
@@ -83,6 +91,7 @@ function fakeService(opts: { events: CockpitEvent[] }) {
     const p = url.pathname;
     reqs.push({ method, path: p + url.search, body: init?.body as string | undefined });
     if (p === '/api/v0/sessions') return json({ store: 'st_1', seq, sessions: [row] });
+    if (p === '/api/v0/settings' && opts.settingsCreated) return tagged({ version: 1, created: opts.settingsCreated, imported_files: [] });
     if (p === '/api/v0/turns' && method === 'GET') return json({ store: 'st_1', seq, turns: apiTurns(opts.events), next_before: null });
     if (p === '/api/v0/sessions/s1/events') {
       const kinds = url.searchParams.get('kind')?.split(',');
@@ -94,6 +103,7 @@ function fakeService(opts: { events: CockpitEvent[] }) {
       const stream = new ReadableStream<Uint8Array>({
         start(c) {
           streams.push(c);
+          if (init?.signal) signals.push(init.signal);
           init?.signal?.addEventListener('abort', () => c.error(new DOMException('aborted', 'AbortError')));
         },
       });
@@ -108,7 +118,9 @@ function fakeService(opts: { events: CockpitEvent[] }) {
       for (const c of streams) c.enqueue(enc.encode(`data: ${JSON.stringify(e)}\n\n`));
     });
   };
-  return { fn, reqs, push };
+  // The event streams still open.
+  const openStreams = () => signals.filter((x) => !x.aborted).length;
+  return { fn, reqs, push, openStreams };
 }
 
 async function settle() {
@@ -230,6 +242,124 @@ describe('Commands from before 0.5', () => {
     const r = await render(<App dataSource={replay} />);
     await settle();
     expect(shells(r)).toHaveLength(0);
+    r.unmount();
+  });
+});
+
+describe('Commands are asked for only where a session can hold them', () => {
+  const kindsAsked = (svc: ReturnType<typeof fakeService>) => svc.reqs.filter((q) => q.path.includes('kind=command.'));
+  const withCommand = () => {
+    const events = finishedTurn();
+    events.push(cmdEvent('queued', 'cmd_9', 'git status'), ran('git status', { stdout: 'clean\n' }, 'cmd_9'));
+    return events;
+  };
+
+  it('not for a session that started after this control first ran 0.5', async () => {
+    // The session started 2026-11-05; the settings database is from before.
+    const svc = fakeService({ events: withCommand(), settingsCreated: '2026-11-01T00:00:00Z' });
+    const r = await mount(svc);
+    expect(svc.reqs.some((q) => q.path === '/api/v0/settings')).toBe(true);
+    expect(kindsAsked(svc)).toHaveLength(0);
+    expect(shells(r)).toHaveLength(0);
+    r.unmount();
+  });
+
+  it('for a session that started before it, and shows them as before', async () => {
+    const svc = fakeService({ events: withCommand(), settingsCreated: '2026-11-10T00:00:00Z' });
+    const r = await mount(svc);
+    expect(kindsAsked(svc)).toHaveLength(1);
+    expect(shells(r).map((x) => x.querySelector('.sh-line')?.textContent)).toEqual(['$ git status']);
+    r.unmount();
+  });
+});
+
+describe('The event stream', () => {
+  const setHidden = async (hidden: boolean) => {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => (hidden ? 'hidden' : 'visible') });
+    await act(async () => {
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+  };
+  afterEach(() => {
+    // Back to jsdom's own.
+    delete (document as unknown as Record<string, unknown>).visibilityState;
+    window.history.replaceState(null, '', '/');
+  });
+
+  it('is given back only after the tab stays hidden a while, and taken again once it is shown', async () => {
+    vi.useFakeTimers();
+    try {
+      let shown: boolean | undefined;
+      const Probe = () => {
+        shown = useTabShown();
+        return null;
+      };
+      const r = await render(<Probe />);
+      expect(shown).toBe(true);
+      // A quick look at another tab keeps it.
+      await setHidden(true);
+      await act(async () => {
+        vi.advanceTimersByTime(STREAM_HIDDEN_MS - 1);
+      });
+      expect(shown).toBe(true);
+      await setHidden(false);
+      await act(async () => {
+        vi.advanceTimersByTime(STREAM_HIDDEN_MS * 2);
+      });
+      expect(shown).toBe(true);
+      // Left hidden, it goes; shown, it comes back at once.
+      await setHidden(true);
+      await act(async () => {
+        vi.advanceTimersByTime(STREAM_HIDDEN_MS);
+      });
+      expect(shown).toBe(false);
+      await setHidden(false);
+      expect(shown).toBe(true);
+      r.unmount();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('is not held by a tab opened hidden, and opens once the tab is shown', async () => {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+    const svc = fakeService({ events: finishedTurn() });
+    const r = await mount(svc);
+    expect(svc.openStreams()).toBe(0);
+    await setHidden(false);
+    await settle();
+    expect(svc.openStreams()).toBe(1);
+    // The list came with the stream's snapshot.
+    expect(r.container.querySelector('.sess[data-session="s1"]')).not.toBeNull();
+    r.unmount();
+  });
+
+  it('is given back on the Settings page, and opens again back in the cockpit', async () => {
+    const svc = fakeService({ events: finishedTurn() });
+    // The settings routes, so the page shows.
+    const base = svc.fn.getMockImplementation()!;
+    svc.fn.mockImplementation(async (input: string, init?: RequestInit) => {
+      const p = new URL(input).pathname;
+      if (p === '/api/v0/settings') return tagged({ version: 1, created: '2026-11-01T00:00:00Z', imported_files: [] });
+      if (p === '/api/v0/settings/permissions') return tagged({ sandbox: { mode: 'off', read: [] } });
+      if (p === '/api/v0/settings/instructions') return tagged({ text: '' });
+      return base(input, init);
+    });
+    const r = await mount(svc);
+    expect(svc.openStreams()).toBe(1);
+    const follow = async (text: string) => {
+      const a = [...r.container.querySelectorAll('a')].find((x) => x.textContent?.trim() === text);
+      await act(async () => {
+        a!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 }));
+      });
+      await settle();
+    };
+    await follow('Settings');
+    expect(r.container.querySelector('#page[aria-label="Settings"]')).not.toBeNull();
+    expect(r.container.querySelector('table[aria-label="Grants"]')).not.toBeNull();
+    expect(svc.openStreams()).toBe(0);
+    await follow('Cockpit');
+    expect(svc.openStreams()).toBe(1);
     r.unmount();
   });
 });
