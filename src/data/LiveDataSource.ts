@@ -303,7 +303,7 @@ export class LiveDataSource implements DataSource {
     if (!res.ok) throw new Error(await apiError(res));
     const data = await res.json();
     const subs: SubscriptionState[] = Array.isArray(data.subscriptions) ? data.subscriptions : [];
-    return { on: data.on === true, subscriptions: subs.map((s) => (s.connect ? { ...s, connect: connectView(s.connect) } : s)) };
+    return { subscriptions: subs.map((s) => (s.connect ? { ...s, connect: connectView(s.connect) } : s)) };
   }
 
   // POST /api/v0/subscriptions/<harness>/connect: 202 with the login started
@@ -335,20 +335,6 @@ export class LiveDataSource implements DataSource {
       body: JSON.stringify({ line }),
     });
     if (!res.ok) throw new Error(await apiError(res));
-  }
-
-  // subscriptions_on_runners = "own": the policy read, that one key
-  // changed, and written back with the version it was read at.
-  async subscriptionsOn(): Promise<void> {
-    const res = await fetch(`${this.baseUrl}/api/v0/settings/permissions`, { headers: this.headers() });
-    if (!res.ok) throw new Error(await apiError(res));
-    const policy = await res.json();
-    const put = await fetch(`${this.baseUrl}/api/v0/settings/permissions`, {
-      method: 'PUT',
-      headers: { ...this.headers(), 'Content-Type': 'application/json', 'If-Match': res.headers.get('ETag') ?? '*' },
-      body: JSON.stringify({ ...policy, subscriptions_on_runners: 'own' }),
-    });
-    if (!put.ok) throw new Error(await apiError(put));
   }
 
   // The settings routes, each with the ETag its answer carried. A write

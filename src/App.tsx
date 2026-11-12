@@ -526,13 +526,12 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
   const subscriptionApi = useMemo<SubscriptionApi | undefined>(
     () =>
       dataSource.listSubscriptions && dataSource.connectSubscription && dataSource.getConnect &&
-      dataSource.connectInput && dataSource.subscriptionsOn
+      dataSource.connectInput
         ? {
             list: () => dataSource.listSubscriptions!(),
             connect: (h) => dataSource.connectSubscription!(h),
             get: (h) => dataSource.getConnect!(h),
             input: (h, line) => dataSource.connectInput!(h, line),
-            turnOn: () => dataSource.subscriptionsOn!(),
           }
         : undefined,
     [dataSource],

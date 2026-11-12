@@ -17,7 +17,6 @@ export interface SubscriptionApi {
   connect: (harness: string) => Promise<ConnectView>;
   get: (harness: string) => Promise<ConnectView>;
   input: (harness: string, line: string) => Promise<void>;
-  turnOn: () => Promise<void>;
 }
 
 // pollMs is how often a running login is read again.
@@ -43,7 +42,6 @@ export const ConnectStep: React.FC<{ harness: string; api: SubscriptionApi }> = 
   // The login took the code: nothing more is sent while it checks it.
   const [sent, setSent] = useState(false);
   const [starting, setStarting] = useState(false);
-  const [turningOn, setTurningOn] = useState(false);
   // Refs as well as state: a second click in the same moment, before a
   // render, is ignored.
   const sendingRef = useRef(false);
@@ -285,31 +283,7 @@ export const ConnectStep: React.FC<{ harness: string; api: SubscriptionApi }> = 
       <span className="nd-note">
         Runners hold no sign-in. Control adds your subscription to their calls once you connect it here. The token
         stays on control and is never shown.
-        {!list.on && ' It is off until subscriptions_on_runners is "own".'}
       </span>
-      {!list.on && (
-        <button
-          type="button"
-          className="btn btn-secondary btn-sm cs-btn cs-on"
-          disabled={turningOn}
-          onClick={() => {
-            if (turningOn) return;
-            setListError(null);
-            setTurningOn(true);
-            // Held until the list says it is on, so it is never sent twice.
-            api.turnOn().then(
-              () => reload().then(() => alive.current && setTurningOn(false)),
-              (e: Error) => {
-                if (!alive.current) return;
-                setTurningOn(false);
-                setListError(e.message);
-              },
-            );
-          }}
-        >
-          Turn on for my runners
-        </button>
-      )}
       {listError && <div className="form-error">{listError}</div>}
     </div>
   );

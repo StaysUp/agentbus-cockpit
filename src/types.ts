@@ -477,8 +477,6 @@ export interface SubscriptionState {
   connect?: ConnectView;
 }
 export interface SubscriptionList {
-  // subscriptions_on_runners is "own" on control.
-  on: boolean;
   subscriptions: SubscriptionState[];
 }
 
@@ -525,12 +523,11 @@ export interface DataSource {
   // A control that adds the person's own subscription to their runners'
   // calls has these: the subscriptions (null when the service keeps none),
   // a connect started with the harness's own login, its output with the
-  // token taken out, a line typed into it, and the switch turned on.
+  // token taken out, and a line typed into it.
   listSubscriptions?(): Promise<SubscriptionList | null>;
   connectSubscription?(harness: string): Promise<ConnectView>;
   getConnect?(harness: string): Promise<ConnectView>;
   connectInput?(harness: string, line: string): Promise<void>;
-  subscriptionsOn?(): Promise<void>;
   // The settings routes (/api/v0/settings), for the Settings page.
   getSettings?(): Promise<Versioned<SettingsInfo>>;
   getPolicy?(): Promise<Versioned<Policy>>;

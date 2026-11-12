@@ -10,7 +10,7 @@ import { click, flush, render } from './helpers';
 // agy): it connects on c0de. No token is ever in what it answers, as the
 // API's never is, and an ended connect has no link, as the API's has none.
 function fakeApi(harness = 'claude', link = 'https://claude.example/oauth?code=1', renews = false) {
-  let list: SubscriptionList = { on: false, subscriptions: [{ harness, connected: false, expired: false }] };
+  let list: SubscriptionList = { subscriptions: [{ harness, connected: false, expired: false }] };
   let view: ConnectView = { harness, state: 'running', output: [link], paste: true };
   const api: SubscriptionApi = {
     list: vi.fn(async () => list),
@@ -27,9 +27,6 @@ function fakeApi(harness = 'claude', link = 'https://claude.example/oauth?code=1
             : { harness, connected: true, expired: false, expires_at: '2027-11-10T00:00:00Z' },
         ],
       };
-    }),
-    turnOn: vi.fn(async () => {
-      list = { ...list, on: true };
     }),
   };
   return api;
@@ -74,10 +71,9 @@ describe('ConnectStep', () => {
       await flush();
       expect(phase(container)).toBe('not-connected');
       expect(container.querySelector('.cs-status')?.textContent).toBe('not connected');
-      expect(container.textContent).toContain('subscriptions_on_runners');
-      await click(container.querySelector('.cs-on'));
-      await flush();
-      expect(api.turnOn).toHaveBeenCalled();
+      // Every runner is the person's own: no switch to turn on.
+      expect(container.textContent).not.toContain('subscriptions_on_runners');
+      expect(container.textContent).not.toContain('Turn on for my runners');
       expect(container.querySelector('.cs-on')).toBeNull();
 
       await click(container.querySelector('.cs-connect'));
@@ -296,7 +292,7 @@ describe('ConnectStep on open', () => {
   it('does not show a login that ended before it was opened', async () => {
     const api = fakeApi();
     const ended = { harness: 'claude', state: 'failed' as const, output: ['https://claude.example/old'], paste: false, error: 'old' };
-    api.list = vi.fn(async () => ({ on: true, subscriptions: [{ harness: 'claude', connected: false, expired: false, connect: ended }] }));
+    api.list = vi.fn(async () => ({ subscriptions: [{ harness: 'claude', connected: false, expired: false, connect: ended }] }));
     const { container } = await render(<ConnectStep harness="claude" api={api} />);
     await flush();
     expect(phase(container)).toBe('not-connected');
@@ -306,7 +302,7 @@ describe('ConnectStep on open', () => {
   it('follows a login still running, with Connect held', async () => {
     const api = fakeApi();
     const running = { harness: 'claude', state: 'running' as const, output: ['https://claude.example/now'], paste: true };
-    api.list = vi.fn(async () => ({ on: true, subscriptions: [{ harness: 'claude', connected: false, expired: false, connect: running }] }));
+    api.list = vi.fn(async () => ({ subscriptions: [{ harness: 'claude', connected: false, expired: false, connect: running }] }));
     const { container } = await render(<ConnectStep harness="claude" api={api} />);
     await flush();
     expect(phase(container)).toBe('connecting');
@@ -342,23 +338,6 @@ describe('ConnectStep while a send runs', () => {
     expect(input.disabled).toBe(true);
     expect(container.textContent).toContain('Code sent. Checking it.');
   });
-
-  it('clears an old error when the switch is turned on', async () => {
-    const api = fakeApi();
-    let fail = true;
-    api.turnOn = vi.fn(async () => {
-      if (fail) throw new Error('the policy changed');
-    });
-    const { container } = await render(<ConnectStep harness="claude" api={api} />);
-    await flush();
-    await click(container.querySelector('.cs-on'));
-    await flush();
-    expect(container.textContent).toContain('the policy changed');
-    fail = false;
-    await click(container.querySelector('.cs-on'));
-    await flush();
-    expect(container.textContent).not.toContain('the policy changed');
-  });
 });
 
 describe('ConnectStep in StrictMode', () => {
@@ -378,7 +357,7 @@ describe('ConnectStep with a device login', () => {
   // codex's device login: control shows a link and a one-time code; the
   // person enters the code at the link, and nothing is typed here.
   it('shows a device login code, asks for nothing, and drops the code once connected', async () => {
-    let list: SubscriptionList = { on: true, subscriptions: [{ harness: 'codex', connected: false, expired: false }] };
+    let list: SubscriptionList = { subscriptions: [{ harness: 'codex', connected: false, expired: false }] };
     let view: ConnectView = {
       harness: 'codex',
       state: 'running',
@@ -391,7 +370,6 @@ describe('ConnectStep with a device login', () => {
       connect: vi.fn(async () => view),
       get: vi.fn(async () => view),
       input: vi.fn(async () => {}),
-      turnOn: vi.fn(async () => {}),
     };
     const { container } = await render(<ConnectStep harness="codex" api={api} />);
     await flush();
@@ -404,7 +382,6 @@ describe('ConnectStep with a device login', () => {
     expect(container.textContent).not.toContain('https://');
     view = { harness: 'codex', state: 'connected', output: [], paste: false };
     list = {
-      on: true,
       subscriptions: [{ harness: 'codex', connected: true, renews: true, expired: false, expires_at: '2026-11-20T00:00:00Z' }],
     };
     await waitFor(() => phase(container) === 'connected', 'connected');
@@ -419,7 +396,6 @@ describe('ConnectStep with a device login', () => {
     const api: SubscriptionApi = {
       ...fakeApi(),
       list: vi.fn(async () => ({
-        on: true,
         subscriptions: [{ harness: 'codex', connected: true, renews: true, expired: true, error: why }],
       })),
     };

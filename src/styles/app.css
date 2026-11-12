@@ -417,7 +417,6 @@ tr.ev-open > td { background: #FBFBFA; border-bottom: 1px solid var(--line); pad
 .cs-until { color: var(--ink3); }
 .connect-step > .nd-note { margin-top: 0; }
 .cs-head .cs-connect { margin-left: auto; }
-.cs-on { align-self: flex-start; }
 .cs-login { display: flex; flex-direction: column; align-items: flex-start; gap: 0.5rem; font-size: var(--fs-s); color: var(--ink2); }
 .cs-step { display: flex; flex-direction: column; gap: 0.25rem; align-self: stretch; }
 .cs-step .nd-note { margin-top: 0; }
