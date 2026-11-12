@@ -47,19 +47,18 @@ export const ConnectStep: React.FC<{ harness: string; api: SubscriptionApi }> = 
   const [starting, setStarting] = useState(false);
   // The last connect failed because the login did not take the code.
   const [rejected, setRejected] = useState(false);
+  // Cancel was clicked for the login on screen: the button stays held
+  // until that login ends.
   const [cancelling, setCancelling] = useState(false);
-  const [cancelError, setCancelError] = useState<string | null>(null);
   // Refs as well as state: a second click in the same moment, before a
   // render, is ignored.
   const sendingRef = useRef(false);
   const startingRef = useRef(false);
   const cancellingRef = useRef(false);
-  // Cancel's state goes once the login it was for has ended, however it
-  // ended, so it never sticks on the outcome or on the next login.
+  // A login ended, or a new one starts: Cancel is free again.
   const cancelDone = () => {
     cancellingRef.current = false;
     setCancelling(false);
-    setCancelError(null);
   };
   const alive = useRef(true);
   // Set on every mount: StrictMode mounts twice.
@@ -95,9 +94,6 @@ export const ConnectStep: React.FC<{ harness: string; api: SubscriptionApi }> = 
   // A running login is read again until it ends; then the list says what is
   // kept. One read at a time: the next is asked for once the last answered.
   const running = view?.state === 'running';
-  // Read by a cancel's answer, which can land after the login ended.
-  const runningRef = useRef(false);
-  runningRef.current = running;
   useEffect(() => {
     if (!running) return;
     let stopped = false;
@@ -232,25 +228,16 @@ export const ConnectStep: React.FC<{ harness: string; api: SubscriptionApi }> = 
     );
   };
 
-  // Cancel stops the login on control; the next read sees it end.
-  // A second click in the same moment is ignored. A refused cancel (the
-  // login had ended already: 409) shows its words only until the next read
-  // says how the login ended, which clears them (cancelDone).
+  // Cancel asks control to stop the login. One rule: its answer is never
+  // shown. A refused cancel only means the login ended already, and the
+  // read of the login alone shows how it ended (connected, failed or
+  // cancelled). The button stays held from the click until that login
+  // ends; a second click is ignored; Connect starts the next login clean.
   const cancel = () => {
     if (!api.cancel || cancellingRef.current) return;
     cancellingRef.current = true;
     setCancelling(true);
-    setCancelError(null);
-    api.cancel(harness).then(
-      () => undefined,
-      (e: Error) => {
-        cancellingRef.current = false;
-        if (!alive.current) return;
-        setCancelling(false);
-        // The login ended meanwhile: how it ended is what shows.
-        if (runningRef.current) setCancelError(e.message);
-      },
-    );
+    api.cancel(harness).catch(() => undefined);
   };
 
   // A sign-in that expired failed too, but no connect of this step did.
@@ -288,7 +275,6 @@ export const ConnectStep: React.FC<{ harness: string; api: SubscriptionApi }> = 
           </button>
         )}
       </div>
-      {cancelError && <div className="form-error">{cancelError}</div>}
       {phase === 'failed' && <div className="form-error cs-why">{why}</div>}
       {phase === 'connecting' && (
         <div className="cs-login">

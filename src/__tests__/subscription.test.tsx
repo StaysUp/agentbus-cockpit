@@ -378,6 +378,55 @@ describe('ConnectStep', () => {
     expect(next.disabled).toBe(false);
   });
 
+  // Review round 2, order 1: the read applies how the login ended first,
+  // then the cancel's refusal (409) arrives. Its answer is never shown.
+  it('a cancel refused after the end was shown changes nothing', async () => {
+    const api = fakeApi();
+    let refuse: (e: Error) => void = () => {};
+    api.cancel = vi.fn(() => new Promise<void>((_, rej) => (refuse = rej)));
+    const { container } = await render(<ConnectStep harness="claude" api={api} />);
+    await flush();
+    await click(container.querySelector('.cs-connect'));
+    await flush();
+    await click(container.querySelector('.cs-cancel'));
+    // Held from the click until that login ends.
+    expect((container.querySelector('.cs-cancel') as HTMLButtonElement).disabled).toBe(true);
+    (api as { get: SubscriptionApi['get'] }).get = vi.fn(async () => ({ harness: 'claude', state: 'connected' as const, output: [], paste: false }));
+    await waitFor(() => phase(container) === 'connected', 'connected');
+    await act(async () => refuse(new Error('no login is running for claude')));
+    await flush();
+    expect(phase(container)).toBe('connected');
+    expect(container.textContent).not.toContain('no login is running');
+  });
+
+  // Review round 2, order 2: a cancel still on its way when its login has
+  // ended and the person has started the next one. Its late refusal never
+  // lands on the new login, whose Cancel is free.
+  it('a late cancel answer never lands on the next login', async () => {
+    const api = fakeApi();
+    let refuse: (e: Error) => void = () => {};
+    api.cancel = vi.fn(() => new Promise<void>((_, rej) => (refuse = rej)));
+    const { container } = await render(<ConnectStep harness="claude" api={api} />);
+    await flush();
+    await click(container.querySelector('.cs-connect'));
+    await flush();
+    await click(container.querySelector('.cs-cancel'));
+    (api as { get: SubscriptionApi['get'] }).get = vi.fn(async () => ({
+      harness: 'claude', state: 'failed' as const, output: [], paste: false, cancelled: true, error: 'the connect was cancelled',
+    }));
+    await waitFor(() => phase(container) === 'not-connected', 'ended');
+    (api as { get: SubscriptionApi['get'] }).get = vi.fn(async () => ({ harness: 'claude', state: 'running' as const, output: ['https://claude.example/b'], paste: true }));
+    await click(container.querySelector('.cs-connect'));
+    await flush();
+    expect(phase(container)).toBe('connecting');
+    await act(async () => refuse(new Error('no login is running for claude')));
+    await flush();
+    expect(container.textContent).not.toContain('no login is running');
+    const next = container.querySelector('.cs-cancel') as HTMLButtonElement;
+    expect(next.textContent).toBe('Cancel');
+    expect(next.disabled).toBe(false);
+  });
+
   it('offers no Cancel where the service cannot cancel', async () => {
     const api = fakeApi();
     const { container } = await render(<ConnectStep harness="claude" api={api} />);
