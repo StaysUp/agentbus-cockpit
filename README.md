@@ -5,15 +5,13 @@
   <img alt="AgentBus" src="docs/assets/agentbus-logo-light.svg" width="360">
 </picture>
 
-# AgentBus cockpit
-
 **A free, self-hosted browser cockpit for [AgentBus](https://github.com/staysup/agentbus).**
 
 [![GitHub stars](https://img.shields.io/github/stars/staysup/agentbus-cockpit?style=flat)](https://github.com/staysup/agentbus-cockpit/stargazers)
 [![Latest release](https://img.shields.io/github/v/release/staysup/agentbus-cockpit)](https://github.com/staysup/agentbus-cockpit/releases)
 [![CI](https://github.com/StaysUp/agentbus-cockpit/actions/workflows/ci.yml/badge.svg)](https://github.com/StaysUp/agentbus-cockpit/actions/workflows/ci.yml)
 
-[Run it](#run) &nbsp;&bull;&nbsp; [Demo](#demo) &nbsp;&bull;&nbsp; [AgentBus](https://github.com/staysup/agentbus) &nbsp;&bull;&nbsp; [Releases](https://github.com/staysup/agentbus-cockpit/releases)
+[Quickstart](#quickstart) &nbsp;&bull;&nbsp; [Demo](#demo) &nbsp;&bull;&nbsp; [Releases](https://github.com/staysup/agentbus-cockpit/releases)
 
 </div>
 
@@ -32,7 +30,7 @@ AgentBus API, so anything it shows, your own program can read too.
 - A running AgentBus service (`agentbus up`). See the
   [AgentBus README](https://github.com/staysup/agentbus#quickstart).
 
-## Run
+## Quickstart
 
 1. Start AgentBus:
 
