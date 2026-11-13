@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Combo, Seg, Select } from "./Controls";
-import { AccessOption, AgentFields, Harness, SavedAgent } from "../types";
+import { AccessOption, AgentFields, Harness, ModelList, SavedAgent } from "../types";
 import { ConnectStep, SubscriptionApi } from "./ConnectStep";
 import { OpenRouterKey } from "./OpenRouterKey";
 
@@ -23,6 +23,9 @@ interface AgentsDialogProps {
   // A control that adds the person's own subscription to their runners'
   // calls: the Connect step of a subscription agent.
   subscriptions?: SubscriptionApi;
+  // The models a harness's access can use now (GET /api/v0/harnesses/<h>/
+  // models), offered beside the harness's own. Absent: only those.
+  loadModels?: (harness: string, access: string, refresh?: boolean) => Promise<ModelList>;
 }
 
 // What a harness, an access and a model are called on screen.
@@ -97,6 +100,27 @@ function formOf(a: SavedAgent): FormState {
   };
 }
 
+// sourceText says where a list of models came from.
+function sourceText(source: string, label: string): string {
+  switch (source) {
+    case "api":
+      return "OpenRouter's list";
+    case "command":
+      return `${label} itself, where its sign-in is`;
+    case "runner":
+      return `${label}'s own list, after its last turn`;
+    case "fixed":
+      return `${label}'s aliases, always the newest of each`;
+  }
+  return "the service";
+}
+
+// when is a time as the person's clock reads it, to the minute.
+const when = (iso: string) => {
+  const d = new Date(iso);
+  return isNaN(d.getTime()) ? iso : d.toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" });
+};
+
 const Off: React.FC<{ label: string; value: string }> = ({ label, value }) => (
   <label className="f-off">
     <span>{label}</span>
@@ -113,6 +137,7 @@ export const AgentsDialog: React.FC<AgentsDialogProps> = ({
   edit,
   onChanged,
   subscriptions,
+  loadModels,
 }) => {
   const [harnesses, setHarnesses] = useState<Harness[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -148,6 +173,35 @@ export const AgentsDialog: React.FC<AgentsDialogProps> = ({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose, busy]);
+
+  // The list of models for the form's harness and access, read when either
+  // changes; a typed name is still taken, and none is the tool's default.
+  const [models, setModels] = useState<ModelList | null>(null);
+  const [modelsBusy, setModelsBusy] = useState(false);
+  const [modelsError, setModelsError] = useState<string | null>(null);
+  const modelsFor = form ? `${form.harness} ${form.access}` : "";
+  const readModels = (refresh: boolean) => {
+    if (!loadModels || !form?.harness || !form.access) return () => undefined;
+    let active = true;
+    const [h, a] = [form.harness, form.access];
+    setModelsBusy(true);
+    setModelsError(null);
+    loadModels(h, a, refresh)
+      .then(
+        (l) => active && setModels(l),
+        (err: Error) => active && setModelsError(err.message),
+      )
+      .finally(() => active && setModelsBusy(false));
+    return () => {
+      active = false;
+    };
+  };
+  useEffect(() => {
+    setModels(null);
+    return readModels(false);
+    // The list follows the harness and access only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modelsFor, loadModels]);
 
   const hs = harnesses ?? [];
   const harness = form ? hs.find((h) => h.name === form.harness) : undefined;
@@ -216,6 +270,14 @@ export const AgentsDialog: React.FC<AgentsDialogProps> = ({
     }
   };
 
+  // What the Model field offers: the harness's own, then the list read now.
+  const listed = models && models.harness === form?.harness && models.access === form?.access ? models : null;
+  const offered = [...(access?.models ?? [])];
+  const modelLabels: Record<string, string> = {};
+  for (const m of listed?.models ?? []) {
+    if (!offered.includes(m.id)) offered.push(m.id);
+    if (m.label) modelLabels[m.id] = m.label;
+  }
   const openRouter = form?.access === "openrouter";
   // The key variable is an advanced field: open at once only for an agent
   // that names a variable other than the default.
@@ -303,7 +365,8 @@ export const AgentsDialog: React.FC<AgentsDialogProps> = ({
                         ? `empty: ${harness?.label ?? form.harness}'s default`
                         : "an OpenRouter model id"
                     }
-                    suggestions={access.models}
+                    suggestions={offered}
+                    labels={modelLabels}
                   />
                 ) : (
                   <Select
@@ -319,6 +382,24 @@ export const AgentsDialog: React.FC<AgentsDialogProps> = ({
                       { value: "", label: "Harness default" },
                     ]}
                   />
+                )}
+                {loadModels && access?.any_model && (
+                  <span className="nd-note ad-models" data-source={listed?.source ?? ""}>
+                    {modelsBusy
+                      ? "Reading the models this access can use…"
+                      : modelsError
+                        ? modelsError
+                        : listed?.error
+                          ? listed.error
+                          : listed
+                            ? `${listed.models.length} models from ${sourceText(listed.source, harness?.label ?? form.harness)}${listed.fetched_at ? `, read ${when(listed.fetched_at)}` : ""}.`
+                            : ""}{" "}
+                    {listed && listed.source !== "fixed" && (
+                      <button type="button" className="btn btn-secondary btn-sm ad-models-refresh" onClick={() => readModels(true)} disabled={modelsBusy}>
+                        Refresh
+                      </button>
+                    )}
+                  </span>
                 )}
                 <span className="nd-note">
                   {access?.kind === "subscription" && access.any_model ? (

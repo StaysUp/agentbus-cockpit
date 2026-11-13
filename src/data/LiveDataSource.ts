@@ -8,6 +8,8 @@ import {
   DataSource,
   AgentFields,
   Harness,
+  ModelList,
+  ModelOption,
   SavedAgent,
   RunRequest,
   RunnerInfo,
@@ -246,6 +248,29 @@ export class LiveDataSource implements DataSource {
     if (!res.ok) throw new Error(await apiError(res));
     const data = await res.json();
     return Array.isArray(data.harnesses) ? data.harnesses : [];
+  }
+
+  // GET /api/v0/harnesses/<harness>/models?access=<access>: the models an
+  // access can use now. Only ids and labels of the right shape are kept.
+  async getModels(harness: string, access: string, refresh = false): Promise<ModelList> {
+    const params = new URLSearchParams({ access });
+    if (refresh) params.set('refresh', 'true');
+    const res = await fetch(`${this.baseUrl}/api/v0/harnesses/${encodeURIComponent(harness)}/models?${params}`, { headers: this.headers() });
+    if (!res.ok) throw new Error(await apiError(res));
+    const data = await res.json();
+    const models: ModelOption[] = Array.isArray(data.models)
+      ? data.models
+          .filter((m: unknown): m is { id: string; label?: unknown } => !!m && typeof (m as { id?: unknown }).id === 'string')
+          .map((m: { id: string; label?: unknown }) => (typeof m.label === 'string' && m.label ? { id: m.id, label: m.label } : { id: m.id }))
+      : [];
+    return {
+      harness,
+      access,
+      models,
+      source: typeof data.source === 'string' ? data.source : '',
+      ...(typeof data.fetched_at === 'string' ? { fetched_at: data.fetched_at } : {}),
+      ...(typeof data.error === 'string' && data.error ? { error: data.error } : {}),
+    };
   }
 
   // GET /api/v0/turns/<id>?session=<id>: a queued message's turn. A turn

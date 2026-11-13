@@ -210,14 +210,19 @@ export const Combo: React.FC<{
   placeholder?: string;
   disabled?: boolean;
   className?: string;
-}> = ({ name, label, value, suggestions, onChange, placeholder, disabled, className }) => {
+  // A suggestion's name for a screen, by its value, such as a model's label:
+  // shown with the value beside it, and searched too.
+  labels?: Record<string, string>;
+}> = ({ name, label, value, suggestions, onChange, placeholder, disabled, className, labels }) => {
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(-1);
   const input = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const q = value.trim().toLowerCase();
-  const list = suggestions.filter((s) => !q || s.toLowerCase().includes(q) && s.toLowerCase() !== q);
-  const options: Option[] = list.map((s) => ({ value: s, label: s }));
+  const list = suggestions.filter(
+    (s) => !q || ((s.toLowerCase().includes(q) || !!labels?.[s]?.toLowerCase().includes(q)) && s.toLowerCase() !== q),
+  );
+  const options: Option[] = list.map((s) => (labels?.[s] ? { value: s, label: labels[s], hint: s } : { value: s, label: s }));
   const shown = open && options.length > 0 && !disabled;
   useEffect(() => {
     if (!open) return;

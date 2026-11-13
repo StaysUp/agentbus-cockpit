@@ -542,6 +542,10 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
   const canStart = !!(dataSource.startRun && dataSource.listAgents);
   // The harnesses the service finds: the review picker and the agent form read them.
   const loadHarnesses = useCallback(() => dataSource.getHarnesses!(), [dataSource]);
+  const loadModels = useCallback(
+    (h: string, a: string, refresh?: boolean) => dataSource.getModels!(h, a, refresh),
+    [dataSource],
+  );
   const loadSaved = useCallback(() => dataSource.listAgents!(), [dataSource]);
   const canKeepAgents = !!(dataSource.listAgents && dataSource.getHarnesses && dataSource.createAgent);
   // The Connect step of a subscription agent and the Subscriptions part of
@@ -1304,6 +1308,7 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
           createAgent={(f) => dataSource.createAgent!(f)}
           updateAgent={(id, f) => dataSource.updateAgent!(id, f)}
           subscriptions={subscriptionApi}
+          loadModels={dataSource.getModels ? loadModels : undefined}
           edit={agentsDialog.edit}
           onClose={() => setAgentsDialog(null)}
         />

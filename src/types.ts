@@ -492,6 +492,10 @@ export interface DataSource {
   // on, and the agents to list, save, edit and remove. Each rejects with the
   // API's own words.
   getHarnesses?(): Promise<Harness[]>;
+  // GET /api/v0/harnesses/<harness>/models?access=<access>: the models that
+  // access can use now, from each source's own data. refresh fetches the
+  // list again now.
+  getModels?(harness: string, access: string, refresh?: boolean): Promise<ModelList>;
   // The folders the runners own (GET /api/v0/folders), each by its
   // reference and name.
   listFolders?(): Promise<FolderInfo[]>;
@@ -586,3 +590,23 @@ export interface EventSelection {
 // What the right panel shows, and what carries the mark in the conversation:
 // the whole session, one turn in it, or one model call in that turn.
 export type Level = 'session' | 'turn' | 'call';
+
+// One model an access offers (GET /api/v0/harnesses/<harness>/models).
+export interface ModelOption {
+  id: string;
+  // Its name for a screen, when the source gives one.
+  label?: string;
+}
+
+// The models a harness can use now on one access, and where the list came
+// from: api (OpenRouter's list), command (agy models on control), runner
+// (codex's own cache, reported after a turn) or fixed (claude's aliases).
+export interface ModelList {
+  harness: string;
+  access: string;
+  models: ModelOption[];
+  source: string;
+  fetched_at?: string;
+  // Why the list is empty or old, in the service's words.
+  error?: string;
+}
