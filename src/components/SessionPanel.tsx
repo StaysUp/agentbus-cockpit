@@ -76,6 +76,7 @@ export const SessionPanel: React.FC<SessionPanelProps> = ({
 
       <div id="d-body">
         <div className="sub-h first">Turns</div>
+        <div className="grid-scroll">
         <table className="grid events turns">
           <thead>
             <tr>
@@ -100,6 +101,7 @@ export const SessionPanel: React.FC<SessionPanelProps> = ({
             ))}
           </tbody>
         </table>
+        </div>
         {queue && reviewUI() && (
           <SessionTurns rows={queue} turns={turns} onSelectTurn={onSelectTurn} error={queueError} />
         )}

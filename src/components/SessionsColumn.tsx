@@ -25,6 +25,9 @@ interface SessionsColumnProps {
   onRename?: (sessionId: string, title: string) => Promise<void>;
   // The saved agents, to name the agents that took part in each session.
   agents?: SavedAgent[];
+  // Opens the Agents menu: on a narrow screen the Agents column is a menu
+  // at the top of this one (styles/narrow.css shows the button there only).
+  onAgents?: () => void;
 }
 
 export const SessionsColumn: React.FC<SessionsColumnProps> = ({
@@ -36,6 +39,7 @@ export const SessionsColumn: React.FC<SessionsColumnProps> = ({
   live,
   onRename,
   agents,
+  onAgents,
 }) => {
   // The session whose name is being edited, if any.
   const [editing, setEditing] = useState<string | null>(null);
@@ -61,6 +65,13 @@ export const SessionsColumn: React.FC<SessionsColumnProps> = ({
   return (
     <section id="sessions">
       <header className="colhead">
+        {onAgents && (
+          <button type="button" className="agents-menu btn btn-quiet" onClick={onAgents} aria-label="Agents" title="Agents">
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" aria-hidden="true">
+              <path d="M3 4.5h10M3 8h10M3 11.5h10" />
+            </svg>
+          </button>
+        )}
         {/* No cost total here, as in the mockup: each card and the panel carry the cost. */}
         <div className="colhead-title">Sessions</div>
         {onNewSession && !empty && (

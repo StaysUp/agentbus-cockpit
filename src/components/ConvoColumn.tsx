@@ -13,6 +13,7 @@ import { PencilIcon, TitleEdit } from './TitleEdit';
 import { ShellEntry } from './ShellEntry';
 import { Select, Switch } from './Controls';
 import { commandsAfter } from '../data/shell';
+import { BackButton } from './BackButton';
 
 interface ConvoColumnProps {
   session: SessionDetail;
@@ -84,6 +85,8 @@ interface ConvoColumnProps {
   // read-only between its turns. A "!" message now goes to the agent like
   // any other: it runs the command with its own shell tool.
   commands?: ShellRun[];
+  // Back to the Sessions column, on a narrow screen (src/columns.ts).
+  onBack?: () => void;
 }
 
 // The name of the agent that ran a turn: its saved agent's, else its
@@ -237,6 +240,7 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
   onRename,
   onChanges,
   commands,
+  onBack,
 }) => {
   // A turn's folder is shown when it is not the session's: by name when the
   // service lists its reference.
@@ -461,6 +465,7 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
   return (
     <main id="convo" data-session={session.id}>
       <header id="c-head" className="colhead">
+        {onBack && <BackButton label="Sessions" onClick={onBack} />}
         {renaming && onRename ? (
           <TitleEdit
             className="c-title-input"

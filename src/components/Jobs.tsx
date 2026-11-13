@@ -379,6 +379,7 @@ export const SessionTurns: React.FC<SessionTurnsProps> = ({ rows, turns, onSelec
       {rows.length === 0 ? (
         <p className="dim">No turns in this session.</p>
       ) : (
+        <div className="grid-scroll">
         <table className="grid events jobs-table">
           <thead>
             <tr>
@@ -420,6 +421,7 @@ export const SessionTurns: React.FC<SessionTurnsProps> = ({ rows, turns, onSelec
             })}
           </tbody>
         </table>
+        </div>
       )}
     </>
   );

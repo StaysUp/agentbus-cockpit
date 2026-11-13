@@ -26,6 +26,7 @@ export const McpTab: React.FC<McpTabProps> = ({ box, running }) => {
 
       <div className="sub-h">Hidden by AgentBus</div>
       {box.hidden.length ? (
+        <div className="grid-scroll">
         <table className="grid mcp-t">
           <tbody>
             {box.hidden.map((h) => (
@@ -38,6 +39,7 @@ export const McpTab: React.FC<McpTabProps> = ({ box, running }) => {
             ))}
           </tbody>
         </table>
+        </div>
       ) : (
         <p className="dim">{box.listed ? 'None: this harness keeps all its own tools.' : 'Not in the record.'}</p>
       )}
@@ -53,6 +55,7 @@ export const McpTab: React.FC<McpTabProps> = ({ box, running }) => {
 };
 
 const Tools: React.FC<{ tools: ToolboxTool[]; server: string }> = ({ tools, server }) => (
+  <div className="grid-scroll">
   <table className="grid mcp-t">
     <tbody>
       {tools.map((t) => (
@@ -65,4 +68,5 @@ const Tools: React.FC<{ tools: ToolboxTool[]; server: string }> = ({ tools, serv
       ))}
     </tbody>
   </table>
+  </div>
 );

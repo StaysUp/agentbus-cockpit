@@ -7,6 +7,8 @@ import { SettingsPage } from './components/SettingsPage';
 import { RunnersPage } from './components/RunnersPage';
 import { RUNNERS_PAGE_POLL_MS, useRunners } from './components/RunnersList';
 import { usePage } from './page';
+import { useColumns } from './columns';
+import { BackButton } from './components/BackButton';
 import { sandboxOffer, type SettingsApi } from './data/settings';
 import { useTabShown } from './data/useTabShown';
 import { SubscriptionApi } from './components/ConnectStep';
@@ -191,8 +193,17 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
   // The one click in the chat that opens the panel: a turn.
   const clickTurn = (turn: Turn) => {
     selectTurnLevel(turn);
-    setPanelOpen(true);
+    columns.forward('turn');
   };
+  // Which column a narrow screen shows, and its moves (src/columns.ts).
+  const columns = useColumns(panelOpen, setPanelOpen);
+  const closePanel = () => columns.back('turn');
+  const closePanelRef = useRef(closePanel);
+  closePanelRef.current = closePanel;
+  // The Agents column is a menu on a narrow screen: open or not.
+  const [agentsMenu, setAgentsMenu] = useState(false);
+  const agentsMenuRef = useRef(false);
+  agentsMenuRef.current = agentsMenu && columns.narrow;
 
 
   // The agents form: closed (null), or open for a new agent or on one to edit.
@@ -703,11 +714,13 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
       setPanelOpen(false);
       setDraft({ id: ++draftSeq.current, req, title });
       setNewSession(null);
+      columns.forward('convo');
       return;
     }
     await launch(req, title, gen);
     setDraft(null);
     setNewSession(null);
+    columns.forward('convo');
   };
   // The draft's first message, once sent. A message sent after it goes to
   // the session that one opens, never to a second new session.
@@ -1033,9 +1046,13 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
         t.blur();
         return;
       }
+      if (agentsMenuRef.current) {
+        setAgentsMenu(false);
+        return;
+      }
       if (!panelOpenRef.current) return;
       if (panelEscRef.current?.()) return;
-      setPanelOpen(false);
+      closePanelRef.current();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -1078,7 +1095,14 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
 
   return (
     <FoldersContext.Provider value={folders}>
-    <div id="app" className={panelOpen ? 'panel' : 'nopanel'}>
+    <div
+      id="app"
+      className={`${panelOpen ? 'panel' : 'nopanel'}${agentsMenu && columns.narrow ? ' agents-open' : ''}`}
+      data-column={columns.column}
+    >
+      {agentsMenu && columns.narrow && (
+        <div className="agents-scrim" aria-hidden="true" onClick={() => setAgentsMenu(false)} />
+      )}
       <AgentsColumn
         agents={savedAgents ?? []}
         selectedAgentId={selectedAgentId}
@@ -1087,7 +1111,10 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
         disconnectLabel={disconnectLabel}
         // Selecting an agent only marks it, for "+ Session": the session on
         // screen and the list stay.
-        onSelectAgent={setSelectedAgentId}
+        onSelectAgent={(id) => {
+          setSelectedAgentId(id);
+          setAgentsMenu(false);
+        }}
         onAddAgent={canKeepAgents ? () => setAgentsDialog({}) : undefined}
         onEditAgent={canKeepAgents && dataSource.updateAgent ? (a) => setAgentsDialog({ edit: a }) : undefined}
         onRemoveAgent={canKeepAgents && dataSource.removeAgent ? removeAgent : undefined}
@@ -1102,14 +1129,24 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
       <SessionsColumn
         sessions={sessions}
         live={dataSource.subscribe ? liveTurns : undefined}
-        selectedSessionId={draft ? null : selectedSessionId}
+        // A narrow screen shows the Sessions column alone, and every card is
+        // a button that opens its conversation, the one open before included.
+        selectedSessionId={draft || (columns.narrow && columns.column === 'sessions') ? null : selectedSessionId}
         onSelectSession={(sessId) => {
+          // The session already on screen, tapped on a narrow screen: only
+          // its column opens. A send in it still selects its turn.
+          if (sessId === selectedSessionId && !draft) {
+            columns.forward('convo');
+            return;
+          }
           setDraft(null);
           nextSend();
           setAwaitedTurn(null);
           setAwaitedSession(null);
           chooseSession(sessId);
+          columns.forward('convo');
         }}
+        onAgents={() => setAgentsMenu(true)}
         // New session starts on the selected agent when it is a saved one.
         onNewSession={canStart ? () => setNewSession({ agent: savedAgents?.find((a) => a.id === selectedAgentId)?.id }) : undefined}
         onRename={renameSession}
@@ -1141,6 +1178,7 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
           onAddAgent={canKeepAgents ? () => setAgentsDialog({}) : undefined}
           agentDot={agentDot}
           onRename={async (_id, t) => setDraft((d) => (d ? { ...d, title: t.trim() } : d))}
+          onBack={() => columns.back('convo')}
         />
       ) : sessionView ? (
         <ConvoColumn
@@ -1183,10 +1221,12 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
           onRename={renameSession}
           onChanges={dataSource.getTurnDiff ? setChangesTurn : undefined}
           commands={commandsBySession[sessionView.id]}
+          onBack={() => columns.back('convo')}
         />
       ) : (
         <main id="convo">
           <header id="c-head" className="colhead">
+            <BackButton label="Sessions" onClick={() => columns.back('convo')} />
             <div className="colhead-title">{allSessions.length === 0 ? 'No sessions yet' : 'No session selected'}</div>
           </header>
           <div id="c-msgs" style={{ padding: '1.25rem' }}>
@@ -1225,7 +1265,7 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
         onFix={fixFindings}
         loadAgents={dataSource.getHarnesses ? loadHarnesses : undefined}
         live={!!dataSource.subscribe}
-        onClose={() => setPanelOpen(false)}
+        onClose={closePanel}
         escRef={panelEscRef}
       />
       </div>

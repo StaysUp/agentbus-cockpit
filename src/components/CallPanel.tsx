@@ -127,6 +127,7 @@ export const CallPanel: React.FC<CallPanelProps> = ({ turn, call, tab, onTab, on
             {call.tools.length === 0 ? (
               <p className="dim">None.</p>
             ) : (
+              <div className="grid-scroll">
               <table className="grid events asked">
                 <thead>
                   <tr>
@@ -157,6 +158,7 @@ export const CallPanel: React.FC<CallPanelProps> = ({ turn, call, tab, onTab, on
                   ))}
                 </tbody>
               </table>
+              </div>
             )}
           </div>
         )}

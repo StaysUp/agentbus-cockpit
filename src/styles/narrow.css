@@ -1,0 +1,66 @@
+/* ---------- the cockpit on narrow screens (src/columns.ts) ---------- */
+/* Above 1200px the layout is app.css alone. html and body keep
+   overflow: hidden at every width: the cockpit is one screen whose columns
+   scroll in their own boxes, and a page scroll would move the headers and
+   the message box away. #app gets overflow-x: auto below 1200px, so anything
+   wider than the screen shows as a sideways scroll and is not cut off. */
+
+.col-back, .agents-menu, .agents-scrim { display: none; }
+
+/* 900-1200px: the turn panel opens over the conversation from the right. */
+@media (min-width: 901px) and (max-width: 1200px) {
+  #app { position: relative; }
+  #app.panel #convo { width: auto; flex: 1; min-width: 0; }
+  #app.panel #right {
+    position: absolute; top: 0; right: 0; bottom: 0; z-index: 50;
+    width: min(46rem, calc(100% - 4rem));
+    box-shadow: -0.875rem 0 2rem rgba(20,20,20,.14);
+  }
+}
+
+/* Under 1200px a table in the turn panel scrolls sideways in its own box. */
+@media (max-width: 1200px) {
+  #app { overflow-x: auto; }
+  #right .grid-scroll { max-width: 100%; overflow-x: auto; }
+  /* A long tool path or summary wraps; an event's kind stays on one line. */
+  #right .grid td.sm { overflow-wrap: anywhere; }
+  #right .grid code.ty { white-space: nowrap; }
+}
+
+/* Under 900px: one column at a time, Sessions, then the conversation, then
+   the turn panel; #app's data-column names it. Agents is a menu. */
+@media (max-width: 900px) {
+  #app { position: relative; height: 100dvh; }
+  #app > #sessions, #app > #convo, #app #right { display: none; }
+  #app[data-column="sessions"] > #sessions,
+  #app[data-column="convo"] > #convo,
+  #app[data-column="turn"] #right { display: flex; flex: 1; width: auto; min-width: 0; border: 0; }
+
+  /* The Agents column, as a menu over the Sessions column. */
+  #app > #agents { display: none; }
+  #app.agents-open > #agents {
+    display: flex; position: absolute; top: 0; left: 0; bottom: 0; z-index: 61;
+    width: min(18rem, calc(100% - 3rem)); box-shadow: 0.875rem 0 2rem rgba(20,20,20,.18);
+  }
+  #app.agents-open > .agents-scrim { display: block; position: absolute; inset: 0; z-index: 60; background: rgba(20,20,20,.28); }
+  .agents-menu { display: inline-flex; padding: 0; }
+  #sessions .colhead { padding-left: 0.5rem; }
+
+  /* Each column's header has its back button; the panel's back is its close. */
+  .col-back { display: inline-flex; padding: 0 0.625rem 0 0.375rem; }
+  #p-head .p-close { display: none; }
+  #c-head, #p-head { padding: 0 0.75rem; gap: 0.5rem; }
+  #p-head { height: auto; }
+  #p-head .colhead-title { height: auto; align-items: center; }
+
+  /* Tap targets at least 40px high. */
+  #app button, #app .tb.pick, #app [role="button"], #app [role="tab"] { min-height: 40px; }
+  #app .icon-btn, #app .col-back, #app .agents-menu, #app .c-rename { min-width: 40px; }
+  #app .colhead { height: auto; min-height: 3.5rem; }
+
+  /* The conversation and the panel use the full width. */
+  .c-in { padding: 0 0.75rem; }
+  #c-reply { padding: 0.5rem 0.75rem 0.75rem; }
+  #right #d-head, #right #d-body { padding-left: 0.75rem; padding-right: 0.75rem; }
+  #right #d-tabs { padding: 0 0.5rem; overflow-x: auto; }
+}

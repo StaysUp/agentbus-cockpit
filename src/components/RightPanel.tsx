@@ -603,6 +603,7 @@ const TurnPanel: React.FC<TurnPanelProps> = ({
         )}
 
         {tab === 'events' && (
+          <div className="grid-scroll">
           <table className="grid events">
             <thead>
               <tr>
@@ -642,10 +643,12 @@ const TurnPanel: React.FC<TurnPanelProps> = ({
               })}
             </tbody>
           </table>
+          </div>
         )}
 
         {tab === 'model' && (
           <div>
+            <div className="grid-scroll">
             <table className="grid events">
               <thead>
                 <tr>
@@ -711,6 +714,7 @@ const TurnPanel: React.FC<TurnPanelProps> = ({
                 })}
               </tbody>
             </table>
+            </div>
           </div>
         )}
 
