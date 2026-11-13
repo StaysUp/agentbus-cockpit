@@ -53,7 +53,7 @@ describe('one look', () => {
   });
 
   it('no button has a look of its own', () => {
-    const oneOff = /\.(connect-go|use-recorded|rn-btn|cs-btn|cs-open|rb-go|rb-fix|head-btn|page-back|pg-save|new-session|add-agent|ag-(edit|remove|yes|keep))\b/;
+    const oneOff = /\.(connect-go|rn-btn|cs-btn|cs-open|rb-go|rb-fix|head-btn|page-back|pg-save|new-session|add-agent|ag-(edit|remove|yes|keep))\b/;
     const styled = all
       .filter(([sel, body]) => oneOff.test(sel) && /\b(background|border|color)\s*:/.test(body))
       .map(([sel]) => sel);

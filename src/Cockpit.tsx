@@ -14,6 +14,7 @@ import {
   saveReplay,
   servedByAgentbus,
   takeSignInCode,
+  wantsRecorded,
 } from './data/connection';
 import { LiveDataSource } from './data/LiveDataSource';
 import { probeQueue, TurnsClient } from './data/jobs';
@@ -42,15 +43,24 @@ export function resetSignInCode(): void {
 }
 
 // Chooses the data source: the live client API after a checked connect, or
-// the recorded sessions for demos. The app itself never knows which.
+// the recorded sessions when the address asks for them with ?recorded (for
+// development and tests; nothing on screen leads there). The app itself
+// never knows which.
 //
 // Served by agentbus itself, the API is this page's own origin: the sign-in
 // link's code connects without the connect screen, and the screen, when it
 // shows, offers that address. From the dev server it works as before.
 export const Cockpit: React.FC = () => {
   const served = useMemo(() => servedByAgentbus(), []);
-  const code = useMemo(() => signInCode(), []);
-  const [saved, setSaved] = useState<Saved>(() => (code ? null : loadSaved()));
+  const recorded = useMemo(() => wantsRecorded(), []);
+  const code = useMemo(() => (recorded ? null : signInCode()), []);
+  const [saved, setSaved] = useState<Saved>(() => {
+    if (recorded) {
+      saveReplay();
+      return { mode: 'replay' };
+    }
+    return code ? null : loadSaved();
+  });
   // A connection kept from earlier in this tab is checked again before use;
   // a sign-in code is traded and checked.
   const [checking, setChecking] = useState(() => saved?.mode === 'live' || code !== null);
@@ -70,8 +80,7 @@ export const Cockpit: React.FC = () => {
   }, [saved, live]);
   const queue = useMemo(() => (live && hasQueue ? new TurnsClient(live.address, live.token) : undefined), [live, hasQueue]);
 
-  // Each check gets an id. Any mode change (recorded data, disconnect, a new
-  // connect) takes a new id, so the result of an older check is ignored.
+  // Each check gets an id. Any mode change (disconnect, a new connect) takes a new id, so the result of an older check is ignored.
   const checkId = useRef(0);
   const startCheck = () => ++checkId.current;
   const cancelChecks = () => {
@@ -144,13 +153,6 @@ export const Cockpit: React.FC = () => {
     setSaved({ mode: 'live', connection: c });
   };
 
-  const useRecorded = () => {
-    cancelChecks();
-    setError(null);
-    saveReplay();
-    setSaved({ mode: 'replay' });
-  };
-
   const disconnect = () => {
     cancelChecks();
     clearSaved();
@@ -169,7 +171,6 @@ export const Cockpit: React.FC = () => {
         checking={checking}
         error={error}
         onConnect={connect}
-        onUseRecorded={useRecorded}
         served={served}
       />
     );

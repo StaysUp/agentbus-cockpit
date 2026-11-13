@@ -133,6 +133,12 @@ export function servedByAgentbus(doc: Document = document): boolean {
   return doc.querySelector('meta[name="agentbus"][content="served"]') !== null;
 }
 
+// The recorded sample is for development and tests only, so the connect
+// screen offers no way in. A developer opens it with ?recorded in the address.
+export function wantsRecorded(loc: Location = window.location): boolean {
+  return new URL(loc.href).searchParams.has('recorded');
+}
+
 // The one-time code of agentbus up's sign-in link, /?t=<code>. Read once and
 // removed from the address bar at once, so it is not kept in history or
 // bookmarks. Null when there is none.

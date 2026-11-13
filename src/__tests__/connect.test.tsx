@@ -91,6 +91,7 @@ async function submit(container: HTMLElement) {
 beforeEach(() => {
   sessionStorage.clear();
   localStorage.clear();
+  window.history.replaceState(null, '', '/');
 });
 afterEach(() => vi.unstubAllGlobals());
 
@@ -185,71 +186,55 @@ describe('Connect screen', () => {
     r.unmount();
   });
 
-  it('"Use recorded data" shows the replay source with no fetch', async () => {
+  it('offers no way into recorded data in a production render', async () => {
+    vi.stubEnv('DEV', false);
+    vi.stubEnv('PROD', true);
+    vi.stubEnv('MODE', 'production');
+    try {
+      const r = await render(<Cockpit />);
+      expect(r.container.querySelector('form.connect')).not.toBeNull();
+      expect(r.container.querySelector('button.use-recorded')).toBeNull();
+      expect(r.container.textContent).not.toMatch(/recorded/i);
+      expect([...r.container.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['Connect']);
+      r.unmount();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('?recorded in the address opens the recorded data with no fetch', async () => {
     const fetchSpy = vi.fn();
     vi.stubGlobal('fetch', fetchSpy);
+    window.history.replaceState(null, '', '/?recorded');
     const r = await render(<Cockpit />);
-    await click(r.container.querySelector('button.use-recorded'));
     await flush();
     await flush();
+    expect(r.container.querySelector('form.connect')).toBeNull();
     expect(r.container.querySelectorAll('.tb').length).toBeGreaterThan(0);
+    expect(r.container.querySelector('button.disconnect')?.textContent).toBe('Connect');
+    expect(sessionStorage.getItem('agentbus.mode')).toBe('replay');
+    expect(fetchSpy).not.toHaveBeenCalled();
+    r.unmount();
+  });
+
+  it('?recorded wins over a saved connection: no check runs and the token is dropped', async () => {
+    sessionStorage.setItem('agentbus.address', ADDR);
+    sessionStorage.setItem('agentbus.token', TOKEN);
+    const fetchSpy = vi.fn();
+    vi.stubGlobal('fetch', fetchSpy);
+    window.history.replaceState(null, '', '/?recorded');
+    const r = await render(<Cockpit />);
+    await flush();
+    await flush();
+    expect(r.container.querySelector('form.connect')).toBeNull();
+    expect(r.container.querySelector('.connect-error')).toBeNull();
+    expect(sessionStorage.getItem('agentbus.token')).toBeNull();
     expect(fetchSpy).not.toHaveBeenCalled();
     r.unmount();
   });
 });
 
-// A fetch that waits until the test answers it.
-function heldFetch() {
-  const pending: ((r: Response) => void)[] = [];
-  const fn = vi.fn(() => new Promise<Response>((resolve) => pending.push(resolve)));
-  return { fn, pending };
-}
-
 describe('Connect checks that are overtaken', () => {
-  it('choosing recorded data while a connect check runs keeps recorded data when the check passes', async () => {
-    const held = heldFetch();
-    vi.stubGlobal('fetch', held.fn);
-    const r = await render(<Cockpit />);
-    await type(r.container.querySelector('input[name="token"]'), TOKEN);
-    await submit(r.container);
-    expect(held.pending).toHaveLength(1);
-
-    await click(r.container.querySelector('button.use-recorded'));
-    await act(async () => {
-      held.pending[0](json({ store: 'st_1', seq: 5, sessions: [summary] }));
-    });
-    await flush();
-    await flush();
-
-    expect(r.container.querySelector('form.connect')).toBeNull();
-    expect(r.container.querySelector('button.disconnect')?.textContent).toBe('Connect');
-    expect(sessionStorage.getItem('agentbus.token')).toBeNull();
-    expect(sessionStorage.getItem('agentbus.mode')).toBe('replay');
-    r.unmount();
-  });
-
-  it('choosing recorded data while the startup recheck runs keeps recorded data when the recheck fails', async () => {
-    sessionStorage.setItem('agentbus.address', ADDR);
-    sessionStorage.setItem('agentbus.token', TOKEN);
-    const held = heldFetch();
-    vi.stubGlobal('fetch', held.fn);
-    const r = await render(<Cockpit />);
-    await flush();
-    expect(held.pending.length).toBeGreaterThan(0);
-
-    await click(r.container.querySelector('button.use-recorded'));
-    await act(async () => {
-      for (const answer of held.pending) answer(json({ error: 'unauthorized' }, 401));
-    });
-    await flush();
-    await flush();
-
-    expect(r.container.querySelector('form.connect')).toBeNull();
-    expect(r.container.querySelector('.connect-error')).toBeNull();
-    expect(sessionStorage.getItem('agentbus.mode')).toBe('replay');
-    r.unmount();
-  });
-
   it('a 200 that is not a snapshot is refused and nothing is stored', async () => {
     vi.stubGlobal(
       'fetch',

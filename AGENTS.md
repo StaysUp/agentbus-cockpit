@@ -40,8 +40,9 @@ with no console errors. Open it in a browser and look before saying it works.
   repository, and a running service serves its OpenAPI description at `/api/v0/openapi.json`. If a
   screen needs data the API does not offer, ask for it in the AgentBus repository. Do not work
   around it here.
-- **The replay source** (`src/data/ReplayDataSource.ts`) reads a recorded `.jsonl` file. "Use
-  recorded data" on the connect screen opens it, with no service needed.
+- **The replay source** (`src/data/ReplayDataSource.ts`) reads a recorded `.jsonl` file. Adding
+  `?recorded` to the address opens it, with no service needed. The connect screen has no button
+  for it: recorded data is for development and tests only.
 - **`testdata/sessions-v0.jsonl`** is two real Claude Code sessions recorded through the gateway,
   with the person's name and email replaced. It predates the `seq` and `turn` fields and the
   `session.registered` event, so the replay source must work without them.

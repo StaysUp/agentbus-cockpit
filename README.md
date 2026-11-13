@@ -65,7 +65,9 @@ running AgentBus (`agentbus up`) of the same version.
    Paste it into the Token field and press Connect. The dev server never uses the sign-in link;
    only the cockpit that `agentbus up` serves does.
 
-**Use recorded data** opens the cockpit on a recorded sample, with no service needed.
+To work on the cockpit with no service, add `?recorded` to the address
+(`http://localhost:5173/?recorded`). It opens a recorded sample. The connect screen has no
+button for it, so people using the cockpit never land there.
 
 ## Using it
 

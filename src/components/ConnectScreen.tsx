@@ -6,7 +6,6 @@ interface ConnectScreenProps {
   checking: boolean;
   error: string | null;
   onConnect: (address: string, token: string) => void;
-  onUseRecorded: () => void;
   // Served by agentbus itself: say how to get a sign-in link.
   served?: boolean;
 }
@@ -17,7 +16,6 @@ export const ConnectScreen: React.FC<ConnectScreenProps> = ({
   checking,
   error,
   onConnect,
-  onUseRecorded,
   served = false,
 }) => {
   // The token lives only in this field until a check passes.
@@ -64,9 +62,6 @@ export const ConnectScreen: React.FC<ConnectScreenProps> = ({
         <div className="connect-actions">
           <button type="submit" className="btn btn-primary connect-go" disabled={checking}>
             {checking ? 'Checking…' : 'Connect'}
-          </button>
-          <button type="button" className="btn btn-secondary use-recorded" onClick={onUseRecorded}>
-            Use recorded data
           </button>
         </div>
       </form>
