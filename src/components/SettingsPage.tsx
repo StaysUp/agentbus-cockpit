@@ -16,6 +16,7 @@ import { ColHead, PageFrame } from "./PageFrame";
 import { Button, Seg, Switch } from "./Controls";
 import { setLeaveGuard } from "../page";
 import { ConnectStep, SubscriptionApi } from "./ConnectStep";
+import { OpenRouterKey } from "./OpenRouterKey";
 import { SubscriptionList } from "../types";
 
 // The Settings page (/settings): control's settings, one global set for every machine.
@@ -297,6 +298,10 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ api, onBack, sandbox
           <p className="pg-note">
             Every turn uses the subscription connected here, on this machine and on your runners. A tool&apos;s own
             sign-in on a machine is not used.
+          </p>
+          <p className="pg-note">
+            OpenRouter agents use the OpenRouter key set here. Control adds it to each call; no runner or agent ever
+            holds it, and it is never shown again.
           </p>
           <p className="f-note first">A turn whose tool is not connected is refused, and says so.</p>
         </div>
@@ -695,6 +700,7 @@ const SubscriptionsPart: React.FC<{ api: SubscriptionApi }> = ({ api }) => {
       {list.subscriptions.map((s) => (
         <ConnectStep key={s.harness} harness={s.harness} api={api} />
       ))}
+      <OpenRouterKey api={api} />
     </>
   );
 };

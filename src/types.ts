@@ -471,8 +471,8 @@ export interface SubscriptionState {
 }
 export interface SubscriptionList {
   subscriptions: SubscriptionState[];
-  // Whether an OpenRouter key is kept on control (set in Settings). Never
-  // the key.
+  // Whether an OpenRouter key is set on control. Never the key. Absent: a
+  // control too old to keep one.
   openrouter_key?: { set: boolean; set_at?: string };
 }
 
@@ -525,6 +525,10 @@ export interface DataSource {
   connectInput?(harness: string, line: string): Promise<void>;
   // DELETE /api/v0/subscriptions/<harness>/connect: stop a running login.
   cancelConnect?(harness: string): Promise<void>;
+  // PUT and DELETE /api/v0/subscriptions/openrouter/key: set the OpenRouter
+  // key on control, sent once and never read back, or remove it.
+  setOpenRouterKey?(key: string): Promise<void>;
+  removeOpenRouterKey?(): Promise<void>;
   // The settings routes (/api/v0/settings), for the Settings page.
   getSettings?(): Promise<Versioned<SettingsInfo>>;
   getPolicy?(): Promise<Versioned<Policy>>;

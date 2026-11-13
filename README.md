@@ -65,8 +65,8 @@ AgentBus API, so anything it shows, your own program can read too.
 ## Using it
 
 - **An agent is a saved setup**: a harness (Claude Code, Codex or Antigravity), how it reaches a
-  model (a subscription connected in Settings, or an OpenRouter key read from an environment
-  variable), the model and a name. "+ Agent" makes one. A subscription agent starts with no model,
+  model (a subscription connected in Settings, or the OpenRouter key set in Settings), the
+  model and a name. "+ Agent" makes one. A subscription agent starts with no model,
   so the tool picks its own; type a model name to pin one.
 - **+ Session** picks a machine, then a folder on it, and the first message. The session works on
   its own copy of the folder. Your folder does not change until a turn is applied.
@@ -98,6 +98,12 @@ form), before its first turn. **Connect** runs the harness's own login on contro
 on control and is never shown. Every turn uses it, on one machine (`agentbus up`) as on many: a
 tool's own sign-in on the machine is not used. A code the login rejects says so at once, and
 **Cancel** stops a connect that is running.
+
+For OpenRouter agents, paste your OpenRouter key once in the same place (**OpenRouter key**,
+**Save**). It is a password field: the key is sent once and never shown again. The row then says
+"set", with **Replace** and **Remove**. Control adds the key to each OpenRouter call; no runner or
+agent holds it. An agent saved before this may name an environment variable for its key (under
+**Advanced** in its form); a key set in Settings wins.
 
 ## Build a static copy
 

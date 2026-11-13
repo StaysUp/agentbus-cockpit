@@ -299,7 +299,32 @@ export class LiveDataSource implements DataSource {
     if (!res.ok) throw new Error(await apiError(res));
     const data = await res.json();
     const subs: SubscriptionState[] = Array.isArray(data.subscriptions) ? data.subscriptions : [];
-    return { subscriptions: subs.map((s) => (s.connect ? { ...s, connect: connectView(s.connect) } : s)) };
+    const out: SubscriptionList = { subscriptions: subs.map((s) => (s.connect ? { ...s, connect: connectView(s.connect) } : s)) };
+    const k = data.openrouter_key;
+    if (k && typeof k === 'object' && typeof k.set === 'boolean') {
+      out.openrouter_key = { set: k.set, ...(typeof k.set_at === 'string' ? { set_at: k.set_at } : {}) };
+    }
+    return out;
+  }
+
+  // PUT /api/v0/subscriptions/openrouter/key: 204. The key goes in the body
+  // only, never in a URL, and nothing of it comes back.
+  async setOpenRouterKey(key: string): Promise<void> {
+    const res = await fetch(`${this.baseUrl}/api/v0/subscriptions/openrouter/key`, {
+      method: 'PUT',
+      headers: { ...this.headers(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key }),
+    });
+    if (!res.ok) throw new Error(await apiError(res));
+  }
+
+  // DELETE /api/v0/subscriptions/openrouter/key: 204.
+  async removeOpenRouterKey(): Promise<void> {
+    const res = await fetch(`${this.baseUrl}/api/v0/subscriptions/openrouter/key`, {
+      method: 'DELETE',
+      headers: this.headers(),
+    });
+    if (!res.ok) throw new Error(await apiError(res));
   }
 
   // POST /api/v0/subscriptions/<harness>/connect: 202 with the login started

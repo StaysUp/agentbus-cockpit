@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { Combo, Seg, Select } from "./Controls";
 import { AccessOption, AgentFields, Harness, SavedAgent } from "../types";
 import { ConnectStep, SubscriptionApi } from "./ConnectStep";
+import { OpenRouterKey } from "./OpenRouterKey";
 
 // The "+ Agent" form, and the same form to edit a saved agent: Harness,
 // then Access (only what that harness offers), then Model (what that harness
@@ -29,7 +30,9 @@ export const accessText = (a: { access: string; key_env?: string }): string =>
   a.access === "subscription"
     ? "subscription"
     : a.access === "openrouter"
-      ? `OpenRouter · ${a.key_env ?? "OPENROUTER_API_KEY"}`
+      ? a.key_env && a.key_env !== "OPENROUTER_API_KEY"
+        ? `OpenRouter · ${a.key_env}`
+        : "OpenRouter"
       : a.access;
 
 export function agentLine(a: SavedAgent, harnesses?: Harness[]): string {
@@ -73,7 +76,9 @@ function freshForm(harnesses: Harness[]): FormState {
     harness: h?.name ?? "",
     access: acc?.kind ?? "",
     model: startModel(acc),
-    keyEnv: acc?.key_env ?? "",
+    // No variable unless the person names one: control adds the key set in
+    // Settings, or reads the default variable.
+    keyEnv: "",
     name: "",
     named: false,
   };
@@ -169,8 +174,6 @@ export const AgentsDialog: React.FC<AgentsDialogProps> = ({
           acc?.any_model && cur.access === f.access && f.model !== "";
         if (acc && !keep && !acc.models.includes(f.model))
           f.model = startModel(acc);
-        if (acc?.kind === "openrouter" && !f.keyEnv)
-          f.keyEnv = acc.key_env ?? "";
       }
       if (!f.named) f.name = autoName(f, hs);
       return f;
@@ -214,10 +217,10 @@ export const AgentsDialog: React.FC<AgentsDialogProps> = ({
   };
 
   const openRouter = form?.access === "openrouter";
-  const keyKnown =
-    openRouter && access?.key_env === form?.keyEnv.trim()
-      ? access?.key_set
-      : undefined;
+  // The key variable is an advanced field: open at once only for an agent
+  // that names a variable other than the default.
+  const defaultKeyEnv = access?.key_env ?? "OPENROUTER_API_KEY";
+  const ownVariable = !!edit?.key_env && edit.key_env !== defaultKeyEnv;
 
   return (
     <div
@@ -279,13 +282,14 @@ export const AgentsDialog: React.FC<AgentsDialogProps> = ({
                 />
                 <span className="nd-note">
                   {openRouter
-                    ? "The key is read from an environment variable where the turn runs. Its value is never shown or stored."
+                    ? "Control adds your OpenRouter key, set once in Settings, Subscriptions. No runner or agent ever holds it."
                     : `Uses the ${access?.label ?? "harness sign-in"}.`}
                 </span>
               </label>
               {subscriptions && form.access === "subscription" && form.harness && (
                 <ConnectStep key={form.harness} harness={form.harness} api={subscriptions} />
               )}
+              {subscriptions && openRouter && <OpenRouterKey api={subscriptions} />}
               <label>
                 <span>Model</span>
                 {access?.any_model ? (
@@ -333,29 +337,27 @@ export const AgentsDialog: React.FC<AgentsDialogProps> = ({
                 </span>
               </label>
               {openRouter && (
-                <label>
-                  <span>Key variable</span>
-                  <input
-                    name="key_env"
-                    type="text"
-                    value={form.keyEnv}
-                    onChange={(e) => update({ keyEnv: e.target.value })}
-                    spellCheck={false}
-                    autoComplete="off"
-                  />
-                  <span className="nd-note">
-                    {keyKnown === true && (
-                      <span className="ok">Set where the service runs.</span>
-                    )}
-                    {keyKnown === false && (
-                      <span className="warn">
-                        Not set where the service runs.
-                      </span>
-                    )}
-                    {keyKnown === undefined &&
-                      "The name of the variable, never the key."}
-                  </span>
-                </label>
+                <details className="ad-advanced" open={ownVariable}>
+                  <summary>Advanced</summary>
+                  <label>
+                    <span>Key variable</span>
+                    <input
+                      name="key_env"
+                      type="text"
+                      value={form.keyEnv}
+                      placeholder={defaultKeyEnv}
+                      onChange={(e) => update({ keyEnv: e.target.value })}
+                      spellCheck={false}
+                      autoComplete="off"
+                    />
+                    <span className="nd-note">
+                      Only for a key kept in an environment variable where
+                      control runs, as agents saved before Settings kept it.
+                      A key set in Settings wins. The name of the variable,
+                      never the key; empty reads {defaultKeyEnv}.
+                    </span>
+                  </label>
+                </details>
               )}
               <label>
                 <span>Name</span>

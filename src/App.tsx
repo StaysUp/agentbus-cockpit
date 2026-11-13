@@ -546,6 +546,8 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
             get: (h) => dataSource.getConnect!(h),
             input: (h, line) => dataSource.connectInput!(h, line),
             cancel: dataSource.cancelConnect ? (h) => dataSource.cancelConnect!(h) : undefined,
+            setKey: dataSource.setOpenRouterKey ? (k) => dataSource.setOpenRouterKey!(k) : undefined,
+            removeKey: dataSource.removeOpenRouterKey ? () => dataSource.removeOpenRouterKey!() : undefined,
           }
         : undefined,
     [dataSource],

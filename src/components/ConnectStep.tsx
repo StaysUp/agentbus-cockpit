@@ -20,6 +20,10 @@ export interface SubscriptionApi {
   input: (harness: string, line: string) => Promise<void>;
   // Stops the running login. Absent: a service without it, and no Cancel.
   cancel?: (harness: string) => Promise<void>;
+  // Set and remove the OpenRouter key kept on control. Absent: a service
+  // without them, and no OpenRouter key row.
+  setKey?: (key: string) => Promise<void>;
+  removeKey?: () => Promise<void>;
 }
 
 // pollMs is how often a running login is read again.

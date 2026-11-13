@@ -1183,7 +1183,7 @@ describe('Agents', () => {
     r.unmount();
   });
 
-  it('an OpenRouter agent takes any model id and the key variable, never a key, and is saved', async () => {
+  it('an OpenRouter agent takes any model id, asks for no key variable, and is saved', async () => {
     const svc = fakeService({ sessions: [row('s1')], events: { s1: oneTurn('s1', 'hi') }, agents: AGENTS });
     const r = await mount(svc);
     await click(r.container.querySelector('#agents button.add-agent'));
@@ -1195,8 +1195,10 @@ describe('Agents', () => {
     expect(model.value).toBe('deepseek/deepseek-v4.1-flash');
     await setValue(model, 'qwen/qwen3-coder:free');
     expect((form().querySelector('input[name="name"]') as HTMLInputElement).value).toBe('Claude Code · qwen/qwen3-coder:free');
-    expect((form().querySelector('input[name="key_env"]') as HTMLInputElement).value).toBe('OPENROUTER_API_KEY');
-    expect(form().textContent).toContain('Set where the service runs.');
+    // The key variable is an advanced field, closed and empty: control adds
+    // the key set in Settings, or reads the default variable.
+    expect((form().querySelector('input[name="key_env"]') as HTMLInputElement).value).toBe('');
+    expect((form().querySelector('details.ad-advanced') as HTMLDetailsElement).open).toBe(false);
     await submitForm(form());
     const post = svc.reqs.find((q) => q.path === '/api/v0/agents' && q.method === 'POST');
     expect(post?.body).toEqual({
@@ -1204,7 +1206,6 @@ describe('Agents', () => {
       harness: 'claude',
       access: 'openrouter',
       model: 'qwen/qwen3-coder:free',
-      key_env: 'OPENROUTER_API_KEY',
     });
     // The form closes, and the new agent is a row of the Agents column, with
     // no session yet.
