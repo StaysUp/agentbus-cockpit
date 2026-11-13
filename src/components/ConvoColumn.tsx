@@ -4,6 +4,7 @@ import { liveStatus, LiveTurn } from '../data/liveStatus';
 import { harnessName, turnNotes } from '../data/turns';
 import { Level, QueuedTurn, SavedAgent, SessionDetail, ShellRun, Started, Turn } from '../types';
 import { useNow } from '../utils/useNow';
+import { Markdown } from './Markdown';
 import { formatCost, formatTokens, stateLabel, turnStateClass } from '../utils/format';
 import { Cost } from './Cost';
 import { folderLabel, sessionFolderRef, useFolders } from '../data/folders';
@@ -563,13 +564,9 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
                   )}
 
                   {answer && !showLive && (
-                    <div className={`m-agent${detail ? '' : ' preview'}`}>
-                      {answer.split('\n\n').map((para, i, all) => (
-                        <p key={i}>
-                          {para}
-                          {answerCut && i === all.length - 1 ? '…' : ''}
-                        </p>
-                      ))}
+                    <div className={`m-agent md-reply${detail ? '' : ' preview'}`}>
+                      {/* The agent's reply is markdown, shown formatted. The turn panel keeps it raw. */}
+                      <Markdown text={answer} cut={answerCut} />
                     </div>
                   )}
 
