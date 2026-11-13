@@ -1,7 +1,7 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { liveStatus, LiveTurn } from '../data/liveStatus';
 import { harnessName, turnNotes } from '../data/turns';
-import { Level, QueuedTurn, SavedAgent, SessionDetail, ShellRun, Started, Turn, TurnChanges } from '../types';
+import { Level, QueuedTurn, SavedAgent, SessionDetail, ShellRun, Started, Turn } from '../types';
 import { useNow } from '../utils/useNow';
 import { Markdown } from './Markdown';
 import { formatCost, formatTokens, stateLabel, turnStateClass } from '../utils/format';
@@ -78,12 +78,9 @@ interface ConvoColumnProps {
   // Given when the source can name sessions: a new title for this one.
   // Rejects with the API's words.
   onRename?: (sessionId: string, title: string) => Promise<void>;
-  // Given when the source keeps each turn's diff: opens a turn's changes.
-  onChanges?: (turn: Turn) => void;
-  // What each turn changed, by turn id, as far as read: null when it changed
-  // no files. A turn not in it is read with onLoadChanges once it is shown.
-  changes?: Record<string, TurnChanges | null>;
-  onLoadChanges?: (turn: Turn) => void;
+  // While the conversation has work not yet in the person's folder: how many
+  // files, and Review, which opens the apply preview in the right panel.
+  applyBar?: { count: number; onReview: () => void } | null;
   // The session's "!" commands from before AgentBus 0.5, oldest first, shown
   // read-only between its turns. A "!" message now goes to the agent like
   // any other: it runs the command with its own shell tool.
@@ -226,53 +223,6 @@ export function cannotContinue(turns: Turn[]): string {
   return 'This conversation cannot take another message. Start a new one.';
 }
 
-// "3 files changed · Review" in an ended turn's header, once the turn's diff
-// says it changed files, and "applied" once it is in the person's folder.
-// The diff is read when the turn first comes into view.
-const TurnChangesLink: React.FC<{
-  turn: Turn;
-  changes: TurnChanges | null | undefined;
-  onLoad?: (turn: Turn) => void;
-  onOpen: (turn: Turn) => void;
-}> = ({ turn, changes, onLoad, onOpen }) => {
-  const ref = useRef<HTMLSpanElement>(null);
-  const unread = changes === undefined;
-  useEffect(() => {
-    if (!unread || !onLoad) return;
-    const el = ref.current;
-    if (!el || typeof IntersectionObserver === 'undefined') {
-      onLoad(turn);
-      return;
-    }
-    const seen = new IntersectionObserver((entries) => {
-      if (entries.some((e) => e.isIntersecting)) {
-        seen.disconnect();
-        onLoad(turn);
-      }
-    });
-    // The header, not this span: an empty span is not displayed, so never seen.
-    seen.observe(el.parentElement ?? el);
-    return () => seen.disconnect();
-    // The turn object changes with every list read; its id is what counts.
-  }, [unread, onLoad, turn.id]);
-  if (!changes || changes.count === 0) return <span ref={ref} className="tb-changes-at" />;
-  return (
-    <span ref={ref} className="tb-changes-at">
-      <button
-        type="button"
-        className="tb-changes"
-        onClick={(e) => {
-          e.stopPropagation();
-          onOpen(turn);
-        }}
-      >
-        {changes.count} {changes.count === 1 ? 'file' : 'files'} changed · Review
-      </button>
-      {changes.applied && <em className="tb-applied">applied</em>}
-    </span>
-  );
-};
-
 export const ConvoColumn: React.FC<ConvoColumnProps> = ({
   session,
   selectedTurn,
@@ -299,9 +249,7 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
   pending: keptPending,
   onPending,
   onRename,
-  onChanges,
-  changes,
-  onLoadChanges,
+  applyBar,
   commands,
   onBack,
 }) => {
@@ -314,6 +262,27 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
   // The header's name is being edited.
   const [renaming, setRenaming] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  // The message box grows with its text, wrapped lines too, up to its CSS
+  // max-height (about ten lines), and then scrolls inside.
+  useLayoutEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    const fit = () => {
+      el.style.height = 'auto';
+      if (el.scrollHeight > 0) el.style.height = `${el.scrollHeight}px`;
+    };
+    fit();
+    if (typeof ResizeObserver === 'undefined') return;
+    // A width change rewraps the text.
+    let width = el.clientWidth;
+    const ro = new ResizeObserver(() => {
+      if (el.clientWidth === width) return;
+      width = el.clientWidth;
+      fit();
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [draft]);
   useEffect(() => {
     if (!prefill || prefill.session !== session.id) return;
     setDraft(prefill.text);
@@ -621,14 +590,6 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
                         </span>
                       </>
                     )}
-                    {onChanges && turn.state !== 'running' && turn.state !== 'queued' && (
-                      <TurnChangesLink
-                        turn={turn}
-                        changes={changes?.[turn.id]}
-                        onLoad={onLoadChanges}
-                        onOpen={onChanges}
-                      />
-                    )}
                   </div>
                   <OriginLine turn={turn} agents={agents} onOpenSession={onOpenSession} />
                   <div className={`m-user${turn.origin ? ' from-agent' : ''}`}>
@@ -698,11 +659,24 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
       </div>
 
       <div id="c-reply">
+        {applyBar && applyBar.count > 0 && (
+          <div className="apply-bar">
+            <span className="ab-dot" aria-hidden="true">
+              ●
+            </span>
+            <span className="ab-text">
+              {applyBar.count} {applyBar.count === 1 ? 'file' : 'files'} changed, not applied
+            </span>
+            <button type="button" className="ab-review" onClick={applyBar.onReview}>
+              Review ▸
+            </button>
+          </div>
+        )}
         <form className={`box${showPick ? ' with-pick' : ''}`} onSubmit={send}>
           <textarea
             id="input"
             ref={inputRef}
-            rows={Math.min(8, draft.split('\n').length)}
+            rows={1}
             placeholder={`Message ${nextName || agentName || 'the agent'}…`}
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
@@ -714,57 +688,59 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
             }}
             disabled={!canSend}
           />
-          {showPick && pickList.length === 0 && (
-            <button type="button" className="next-agent add-first btn btn-quiet" onClick={onAddAgent} disabled={!onAddAgent}>
-              Add an agent first
-            </button>
-          )}
-          {showPick && pickList.length > 0 && (
-            <span className="next-agent-at">
-              {agentDot && nextAgent !== '' && agentDot(pickList.find((a) => a.id === nextAgent)!)}
-              <Select
-                name="next_agent"
-                className="next-agent"
-                variant="quiet"
-                label="Agent for the next message"
-                title="Agent for the next message"
-                value={nextAgent}
-                placeholder="Pick an agent"
-                disabled={!canSend}
-                options={pickList.map((a) => ({ value: a.id, label: a.name }))}
-                onChange={setPicked}
-                align="right"
-              />
-            </span>
-          )}
-          {showStop ? (
-            <button type="button" className="go stop" disabled={lastStopping} onClick={stop}>
-              {lastStopping ? 'Stopping…' : 'Stop'}
-            </button>
-          ) : (
-            <span className="go-split">
-              <button type="submit" className="go" disabled={!canSend || needsAgent || draft.trim() === ''}>
-                {sendLabel}
+          <div className="box-row">
+            {showPick && pickList.length === 0 && (
+              <button type="button" className="next-agent add-first btn btn-quiet" onClick={onAddAgent} disabled={!onAddAgent}>
+                Add an agent first
               </button>
-              {/* How to send. Fork (run in parallel from the same point) is
-                  shown but not built yet. */}
-              <Select
-                name="send_mode"
-                className="send-mode"
-                variant="icon"
-                label="How to send"
-                title="How to send"
-                value="send"
-                disabled={!canSend}
-                align="right"
-                options={[
-                  { value: 'send', label: sendLabel === 'Queue' ? 'Queue: run after the running turn' : 'Send' },
-                  { value: 'fork', label: 'Fork: run in parallel from here', hint: 'coming soon', disabled: true },
-                ]}
-                onChange={() => undefined}
-              />
-            </span>
-          )}
+            )}
+            {showPick && pickList.length > 0 && (
+              <span className="next-agent-at">
+                {agentDot && nextAgent !== '' && agentDot(pickList.find((a) => a.id === nextAgent)!)}
+                <Select
+                  name="next_agent"
+                  className="next-agent"
+                  variant="quiet"
+                  label="Agent for the next message"
+                  title="Agent for the next message"
+                  value={nextAgent}
+                  placeholder="Pick an agent"
+                  disabled={!canSend}
+                  options={pickList.map((a) => ({ value: a.id, label: a.name }))}
+                  onChange={setPicked}
+                  align="right"
+                />
+              </span>
+            )}
+            {showStop ? (
+              <button type="button" className="go stop" disabled={lastStopping} onClick={stop}>
+                {lastStopping ? 'Stopping…' : 'Stop'}
+              </button>
+            ) : (
+              <span className="go-split">
+                <button type="submit" className="go" disabled={!canSend || needsAgent || draft.trim() === ''}>
+                  {sendLabel}
+                </button>
+                {/* How to send. Fork (run in parallel from the same point) is
+                    shown but not built yet. */}
+                <Select
+                  name="send_mode"
+                  className="send-mode"
+                  variant="icon"
+                  label="How to send"
+                  title="How to send"
+                  value="send"
+                  disabled={!canSend}
+                  align="right"
+                  options={[
+                    { value: 'send', label: sendLabel === 'Queue' ? 'Queue: run after the running turn' : 'Send' },
+                    { value: 'fork', label: 'Fork: run in parallel from here', hint: 'coming soon', disabled: true },
+                  ]}
+                  onChange={() => undefined}
+                />
+              </span>
+            )}
+          </div>
         </form>
         {onSend && (
           <div className="reply-foot">

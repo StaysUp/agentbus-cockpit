@@ -26,6 +26,8 @@ import { reviewUI } from '../features';
 import { folderLabel, useFolders } from '../data/folders';
 import { Toolbox, toolboxSummary, turnToolbox } from '../data/toolbox';
 import { McpTab } from './McpTab';
+import { TurnChangesTab } from './Changes';
+import { TurnDiff } from '../types';
 
 interface RightPanelProps {
   turn: Turn | null;
@@ -69,9 +71,11 @@ interface RightPanelProps {
   // panel. The turn level puts a function here that collapses its open row
   // and says whether there was one; App calls it before closing the panel.
   escRef?: React.MutableRefObject<(() => boolean) | null>;
+  // Given when the source keeps each turn's diff: the Changes tab reads it.
+  loadDiff?: (sessionId: string, turnId: string) => Promise<TurnDiff>;
 }
 
-type TabKey = 'result' | 'events' | 'model' | 'tools' | 'prompt' | 'skills' | 'mcp' | 'cicd';
+type TabKey = 'result' | 'changes' | 'events' | 'model' | 'tools' | 'prompt' | 'skills' | 'mcp' | 'cicd';
 
 // Follows the selected level: the session, one turn, or one model call. The
 // turn and call tabs are kept here, so stepping down and back keeps them.
@@ -165,6 +169,7 @@ const TurnPanel: React.FC<TurnPanelProps> = ({
   onStopQueued,
   onFix,
   loadAgents,
+  loadDiff,
 }) => {
   // A running turn's status from its events, read each second while it runs.
   const running = !!live && turn?.state === 'running' && !!turn.detail;
@@ -244,8 +249,9 @@ const TurnPanel: React.FC<TurnPanelProps> = ({
   const row = queue?.turnOf(turn.sessionId, turn.id);
   const reviews = queue ? queue.reviewsOf(turn.id) : [];
   const showJobs = !!queue && reviewUI();
-  const tabs = showJobs ? [...TURN_TABS, ['cicd', 'CI/CD'] as [TabKey, string]] : TURN_TABS;
-  const tab: TabKey = activeTab === 'cicd' && !showJobs ? 'result' : activeTab;
+  const baseTabs = loadDiff ? TURN_TABS : TURN_TABS.filter(([k]) => k !== 'changes');
+  const tabs = showJobs ? [...baseTabs, ['cicd', 'CI/CD'] as [TabKey, string]] : baseTabs;
+  const tab: TabKey = (activeTab === 'cicd' && !showJobs) || (activeTab === 'changes' && !loadDiff) ? 'result' : activeTab;
 
   // The head reads the turn list's row, so it shows while the events load.
   const head = (
@@ -584,9 +590,13 @@ const TurnPanel: React.FC<TurnPanelProps> = ({
       </div>
 
       <div id="d-body">
-        {tab !== 'cicd' && <TabSum tab={tab} turn={turn} detail={detail} box={box} />}
+        {tab !== 'cicd' && tab !== 'changes' && <TabSum tab={tab} turn={turn} detail={detail} box={box} />}
 
         {tab === 'cicd' && <TurnTab turn={turn} row={row} reviews={reviews} onStop={onStopQueued} />}
+
+        {tab === 'changes' && loadDiff && (
+          <TurnChangesTab turnId={turn.id} loadDiff={() => loadDiff(turn.sessionId, turn.id)} />
+        )}
 
         {tab === 'result' && (
           <div>
@@ -785,6 +795,7 @@ export function continuedLine(detail: TurnDetail | undefined, turns: { id: strin
 // the API has no data for them yet.
 const TURN_TABS: [TabKey, string][] = [
   ['result', 'Result'],
+  ['changes', 'Changes'],
   ['prompt', 'Prompt'],
   ['events', 'Events'],
   ['model', 'Model calls'],
@@ -853,6 +864,7 @@ export const TabSum: React.FC<{ tab: TabKey; turn: Turn; detail: TurnDetail; box
       break;
     }
     case 'cicd':
+    case 'changes':
       return null;
   }
   return (

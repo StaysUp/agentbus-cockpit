@@ -80,18 +80,22 @@ code { font-size: .86em; }
 .after code { font-size: var(--fs-xs); }
 .after:hover { color: var(--ink); }
 #c-reply { flex: none; padding: 0.5rem 1.25rem 1.25rem; }
-#c-reply .box { padding: 0.75rem 6.5rem 0.75rem 1rem; border-radius: 1rem; }
-#c-reply #input { font-size: 0.9375rem; }
-#c-reply .go { height: 2rem; bottom: 0.5rem; right: 0.5rem; font-size: var(--fs-m); }
-/* Stopping… stays readable while it waits for the turn to end. */
+/* The message box: the text, then the agent picker and Send at the bottom
+   right, in one row while the text has room beside them; on a narrow box the
+   controls wrap under the text. The text grows with its lines (wrapped ones
+   too) up to about ten, then scrolls inside. */
+#c-reply .box { padding: 0.5rem 0.5rem 0.5rem 1rem; border-radius: 1rem; display: flex; flex-wrap: wrap; align-items: flex-end; column-gap: 0.5rem; row-gap: 0.25rem; }
+#c-reply #input { font-size: 0.9375rem; flex: 1 1 14rem; min-width: 0; width: auto; padding: 0.3125rem 0; max-height: calc(1.35em * 10 + 0.625rem); overflow-y: auto; }
+#c-reply .box-row { flex: none; margin-left: auto; display: flex; align-items: center; justify-content: flex-end; gap: 0.5rem; min-width: 0; max-width: 100%; }
+#c-reply .go { position: static; height: 2rem; font-size: var(--fs-m); }
+/* Stop and Stopping… take the width of Send with its menu, so a changing label moves nothing. */
+#c-reply .go.stop { min-width: 6rem; }
 #c-reply .go.stop:disabled { opacity: .5; }
 /* The agent for the next message, beside Send: quiet text until hovered (mockup v4, round 17). */
-#c-reply .box.with-pick { padding-right: 17.5rem; }
-#c-reply .next-agent { position: absolute; right: 6rem; bottom: 0.5rem; max-width: 10rem; }
+#c-reply .next-agent { max-width: 10rem; min-width: 0; }
 #c-reply .next-agent:disabled { cursor: default; opacity: .6; }
 /* The picker and the picked agent's sign-in dot, side by side. */
-#c-reply .next-agent-at { position: absolute; right: 6rem; bottom: 0.5rem; display: flex; align-items: center; gap: 0.4rem; }
-#c-reply .next-agent-at .next-agent { position: static; }
+#c-reply .next-agent-at { display: flex; align-items: center; gap: 0.4rem; min-width: 0; }
 
 /* ---------- right panel ---------- */
 #p-head { height: 3.75rem; flex: none; padding: 0 1rem 0 1.5rem; }
@@ -698,8 +702,8 @@ tr.ev-open > td { background: #FBFBFA; border-bottom: 1px solid var(--line); pad
 #agents .agent .form-error { flex-basis: 100%; padding-left: 2.125rem; font-weight: 400; white-space: normal; }
 
 /* Send as a split button: the button, and a small menu of how to send. */
-#c-reply .go-split { position: absolute; right: 0.5rem; bottom: 0.5rem; display: flex; height: 2rem; }
-#c-reply .go-split .go { position: static; height: 2rem; border-radius: 0.5rem 0 0 0.5rem; }
+#c-reply .go-split { flex: none; display: flex; height: 2rem; }
+#c-reply .go-split .go { height: 2rem; min-width: 4.5rem; border-radius: 0.5rem 0 0 0.5rem; }
 #c-reply .send-mode { width: 1.5rem; height: 2rem; justify-content: center; border-left: 1px solid rgba(255,255,255,.25); border-radius: 0 0.5rem 0.5rem 0; background: var(--ink); }
 #c-reply .send-mode svg { color: #fff; width: 0.625rem; height: 0.625rem; }
 #c-reply .send-mode:disabled { opacity: .22; cursor: default; }
@@ -725,12 +729,18 @@ tr.ev-open > td { background: #FBFBFA; border-bottom: 1px solid var(--line); pad
 #c-head .c-title-input { position: relative; }
 #c-head .c-title-input input { font-size: 1rem; font-weight: 650; }
 #c-head .c-title-input .form-error { position: absolute; top: calc(100% + 0.25rem); left: 0; right: 0; z-index: 20; background: #fff; border: 1px solid var(--line2); border-radius: 0.375rem; padding: 0.25rem 0.5rem; box-shadow: 0 2px 8px rgba(0,0,0,.08); }
-/* A turn's changes: "3 files changed · Review" in its header, and the ChangesDialog. */
-.tb-h > .tb-changes-at { margin-left: auto; white-space: nowrap; }
-.tb-h > .tb-changes-at:empty { display: none; }
-.tb-changes { font-size: var(--fs-s); }
-.tb-h .tb-applied { margin-left: 0.375rem; font-style: normal; font-size: var(--fs-s); color: var(--green); }
-.changes-dialog { width: 44rem; max-height: calc(100vh - 3rem); overflow: auto; box-sizing: border-box; }
+/* Work not yet in the person's folder: one quiet line above the message box. */
+#c-reply .apply-bar { box-sizing: border-box; max-width: 45.6rem; margin: 0 0 0.375rem; display: flex; align-items: center; gap: 0.5rem; padding: 0 0.25rem; font-size: var(--fs-s); color: var(--ink2); }
+.apply-bar .ab-dot { color: var(--amber); font-size: var(--fs-xs); }
+.apply-bar .ab-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.apply-bar .ab-review { margin-left: auto; flex: none; border: 0; background: none; padding: 0.125rem 0.25rem; font: inherit; font-weight: 600; color: var(--ink); cursor: pointer; border-radius: 0.375rem; }
+.apply-bar .ab-review:hover { background: var(--row-hover); }
+/* The apply preview in the right panel, and a turn's Changes tab. */
+.apply-panel .ap-conflicts { margin: 0 0 0.625rem; padding: 0.5rem 0.625rem; border-radius: 0.375rem; background: #FBE9E7; color: #8A2A1E; font-size: var(--fs-s); }
+.apply-panel .ap-done { margin: 0.25rem 0; font-weight: 600; color: var(--green); }
+.apply-panel .ap-actions { position: sticky; bottom: 0; margin-top: 0.75rem; padding: 0.625rem 0; background: var(--panel); border-top: 1px solid var(--line); }
+.ch-conflict { display: block; margin-top: 0.125rem; font-size: var(--fs-xs); color: var(--bad); }
+.ch-file.conflict > .ch-path code { color: var(--bad); }
 .ch-files { display: flex; flex-direction: column; gap: 0.5rem; min-width: 0; }
 .ch-file { min-width: 0; }
 .ch-path { cursor: pointer; overflow-wrap: anywhere; }

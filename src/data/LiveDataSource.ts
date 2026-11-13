@@ -19,6 +19,7 @@ import {
   SessionSummary,
   ShellRun,
   Started,
+  ApplyPreview,
   ApplyState,
   Turn,
   TurnDiff,
@@ -541,6 +542,17 @@ export class LiveDataSource implements DataSource {
     );
     if (!res.ok) throw new Error(await apiError(res));
     return res.json();
+  }
+
+  // GET /api/v0/sessions/<id>/changes: the apply preview. The runner
+  // answers within 30 s. A machine that is offline or does not answer is
+  // said plainly; other refusals are in the API's words.
+  async getApplyPreview(sessionId: string): Promise<ApplyPreview> {
+    const res = await fetch(`${this.baseUrl}/api/v0/sessions/${encodeURIComponent(sessionId)}/changes`, { headers: this.headers() });
+    if (res.ok) return res.json();
+    if (res.status === 503) throw new Error('The machine with this folder is offline.');
+    if (res.status === 504) throw new Error('The machine with this folder did not answer in 30 seconds.');
+    throw new Error(await apiError(res));
   }
 
   // POST /api/v0/turns/<id>/apply: 200 applied (or already), 202 still

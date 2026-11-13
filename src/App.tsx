@@ -14,7 +14,7 @@ import { useTabShown } from './data/useTabShown';
 import { SubscriptionApi } from './components/ConnectStep';
 import { SignInDot, signInOf } from './components/SignInDot';
 import { NewSessionDialog } from './components/NewSessionDialog';
-import { ChangesDialog } from './components/ChangesDialog';
+import { ApplyPanel } from './components/Changes';
 import { RightPanel } from './components/RightPanel';
 import { SessionsColumn } from './components/SessionsColumn';
 import { FolderInfo, FoldersContext, rememberFolder, rememberMachine } from './data/folders';
@@ -28,6 +28,7 @@ import { useQueue } from './data/useJobs';
 import { addRun } from './data/shell';
 import { addStreamedCost, addTurnEvents, createEmptyUsage, turnDetail } from './data/turns';
 import {
+  ApplyPreview,
   CockpitEvent,
   DataSource,
   EventSelection,
@@ -41,9 +42,7 @@ import {
   Started,
   SubscriptionList,
   Turn,
-  TurnChanges,
   TurnDetail,
-  TurnDiff,
   VersionInfo,
 } from './types';
 
@@ -80,6 +79,10 @@ const TURN_LIST_KINDS = new Set([
   'session.opened',
   'session.closed',
 ]);
+
+// Kinds that change what applying a conversation would write: a turn ended,
+// its changes recorded, or an apply done. On these the preview is read again.
+const PREVIEW_KINDS = new Set(['turn.completed', 'turn.changed', 'turn.applied']);
 
 // Whether a streamed event changes the turn list of `session`.
 function changesTurns(event: CockpitEvent, session: string): boolean {
@@ -195,6 +198,7 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
   // The one click in the chat that opens the panel: a turn.
   const clickTurn = (turn: Turn) => {
     selectTurnLevel(turn);
+    setApplyOpen(false);
     columns.forward('turn');
   };
   // Which column a narrow screen shows, and its moves (src/columns.ts).
@@ -249,8 +253,8 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
   const allSessionsRef = useRef<SessionSummary[] | null>(null);
   allSessionsRef.current = allSessions;
   const shownRef = useRef<Shown | null>(null);
-  // Clears turns' read changes (forgetChanges, below) for the stream.
-  const forgetChangesRef = useRef<(turnIds: string[]) => void>(() => {});
+  // Reads the apply preview of a session again (readPreview, below), for the stream.
+  const readPreviewRef = useRef<(sessionId: string) => void>(() => {});
   shownRef.current = shown;
   // Events of the selected session that arrive while its turns load.
   const streamedRef = useRef<CockpitEvent[] | null>(null);
@@ -414,8 +418,10 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
         if (s && changesTurns(event, s.session.id) && !countedIn(s.cursor, event)) {
           refreshTurns.current(s.session.id);
         }
-        if (s && event.session === s.session.id && (event.kind === 'turn.changed' || event.kind === 'turn.applied')) {
-          forgetChangesRef.current(event.kind === 'turn.applied' ? s.session.turnsList.map((t) => t.id) : [event.turn ?? '']);
+        // A turn that ends, records its changes or is applied changes what
+        // an apply would write: the bar above the message box reads it again.
+        if (s && event.session === s.session.id && PREVIEW_KINDS.has(event.kind)) {
+          readPreviewRef.current(s.session.id);
         }
 
         // A call adds to its row's total now, unless the shown list already
@@ -535,58 +541,49 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
 
   // The New session dialog: closed (null), or open with an agent to preselect.
   const [newSession, setNewSession] = useState<{ agent?: string } | null>(null);
-  // The turn whose changes are open, from GET /api/v0/turns/<id>/diff.
-  const [changesTurn, setChangesTurn] = useState<Turn | null>(null);
-  // What each turn changed, by turn id, for its header ("3 files changed"):
-  // null when the turn changed no files. Read from the turn's diff when the
-  // turn comes into view. A read in flight is dropped when its turn's entry
-  // was cleared meanwhile (a turn.changed or turn.applied arrived).
-  const [turnChanges, setTurnChanges] = useState<Record<string, TurnChanges | null>>({});
-  const changesReads = useRef(new Map<string, number>());
-  const changesGen = useRef(0);
-  const noteChanges = useCallback((turnId: string, d: TurnDiff) => {
-    setTurnChanges((cur) => ({
-      ...cur,
-      [turnId]: d.files && d.files.count > 0 ? { count: d.files.count, applied: d.apply.state === 'applied' } : null,
-    }));
-  }, []);
-  const loadTurnChanges = useCallback(
-    (turn: Turn) => {
-      if (!dataSource.getTurnDiff || changesReads.current.has(turn.id)) return;
-      const gen = changesGen.current;
-      changesReads.current.set(turn.id, gen);
-      dataSource.getTurnDiff(turn.sessionId, turn.id).then(
-        (d) => {
-          if (changesReads.current.get(turn.id) !== gen) return;
-          changesReads.current.delete(turn.id);
-          noteChanges(turn.id, d);
-        },
-        () => {
-          if (changesReads.current.get(turn.id) !== gen) return;
-          changesReads.current.delete(turn.id);
-          setTurnChanges((cur) => ({ ...cur, [turn.id]: null }));
-        }
+  // The apply preview of the conversation on screen: what "Apply to my
+  // folder" would write now. Read when the conversation opens, when one of
+  // its turns ends, records its changes or is applied, and after an apply.
+  // Each read is a job on the runner that may wait up to 30 s, so one read
+  // runs at a time per session: asks that come meanwhile make one more read
+  // after it. A reply for a session no longer on screen is dropped.
+  const [preview, setPreview] = useState<{ session: string; p: ApplyPreview | null; error: string | null } | null>(null);
+  const previewReads = useRef(new Map<string, 'reading' | 'again'>());
+  const readPreview = useCallback(
+    (sessionId: string) => {
+      if (!dataSource.getApplyPreview) return;
+      const reads = previewReads.current;
+      if (reads.has(sessionId)) {
+        reads.set(sessionId, 'again');
+        return;
+      }
+      reads.set(sessionId, 'reading');
+      const done = (next: (cur: typeof preview) => typeof preview) => {
+        if (selectedSessionRef.current === sessionId) setPreview(next);
+        const again = reads.get(sessionId) === 'again';
+        reads.delete(sessionId);
+        if (again) readPreviewRef.current(sessionId);
+      };
+      dataSource.getApplyPreview(sessionId).then(
+        (p) => done(() => ({ session: sessionId, p, error: null })),
+        (err) =>
+          done((cur) => ({ session: sessionId, p: cur?.session === sessionId ? cur.p : null, error: (err as Error).message }))
       );
     },
-    [dataSource, noteChanges]
+    [dataSource]
   );
-  // Read the changes of a session's turns again: an apply covers the earlier
-  // turns not yet applied, and a turn's changes are stored after it ends.
-  const forgetChanges = useCallback((turnIds: string[]) => {
-    changesGen.current++;
-    for (const id of turnIds) changesReads.current.delete(id);
-    setTurnChanges((cur) => {
-      const next = { ...cur };
-      for (const id of turnIds) delete next[id];
-      return next;
-    });
-  }, []);
-  forgetChangesRef.current = forgetChanges;
-  const loadChanges = useCallback(async () => {
-    const d = await dataSource.getTurnDiff!(changesTurn!.sessionId, changesTurn!.id);
-    noteChanges(changesTurn!.id, d);
-    return d;
-  }, [dataSource, changesTurn, noteChanges]);
+  readPreviewRef.current = readPreview;
+  // The right panel shows the apply preview instead of a turn.
+  const [applyOpen, setApplyOpen] = useState(false);
+  useEffect(() => {
+    if (!panelOpen) setApplyOpen(false);
+  }, [panelOpen]);
+  const applyTurn = useMemo(
+    () => (dataSource.applyTurn ? (turn: string) => dataSource.applyTurn!(turn) : undefined),
+    [dataSource]
+  );
+  // One turn's own diff, for the turn panel's Changes tab.
+  const loadTurnDiff = useCallback((sessionId: string, turnId: string) => dataSource.getTurnDiff!(sessionId, turnId), [dataSource]);
   const loadContext = useMemo(
     () => (dataSource.getCallContext ? (t: string, x: string, full: boolean) => dataSource.getCallContext!(t, x, full) : undefined),
     [dataSource]
@@ -1032,6 +1029,17 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
     ? { ...(shownRow ?? shown.session), turnsList: turns, closed: !!shownRow?.closed || closedIds.has(shown.session.id) || undefined }
     : null;
 
+  // The conversation on screen's apply preview, read when it opens.
+  const previewSession = sessionView?.id ?? null;
+  useEffect(() => {
+    if (previewSession) readPreview(previewSession);
+  }, [previewSession, readPreview]);
+  const shownPreview = preview && preview.session === previewSession ? preview : null;
+  const openApply = () => {
+    setApplyOpen(true);
+    columns.forward('turn');
+  };
+
   // Ask whether the selected session is closed, each time it is read.
   useEffect(() => {
     if (selectedSessionId === null || !dataSource.sessionClosed) return;
@@ -1278,9 +1286,7 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
             chooseSession(id);
           }}
           onRename={renameSession}
-          onChanges={dataSource.getTurnDiff ? setChangesTurn : undefined}
-          changes={turnChanges}
-          onLoadChanges={dataSource.getTurnDiff ? loadTurnChanges : undefined}
+          applyBar={shownPreview?.p?.unapplied ? { count: shownPreview.p.count || shownPreview.p.files.length, onReview: openApply } : null}
           commands={commandsBySession[sessionView.id]}
           onBack={() => columns.back('convo')}
         />
@@ -1305,6 +1311,21 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
       )}
 
       <div className="panel-slot" hidden={!panelOpen}>
+      {applyOpen && previewSession ? (
+        <ApplyPanel
+          key={previewSession}
+          preview={shownPreview?.p ?? null}
+          error={shownPreview?.error}
+          apply={applyTurn}
+          readApply={
+            dataSource.getTurnDiff
+              ? (turn: string) => dataSource.getTurnDiff!(previewSession, turn).then((d) => d.apply)
+              : undefined
+          }
+          onApplyEnded={() => readPreview(previewSession)}
+          onClose={closePanel}
+        />
+      ) : (
       <RightPanel
         turn={selectedTurn}
         totalTurns={turns.length}
@@ -1330,7 +1351,9 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
         live={!!dataSource.subscribe}
         onClose={closePanel}
         escRef={panelEscRef}
+        loadDiff={dataSource.getTurnDiff ? loadTurnDiff : undefined}
       />
+      )}
       </div>
 
       {newSession && canStart && (
@@ -1350,25 +1373,6 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
                 }
               : undefined
           }
-        />
-      )}
-      {changesTurn && dataSource.getTurnDiff && (
-        <ChangesDialog
-          key={changesTurn.id}
-          turnNumber={changesTurn.turnNumber}
-          loadDiff={loadChanges}
-          apply={dataSource.applyTurn ? () => dataSource.applyTurn!(changesTurn.id) : undefined}
-          onApplied={() => {
-            // The apply carried the earlier turns not yet applied too: read
-            // theirs again. This turn's is known.
-            const ids = (shownRef.current?.session.turnsList ?? []).map((t) => t.id).filter((id) => id !== changesTurn.id);
-            forgetChanges(ids);
-            setTurnChanges((cur) => {
-              const c = cur[changesTurn.id];
-              return c ? { ...cur, [changesTurn.id]: { ...c, applied: true } } : cur;
-            });
-          }}
-          onClose={() => setChangesTurn(null)}
         />
       )}
       {agentsDialog && canKeepAgents && (

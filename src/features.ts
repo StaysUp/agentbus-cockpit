@@ -6,9 +6,10 @@
 // runners underneath are unchanged. Turn the screens on with VITE_REVIEW_UI=1
 // when running or building the cockpit.
 //
-// A turn's changes are not behind this: since 0.5.1 an agent may not apply a
-// turn by default, so each turn that changed files shows "N files changed ·
-// Review" in its header, which opens its diff and "Apply to my folder".
+// Applying is not behind this: since 0.5.1 an agent may not apply a turn by
+// default, so a conversation with work not in the person's folder shows a bar
+// above the message box whose Review opens the apply preview and "Apply to my
+// folder". Each turn's own diff is its panel's Changes tab.
 export function reviewUI(): boolean {
   return import.meta.env.VITE_REVIEW_UI === '1';
 }

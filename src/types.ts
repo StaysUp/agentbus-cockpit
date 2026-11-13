@@ -373,11 +373,35 @@ export interface ApplyState {
   error?: string;
 }
 
-// What the cockpit keeps of a turn's diff for its header: how many files the
-// turn changed, and whether its changes are in the person's folder.
-export interface TurnChanges {
+// GET /api/v0/sessions/<id>/changes: what applying the conversation now
+// would do, computed by the runner with the same code as Apply, writing
+// nothing. files lists every file the apply would write or remove and each
+// conflicting file, each diffed against the person's folder now.
+export interface ApplyPreviewFile {
+  path: string;
+  change: 'added' | 'modified' | 'deleted';
+  added?: number;
+  removed?: number;
+  diff?: string;
+  diff_left_out?: boolean;
+}
+
+export interface ApplyPreview {
+  session: string;
+  isolated: boolean;
+  // Files or conflicts are not empty.
+  unapplied: boolean;
+  // The turn "Apply to my folder" applies (POST /api/v0/turns/<turn>/apply).
+  turn?: string;
+  turns?: string[];
+  files: ApplyPreviewFile[];
   count: number;
-  applied: boolean;
+  truncated?: boolean;
+  diffs_cut?: boolean;
+  // Each file the person changed in their folder since: an apply refuses it.
+  conflicts: { path: string; why: string }[];
+  // Why there is nothing to apply (not isolated, or closed).
+  why?: string;
 }
 
 export interface TurnDiff {
@@ -582,6 +606,10 @@ export interface DataSource {
   // failure rejects with the API's words.
   getTurnDiff?(sessionId: string, turnId: string): Promise<TurnDiff>;
   applyTurn?(turnId: string): Promise<ApplyState>;
+  // What applying the whole conversation now would do (a dry run): the files
+  // not yet in the person's folder, their diffs and conflicts. Rejects with
+  // the API's words.
+  getApplyPreview?(sessionId: string): Promise<ApplyPreview>;
   // A source that keeps request bodies has this: one model call's request
   // and reply by its turn and exchange. Rejects with an Error in the API's
   // own words.

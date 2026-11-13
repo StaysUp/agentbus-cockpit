@@ -1,14 +1,14 @@
 // @vitest-environment jsdom
-// A turn's changes: GET /api/v0/turns/<id>/diff in a dialog, and "Apply to
-// my folder" through POST /api/v0/turns/<id>/apply, with a refusal shown in
-// the API's words.
+// Applying a conversation: the bar above the message box while it has work
+// not yet in the person's folder, the preview in the right panel with one
+// "Apply to my folder", and each turn's own read-only Changes tab.
 import { act } from 'react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { App } from '../App';
-import { ChangesDialog } from '../components/ChangesDialog';
+import { ApplyPanel } from '../components/Changes';
 import { LiveDataSource } from '../data/LiveDataSource';
-import { ApplyState, TurnDiff } from '../types';
-import { click, ev, flush, liveReplay, render } from './helpers';
+import { ApplyPreview, ApplyState, TurnDiff } from '../types';
+import { click, ev, flush, liveReplay, panelOpen, render } from './helpers';
 
 const finished = [
   ev({ seq: 1, session: 'c1', kind: 'session.registered', agent: 'claude', folder: '/w' }),
@@ -18,232 +18,297 @@ const finished = [
   ev({ seq: 5, session: 'c1', kind: 'turn.completed', turn: 'T1', exchange: 'x1', outcome: 'finished' }),
 ];
 
+const A_DIFF = '--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-one\n+two\n';
+
+const preview: ApplyPreview = {
+  session: 'c1',
+  isolated: true,
+  unapplied: true,
+  turn: 'T1',
+  turns: ['T1'],
+  count: 2,
+  files: [
+    { path: 'a.txt', change: 'modified', added: 1, removed: 1, diff: A_DIFF },
+    { path: 'logo.png', change: 'added', added: 0, removed: 0, diff_left_out: true },
+  ],
+  conflicts: [],
+};
+const nothing: ApplyPreview = { session: 'c1', isolated: true, unapplied: false, count: 0, files: [], conflicts: [] };
+
 const diff: TurnDiff = {
   turn: 'T1',
   session: 'c1',
   state: 'finished',
-  files: {
-    isolated: true,
-    count: 2,
-    changes: [
-      { path: 'a.txt', change: 'modified', size: 4, diff: '--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-one\n+two\n' },
-      { path: 'logo.png', change: 'added', size: 900, diff_left_out: true },
-    ],
-  },
+  files: { isolated: true, count: 1, changes: [{ path: 'a.txt', change: 'modified', size: 4, diff: A_DIFF }] },
   model_calls: { count: 1 },
   tools: { count: 1 },
   commands: ['go test ./...'],
   apply: { state: 'none' },
 };
 
-// The turn header's "N files changed · Review" is on by default: no flag.
-beforeEach(() => {
-  vi.stubEnv('VITE_REVIEW_UI', '');
-});
-afterEach(() => {
-  vi.unstubAllEnvs();
-});
+const bar = (c: HTMLElement) => c.querySelector('#c-reply .apply-bar') as HTMLElement | null;
+const button = (c: ParentNode, text: string) =>
+  Array.from(c.querySelectorAll('button')).find((b) => b.textContent === text) as HTMLButtonElement | undefined;
 
-const header = (r: { container: HTMLElement }, i = 0) => r.container.querySelectorAll('#convo .tb-h')[i] as HTMLElement;
+async function open(extra: Parameters<typeof liveReplay>[1]) {
+  const lr = liveReplay(finished, extra);
+  const r = await render(<App dataSource={lr.source} />);
+  await flush();
+  await flush();
+  return { ...lr, r };
+}
 
-describe('Changes by default', () => {
-  it('a turn that changed files shows "2 files changed · Review" in its header, with no flag', async () => {
-    const getTurnDiff = vi.fn(async () => diff);
-    const { source } = liveReplay(finished, { getTurnDiff, applyTurn: vi.fn() });
-    const r = await render(<App dataSource={source} />);
-    await flush();
-    await flush();
-    const link = header(r).querySelector('.tb-changes');
-    expect(link).not.toBeNull();
-    expect(link!.textContent).toBe('2 files changed · Review');
-    expect(header(r).querySelector('.tb-applied')).toBeNull();
+describe('The apply bar', () => {
+  it('shows "● 2 files changed, not applied  Review ▸" above the message box while there is unapplied work', async () => {
+    const getApplyPreview = vi.fn(async () => preview);
+    const { r } = await open({ getApplyPreview, applyTurn: vi.fn() });
+    expect(getApplyPreview).toHaveBeenCalledWith('c1');
+    const b = bar(r.container)!;
+    expect(b).not.toBeNull();
+    expect(b.querySelector('.ab-dot')!.textContent).toBe('●');
+    expect(b.querySelector('.ab-text')!.textContent).toBe('2 files changed, not applied');
+    expect(b.querySelector('.ab-review')!.textContent).toBe('Review ▸');
+    // Directly above the message box.
+    expect(b.nextElementSibling!.tagName).toBe('FORM');
     r.unmount();
   });
 
-  it('a turn with no changes shows no control', async () => {
-    const getTurnDiff = vi.fn(async () => ({ ...diff, files: null }));
-    const { source } = liveReplay(finished, { getTurnDiff, applyTurn: vi.fn() });
-    const r = await render(<App dataSource={source} />);
-    await flush();
-    await flush();
-    expect(getTurnDiff).toHaveBeenCalledWith('c1', 'T1');
-    expect(r.container.querySelector('#convo .tb')).not.toBeNull();
+  it('is not shown when nothing is unapplied, or when the source has no preview', async () => {
+    const a = await open({ getApplyPreview: vi.fn(async () => nothing) });
+    expect(bar(a.r.container)).toBeNull();
+    a.r.unmount();
+    const b = await open({});
+    expect(bar(b.r.container)).toBeNull();
+    b.r.unmount();
+  });
+
+  it('the old per-turn "N files changed · Review" header control is gone', async () => {
+    const getTurnDiff = vi.fn(async () => diff);
+    const { r } = await open({ getApplyPreview: vi.fn(async () => preview), getTurnDiff, applyTurn: vi.fn() });
     expect(r.container.querySelector('#convo .tb-changes')).toBeNull();
+    expect(r.container.querySelector('#convo .tb-applied')).toBeNull();
+    // No turn's diff is read for the chat itself.
+    expect(getTurnDiff).not.toHaveBeenCalled();
     r.unmount();
   });
 
-  it('opening shows each file and its diff, coloured by line; Apply calls the apply route and the header then says applied', async () => {
-    const getTurnDiff = vi.fn(async () => diff);
-    const applyTurn = vi.fn(async () => ({ state: 'applied', files: ['a.txt', 'logo.png'] }) as ApplyState);
-    const { source } = liveReplay(finished, { getTurnDiff, applyTurn });
-    const r = await render(<App dataSource={source} />);
+  it('is read again when a turn ends, records its changes, or is applied', async () => {
+    let p = nothing;
+    const getApplyPreview = vi.fn(async () => p);
+    const { r, push } = await open({ getApplyPreview });
+    expect(bar(r.container)).toBeNull();
+    const reads = getApplyPreview.mock.calls.length;
+    p = preview;
+    await act(async () => push(ev({ seq: 6, session: 'c1', kind: 'turn.changed', turn: 'T1' })));
     await flush();
+    expect(getApplyPreview.mock.calls.length).toBe(reads + 1);
+    expect(bar(r.container)).not.toBeNull();
+    p = nothing;
+    await act(async () => push(ev({ seq: 7, session: 'c1', kind: 'turn.applied', turn: 'T1' })));
     await flush();
-    await click(header(r).querySelector('.tb-changes'));
+    expect(bar(r.container)).toBeNull();
+    // Another session's events do not read it.
+    const before = getApplyPreview.mock.calls.length;
+    await act(async () => push(ev({ seq: 8, session: 'c2', kind: 'turn.changed', turn: 'X' })));
     await flush();
-    const dialog = r.container.querySelector('.changes-dialog')!;
-    expect(Array.from(dialog.querySelectorAll('.ch-path code')).map((c) => c.textContent)).toEqual(['a.txt', 'logo.png']);
-    const lines = (k: string) => Array.from(dialog.querySelectorAll(`.ch-diff .dl.${k}`)).map((l) => l.textContent);
+    expect(getApplyPreview.mock.calls.length).toBe(before);
+    r.unmount();
+  });
+
+  it('runs one read at a time: events during a read make one more read after it', async () => {
+    let release: (() => void) | null = null;
+    let reads = 0;
+    const getApplyPreview = vi.fn(() => {
+      reads++;
+      if (reads === 1) return Promise.resolve(nothing);
+      return new Promise<ApplyPreview>((done) => {
+        release = () => done(preview);
+      });
+    });
+    const { r, push } = await open({ getApplyPreview });
+    expect(reads).toBe(1);
+    await act(async () => push(ev({ seq: 6, session: 'c1', kind: 'turn.completed', turn: 'T1' })));
+    await act(async () => push(ev({ seq: 7, session: 'c1', kind: 'turn.changed', turn: 'T1' })));
+    await act(async () => push(ev({ seq: 8, session: 'c1', kind: 'turn.changed', turn: 'T1' })));
+    expect(reads).toBe(2);
+    await act(async () => release!());
+    await flush();
+    expect(reads).toBe(3);
+    r.unmount();
+  });
+});
+
+describe('The apply preview', () => {
+  it('Review ▸ opens it in the right panel: each file with counts and a coloured diff', async () => {
+    const { r } = await open({ getApplyPreview: vi.fn(async () => preview), applyTurn: vi.fn() });
+    expect(panelOpen(r.container)).toBe(false);
+    await click(bar(r.container)!.querySelector('.ab-review'));
+    await flush();
+    expect(panelOpen(r.container)).toBe(true);
+    const panel = r.container.querySelector('#right.apply-panel')!;
+    expect(panel).not.toBeNull();
+    expect(Array.from(panel.querySelectorAll('.ch-path code')).map((c) => c.textContent)).toEqual(['a.txt', 'logo.png']);
+    const lines = (k: string) => Array.from(panel.querySelectorAll(`.ch-diff .dl.${k}`)).map((l) => l.textContent);
     expect(lines('add')).toEqual(['+two']);
     expect(lines('del')).toEqual(['-one']);
     expect(lines('hunk')).toEqual(['@@ -1 +1 @@']);
-    expect(dialog.querySelector('.ch-count')!.textContent).toBe('+1 −1');
-    const button = Array.from(dialog.querySelectorAll('button')).find((b) => b.textContent === 'Apply to my folder')!;
-    expect(button.className).toContain('btn-primary');
-    await click(button);
+    expect(panel.querySelector('.ch-count')!.textContent).toBe('+1 −1');
+    expect(panel.textContent).toContain('No diff here');
+    const apply = button(panel, 'Apply to my folder')!;
+    expect(apply.className).toContain('btn-primary');
+    expect(apply.disabled).toBe(false);
+    r.unmount();
+  });
+
+  it('Apply applies the turn the preview names; then "Applied. Your folder matches this conversation." and the bar goes', async () => {
+    let p = preview;
+    const getApplyPreview = vi.fn(async () => p);
+    const applyTurn = vi.fn(async () => {
+      p = nothing;
+      return { state: 'applied', files: ['a.txt', 'logo.png'] } as ApplyState;
+    });
+    const { r } = await open({ getApplyPreview, applyTurn });
+    await click(bar(r.container)!.querySelector('.ab-review'));
+    await flush();
+    await click(button(r.container.querySelector('#right')!, 'Apply to my folder'));
     await flush();
     expect(applyTurn).toHaveBeenCalledWith('T1');
-    expect(dialog.textContent).toContain('Applied to your folder. 2 files written.');
-    expect(header(r).querySelector('.tb-applied')!.textContent).toBe('applied');
+    expect(r.container.querySelector('#right')!.textContent).toContain('Applied. Your folder matches this conversation.');
+    expect(button(r.container.querySelector('#right')!, 'Apply to my folder')).toBeUndefined();
+    expect(bar(r.container)).toBeNull();
+    r.unmount();
+  });
+
+  it('a file changed in the folder since is marked plainly, and Apply is off', async () => {
+    const conflicted: ApplyPreview = { ...preview, conflicts: [{ path: 'a.txt', why: 'changed in your folder since the checkpoint' }] };
+    const r = await render(<ApplyPanel preview={conflicted} apply={vi.fn()} />);
+    expect(r.container.querySelector('.ch-file.conflict .ch-conflict')!.textContent).toBe(
+      'you changed this file since; it would be refused'
+    );
+    const box = r.container.querySelector('.ap-conflicts')!;
+    expect(box.textContent).toContain('1 file would be refused.');
+    expect(box.querySelector('li')!.textContent).toBe('a.txt: changed in your folder since the checkpoint');
+    expect(button(r.container, 'Apply to my folder')!.disabled).toBe(true);
+    r.unmount();
+  });
+
+  it('a refused apply shows the API words and each conflict', async () => {
+    const refused: ApplyState = {
+      state: 'refused',
+      error: 'apply refused: 1 file(s) in your folder changed since the checkpoint: a.txt',
+      conflicts: [{ path: 'a.txt', why: 'changed in your folder since the checkpoint' }],
+    };
+    const apply = vi.fn(async () => refused);
+    const onApplyEnded = vi.fn();
+    const r = await render(<ApplyPanel preview={preview} apply={apply} onApplyEnded={onApplyEnded} />);
+    await click(button(r.container, 'Apply to my folder'));
+    await flush();
+    expect(apply).toHaveBeenCalledWith('T1');
+    expect(onApplyEnded).toHaveBeenCalled();
+    const err = r.container.querySelector('.form-error')!;
+    expect(err.textContent).toContain('apply refused: 1 file(s) in your folder changed since the checkpoint: a.txt');
+    expect(err.querySelector('li')!.textContent).toBe('a.txt: changed in your folder since the checkpoint');
+    r.unmount();
+  });
+
+  it('an apply still queued is read again until it ends', async () => {
+    let ended = false;
+    const readApply = vi.fn(async () => (ended ? { state: 'applied' } : { state: 'queued' }) as ApplyState);
+    const apply = vi.fn(async () => ({ state: 'queued' }) as ApplyState);
+    const r = await render(<ApplyPanel preview={preview} apply={apply} readApply={readApply} pollMs={5} />);
+    await click(button(r.container, 'Apply to my folder'));
+    await flush();
+    expect(r.container.textContent).toContain('Applying…');
+    ended = true;
+    for (let i = 0; i < 50 && !r.container.textContent!.includes('Applied.'); i++) {
+      await act(async () => {
+        await new Promise((done) => setTimeout(done, 10));
+      });
+    }
+    expect(readApply).toHaveBeenCalledWith('T1');
+    expect(r.container.textContent).toContain('Applied. Your folder matches this conversation.');
+    r.unmount();
+  });
+
+  it('a preview that fails shows the words, e.g. a machine offline', async () => {
+    const r = await render(<ApplyPanel preview={null} error="The machine with this folder is offline." />);
+    expect(r.container.querySelector('.form-error')!.textContent).toBe('The machine with this folder is offline.');
+    r.unmount();
+  });
+
+  it('a conversation not in an isolated copy says why, with no Apply', async () => {
+    const r = await render(
+      <ApplyPanel preview={{ ...nothing, isolated: false, why: 'this conversation works in your folder itself' }} apply={vi.fn()} />
+    );
+    expect(r.container.textContent).toContain('this conversation works in your folder itself');
+    expect(button(r.container, 'Apply to my folder')).toBeUndefined();
+    r.unmount();
+  });
+
+  it('the preview counts lines as the API gives them', async () => {
+    const r = await render(<ApplyPanel preview={{ ...preview, files: [{ ...preview.files[0], added: 7, removed: 3 }] }} />);
+    expect(r.container.querySelector('.ch-count')!.textContent).toBe('+7 −3');
     r.unmount();
   });
 
   it('more than three files start folded to their names', async () => {
-    const many: TurnDiff = {
-      ...diff,
-      files: {
-        isolated: true,
-        count: 4,
-        changes: ['a', 'b', 'c', 'd'].map((p) => ({ path: `${p}.txt`, change: 'modified' as const, size: 1, diff: '@@ -1 +1 @@\n-x\n+y\n' })),
-      },
+    const many: ApplyPreview = {
+      ...preview,
+      count: 4,
+      files: ['a', 'b', 'c', 'd'].map((p) => ({ path: `${p}.txt`, change: 'modified' as const, added: 1, removed: 1, diff: '@@ -1 +1 @@\n-x\n+y\n' })),
     };
-    const r = await render(<ChangesDialog turnNumber={1} loadDiff={async () => many} onClose={() => {}} />);
-    await flush();
+    const r = await render(<ApplyPanel preview={many} />);
     const files = Array.from(r.container.querySelectorAll('details.ch-file')) as HTMLDetailsElement[];
     expect(files).toHaveLength(4);
     expect(files.every((f) => !f.open)).toBe(true);
     r.unmount();
   });
 
-  it('a turn not in an isolated copy cannot be applied', async () => {
-    const r = await render(
-      <ChangesDialog turnNumber={1} loadDiff={async () => ({ ...diff, files: { ...diff.files!, isolated: false } })} apply={vi.fn()} onClose={() => {}} />
-    );
+  it('clicking a turn shows the turn panel again', async () => {
+    const { r } = await open({ getApplyPreview: vi.fn(async () => preview), applyTurn: vi.fn() });
+    await click(bar(r.container)!.querySelector('.ab-review'));
     await flush();
-    expect(r.container.textContent).toContain('cannot be applied');
-    const button = Array.from(r.container.querySelectorAll('button')).find((b) => b.textContent === 'Apply to my folder')!;
-    expect((button as HTMLButtonElement).disabled).toBe(true);
+    expect(r.container.querySelector('#right.apply-panel')).not.toBeNull();
+    await click(r.container.querySelector('#convo .tb'));
+    await flush();
+    expect(r.container.querySelector('#right.apply-panel')).toBeNull();
+    expect(r.container.querySelector('#right #d-tabs')).not.toBeNull();
     r.unmount();
   });
 });
 
-describe('Changes', () => {
-  it('shows a turn diff, and a refused apply names each file in the API words', async () => {
-    const refused: ApplyState = {
-      state: 'refused',
-      error: 'apply refused: 1 file(s) in your folder changed since the checkpoint: a.txt',
-      conflicts: [{ path: 'a.txt', why: 'changed in your folder since the checkpoint' }],
-    };
+describe("A turn's Changes tab", () => {
+  it('sits beside Result and shows the turn\'s own diff, read-only', async () => {
     const getTurnDiff = vi.fn(async () => diff);
-    const applyTurn = vi.fn(async () => refused);
-    const { source } = liveReplay(finished, { getTurnDiff, applyTurn });
-    const r = await render(<App dataSource={source} />);
+    const { r } = await open({ getTurnDiff, applyTurn: vi.fn() });
+    await click(r.container.querySelector('#convo .tb'));
     await flush();
-    await flush();
-    await click(r.container.querySelector('#convo .tb-changes'));
+    const tabs = Array.from(r.container.querySelectorAll('#d-tabs .tab')).map((t) => t.textContent);
+    expect(tabs.slice(0, 2)).toEqual(['Result', 'Changes']);
+    expect(getTurnDiff).not.toHaveBeenCalled();
+    await click(Array.from(r.container.querySelectorAll('#d-tabs .tab')).find((t) => t.textContent === 'Changes'));
     await flush();
     expect(getTurnDiff).toHaveBeenCalledWith('c1', 'T1');
-    const dialog = r.container.querySelector('.changes-dialog')!;
-    expect(dialog.querySelector('.ch-diff')!.textContent).toContain('+two');
-    expect(dialog.textContent).toContain('No diff here');
-    expect(dialog.textContent).toContain('1 command');
-    const button = Array.from(dialog.querySelectorAll('button')).find((b) => b.textContent === 'Apply to my folder')!;
-    await click(button);
-    await flush();
-    expect(applyTurn).toHaveBeenCalledWith('T1');
-    const err = dialog.querySelector('.form-error')!;
-    expect(err.textContent).toContain('apply refused: 1 file(s) in your folder changed since the checkpoint: a.txt');
-    expect(err.querySelector('li')!.textContent).toBe('a.txt: changed in your folder since the checkpoint');
+    const body = r.container.querySelector('#d-body')!;
+    expect(body.querySelector('.tab-sum')!.textContent).toContain('1 file');
+    expect(body.querySelector('.ch-diff .dl.add')!.textContent).toBe('+two');
+    expect(body.textContent).toContain('Commands');
+    expect(button(body, 'Apply to my folder')).toBeUndefined();
     r.unmount();
   });
 
-  it('an applied turn says so, and the button is off', async () => {
-    const getTurnDiff = vi.fn(async () => ({ ...diff, apply: { state: 'applied', files: ['a.txt', 'logo.png'] } }));
-    const { source } = liveReplay(finished, { getTurnDiff, applyTurn: vi.fn() });
-    const r = await render(<App dataSource={source} />);
+  it('is not there when the source keeps no diffs', async () => {
+    const { r } = await open({});
+    await click(r.container.querySelector('#convo .tb'));
     await flush();
-    await flush();
-    await click(r.container.querySelector('#convo .tb-changes'));
-    await flush();
-    const dialog = r.container.querySelector('.changes-dialog')!;
-    expect(dialog.textContent).toContain('Applied to your folder. 2 files written.');
-    const button = Array.from(dialog.querySelectorAll('button')).find((b) => b.textContent === 'Apply to my folder')!;
-    expect((button as HTMLButtonElement).disabled).toBe(true);
+    const tabs = Array.from(r.container.querySelectorAll('#d-tabs .tab')).map((t) => t.textContent);
+    expect(tabs).not.toContain('Changes');
     r.unmount();
   });
+});
 
-  it('another turn\'s Changes starts empty: Apply never applies a turn whose diff is not shown', async () => {
-    const two = [
-      ...finished,
-      ev({ seq: 6, session: 'c1', kind: 'turn.started', turn: 'T2', exchange: 'y1', text: 'edit b.txt' }),
-      ev({ seq: 7, session: 'c1', kind: 'model.requested', turn: 'T2', exchange: 'y1' }),
-      ev({ seq: 8, session: 'c1', kind: 'model.responded', turn: 'T2', exchange: 'y1', status: 200, text: 'done' }),
-      ev({ seq: 9, session: 'c1', kind: 'turn.completed', turn: 'T2', exchange: 'y1', outcome: 'finished' }),
-    ];
-    // Each header reads its turn once; the dialog's read of T2 never ends.
-    let t2Reads = 0;
-    const getTurnDiff = vi.fn((_s: string, turn: string) =>
-      turn === 'T1' || ++t2Reads === 1 ? Promise.resolve(diff) : new Promise<TurnDiff>(() => {})
-    );
-    const applyTurn = vi.fn();
-    const { source } = liveReplay(two, { getTurnDiff, applyTurn });
-    const r = await render(<App dataSource={source} />);
-    await flush();
-    await flush();
-    const buttons = r.container.querySelectorAll('#convo .tb-changes');
-    expect(buttons).toHaveLength(2);
-    await click(buttons[0]);
-    await flush();
-    expect(r.container.querySelector('.changes-dialog .ch-diff')).not.toBeNull();
-    await click(buttons[1]);
-    await flush();
-    const dialog = r.container.querySelector('.changes-dialog')!;
-    expect(dialog.querySelector('.ch-diff')).toBeNull();
-    expect(dialog.textContent).toContain('Reading');
-    const apply = Array.from(dialog.querySelectorAll('button')).find((b) => b.textContent === 'Apply to my folder')!;
-    expect((apply as HTMLButtonElement).disabled).toBe(true);
-    r.unmount();
-  });
-
-  it('an apply still queued is read again until it ends', async () => {
-    // The first read is before the apply; later ones say queued until the
-    // test has seen it, then applied. A read that said none after the apply
-    // was asked for ended the wait at once, before the test looked.
-    let calls = 0;
-    let ended = false;
-    const loadDiff = vi.fn(async () => {
-      calls++;
-      if (calls === 1) return diff;
-      return ended ? { ...diff, apply: { state: 'applied', files: ['a.txt'] } } : { ...diff, apply: { state: 'queued' } };
-    });
-    const apply = vi.fn(async () => ({ state: 'queued' }) as ApplyState);
-    const r = await render(<ChangesDialog turnNumber={1} loadDiff={loadDiff} apply={apply} onClose={() => {}} pollMs={5} />);
-    await flush();
-    const button = Array.from(r.container.querySelectorAll('button')).find((b) => b.textContent === 'Apply to my folder')!;
-    await click(button);
-    await flush();
-    expect(r.container.textContent).toContain('Applying');
-    ended = true;
-    for (let i = 0; i < 50 && !r.container.textContent!.includes('Applied to your folder'); i++) {
-      await act(async () => {
-        await new Promise((done) => setTimeout(done, 10));
-      });
-    }
-    expect(r.container.textContent).toContain('Applied to your folder. 1 file written.');
-    r.unmount();
-  });
-
-  it('a source with no diff shows no changes control', async () => {
-    const { source } = liveReplay(finished);
-    const r = await render(<App dataSource={source} />);
-    await flush();
-    await flush();
-    expect(r.container.querySelector('#convo .tb')).not.toBeNull();
-    expect(r.container.querySelector('#convo .tb-changes')).toBeNull();
-    r.unmount();
-  });
-
-  it('the live source reads the diff and takes a 409 as an answer', async () => {
+describe('The live source', () => {
+  it('reads the diff and GET /sessions/<id>/changes, says a machine offline plainly, and takes a 409 apply as an answer', async () => {
     const calls: string[] = [];
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       calls.push(`${init?.method ?? 'GET'} ${url}`);
@@ -251,14 +316,26 @@ describe('Changes', () => {
         return new Response(JSON.stringify({ state: 'refused', conflicts: [{ path: 'a.txt', why: 'x' }] }), { status: 409 });
       }
       if (url.includes('/diff')) return new Response(JSON.stringify(diff), { status: 200 });
+      if (url.endsWith('/sessions/c1/changes')) return new Response(JSON.stringify(preview), { status: 200 });
+      if (url.endsWith('/sessions/off/changes')) return new Response('{"error":"offline"}', { status: 503 });
+      if (url.endsWith('/sessions/slow/changes')) return new Response('{"error":"timeout"}', { status: 504 });
+      if (url.endsWith('/sessions/busy/changes')) return new Response('{"error":"an apply is running"}', { status: 409 });
       return new Response(JSON.stringify({ error: 'no' }), { status: 404 });
     });
     vi.stubGlobal('fetch', fetchMock);
     try {
       const src = new LiveDataSource({ baseUrl: 'http://cockpit.test', token: 'tok' });
-      expect((await src.getTurnDiff('c1', 'T1')).files!.count).toBe(2);
+      expect((await src.getTurnDiff('c1', 'T1')).files!.count).toBe(1);
+      expect((await src.getApplyPreview('c1')).count).toBe(2);
       expect((await src.applyTurn('T1')).state).toBe('refused');
-      expect(calls).toEqual(['GET http://cockpit.test/api/v0/turns/T1/diff?session=c1', 'POST http://cockpit.test/api/v0/turns/T1/apply']);
+      expect(calls).toEqual([
+        'GET http://cockpit.test/api/v0/turns/T1/diff?session=c1',
+        'GET http://cockpit.test/api/v0/sessions/c1/changes',
+        'POST http://cockpit.test/api/v0/turns/T1/apply',
+      ]);
+      await expect(src.getApplyPreview('off')).rejects.toThrow('The machine with this folder is offline.');
+      await expect(src.getApplyPreview('slow')).rejects.toThrow('The machine with this folder did not answer in 30 seconds.');
+      await expect(src.getApplyPreview('busy')).rejects.toThrow('an apply is running');
     } finally {
       vi.unstubAllGlobals();
     }
