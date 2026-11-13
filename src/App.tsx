@@ -1237,7 +1237,9 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
             <p className="dim">
               {allSessions.length === 0
                 ? canStart
-                  ? 'Start one with New session.'
+                  ? savedAgents?.length === 0
+                    ? 'Add an agent first with + Agent, then start a session.'
+                    : 'Start one with New session.'
                   : 'Sessions appear here when an agent runs through agentbus.'
                 : 'Select a session from the list to view conversation.'}
             </p>

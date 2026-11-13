@@ -86,7 +86,9 @@ export const AgentsColumn: React.FC<AgentsColumnProps> = ({
         )}
       </header>
       <div className="colbody">
-        {agents.length === 0 && <p className="empty agents-empty">No agents yet.</p>}
+        {agents.length === 0 && (
+          <p className="empty agents-empty">{onAddAgent ? 'No agents yet. Add one with + Agent.' : 'No agents yet.'}</p>
+        )}
         {agents.map((a) => {
           const isSelected = selectedAgentId === a.id;
           const body = (
