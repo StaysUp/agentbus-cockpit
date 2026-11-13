@@ -98,6 +98,17 @@ export function turnAgentName(turn: Turn, agents?: SavedAgent[]): string {
   return turn.agent ? harnessName(turn.agent) : '';
 }
 
+// A turn header's agent and model, each said once. An agent's default name is
+// its harness and model ("Codex · deepseek/deepseek-v4.1-flash"), so when the
+// name's last part, or the whole name, is the turn's recorded model, the model
+// shows once, as its own fact. The name comes back split at " · ", so the
+// header can break between its parts.
+export function turnHeadFacts(ranBy: string, model?: string): { agent: string[]; model?: string } {
+  const agent = ranBy ? ranBy.split(' · ').filter((p) => p !== '') : [];
+  if (model && agent.length > 0 && agent[agent.length - 1] === model) agent.pop();
+  return { agent, model: model || undefined };
+}
+
 // A refusal of a message, for the screen: the agent named by its name, never
 // its id, and without the API's pointer to its own routes.
 export function refusalText(msg: string, agentId?: string, agentName?: string): string {
@@ -518,12 +529,24 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
               live !== undefined && turn.state === 'running' && !(status && !status.running && answer) && !(status?.state === 'finishing' && answer);
             const replyIn = live !== undefined && turn.state === 'running' && !showLive;
             // The turn header's facts: the agent that ran the turn, the model
-            // that made it, then its calls. A line breaks between facts, never
-            // inside one.
-            const ranBy = turnAgentName(turn, agents);
+            // that made it (once, see turnHeadFacts), then its calls. A line
+            // breaks between facts and between the parts of the agent's name,
+            // never inside one.
+            const head = turnHeadFacts(turnAgentName(turn, agents), model);
             const facts = [
-              ranBy ? <i className="tb-agent">{ranBy}</i> : null,
-              model ? <i className="tb-model">{model}</i> : null,
+              head.agent.length > 0 ? (
+                <i className="tb-agent">
+                  {head.agent.map((part, i) => (
+                    <React.Fragment key={i}>
+                      {i > 0 && <><span className="sep"> ·</span>{' '}</>}
+                      <span className="tb-fact">{part}</span>
+                    </React.Fragment>
+                  ))}
+                </i>
+              ) : null,
+              head.model ? (
+<i className="tb-model">{head.model}</i>
+              ) : null,
               calls !== undefined ? <i className="tb-calls">{calls} {calls === 1 ? 'model call' : 'model calls'}</i> : null,
             ].filter((x): x is React.ReactElement => x !== null);
 
@@ -539,7 +562,7 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
                         <span>
                           {facts.map((x, i) => (
                             <React.Fragment key={i}>
-                              {i > 0 && <span className="sep"> · </span>}
+                              {i > 0 && <><span className="sep"> ·</span>{' '}</>}
                               {x}
                             </React.Fragment>
                           ))}

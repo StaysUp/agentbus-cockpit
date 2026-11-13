@@ -526,12 +526,18 @@ tr.ev-open > td { background: #FBFBFA; border-bottom: 1px solid var(--line); pad
 #c-msgs { padding-top: 1.2rem; }
 #p-head .icon-btn { flex: none; width: 1.75rem; height: 1.75rem; margin-right: -0.25rem; }
 
-/* A turn header: Turn n, then its facts. It breaks between facts, never inside one. */
+/* A turn header: Turn n, then its facts. It breaks between facts, never inside
+   one: a separator keeps its dot with the fact before it and breaks after it.
+   Only a model name too long for a whole line breaks inside itself. */
 .tb-h { flex-wrap: wrap; gap: 0 0.6rem; }
 .tb-h b { white-space: nowrap; }
-.tb-h > span { font-size: var(--fs-s); color: var(--ink3); }
+.tb-h > span { font-size: var(--fs-s); color: var(--ink3); min-width: 0; max-width: 100%; }
 .tb-h > span i { font-style: normal; white-space: nowrap; }
-.tb-h .sep, .tab-sum .sep { margin: 0; white-space: pre; }
+.tb-h > span i.tb-agent { white-space: normal; }
+.tb-h > span i.tb-model { white-space: normal; overflow-wrap: anywhere; }
+.tb-h .tb-fact { white-space: nowrap; }
+.tb-h .sep { margin: 0; white-space: nowrap; }
+.tab-sum .sep { margin: 0; white-space: pre; }
 
 /* The turn strip ends with the folder, cut with an ellipsis; the full path is its tooltip. */
 .strip > .fold { flex: 1; min-width: 0; }
