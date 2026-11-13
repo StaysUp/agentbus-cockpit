@@ -725,15 +725,31 @@ tr.ev-open > td { background: #FBFBFA; border-bottom: 1px solid var(--line); pad
 #c-head .c-title-input { position: relative; }
 #c-head .c-title-input input { font-size: 1rem; font-weight: 650; }
 #c-head .c-title-input .form-error { position: absolute; top: calc(100% + 0.25rem); left: 0; right: 0; z-index: 20; background: #fff; border: 1px solid var(--line2); border-radius: 0.375rem; padding: 0.25rem 0.5rem; box-shadow: 0 2px 8px rgba(0,0,0,.08); }
-/* A turn's changes (ChangesDialog). */
-.tb-changes { margin-left: 0.5rem; font-size: var(--fs-xs); }
-.changes-dialog { width: 44rem; max-height: calc(100vh - 3rem); overflow: auto; }
-.ch-files { display: flex; flex-direction: column; gap: 0.5rem; }
+/* A turn's changes: "3 files changed · Review" in its header, and the ChangesDialog. */
+.tb-h > .tb-changes-at { margin-left: auto; white-space: nowrap; }
+.tb-h > .tb-changes-at:empty { display: none; }
+.tb-changes { font-size: var(--fs-s); }
+.tb-h .tb-applied { margin-left: 0.375rem; font-style: normal; font-size: var(--fs-s); color: var(--green); }
+.changes-dialog { width: 44rem; max-height: calc(100vh - 3rem); overflow: auto; box-sizing: border-box; }
+.ch-files { display: flex; flex-direction: column; gap: 0.5rem; min-width: 0; }
+.ch-file { min-width: 0; }
+.ch-path { cursor: pointer; overflow-wrap: anywhere; }
 .ch-path code { font-size: var(--fs-xs); }
 .ch-kind { font-size: var(--fs-xs); color: var(--ink3); }
 .ch-kind.added { color: var(--green); }
 .ch-kind.deleted { color: var(--bad); }
+.ch-count { margin-left: 0.375rem; font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
+.ch-add { color: var(--green); }
+.ch-del { color: var(--bad); }
 .ch-diff, .ch-cmds pre { margin: 0.1875rem 0 0; padding: 0.375rem 0.5rem; background: #F6F6F3; border-radius: 0.3125rem; font-size: var(--fs-xs); line-height: 1rem; overflow-x: auto; white-space: pre; }
+.ch-diff { padding: 0.375rem 0; max-height: 28rem; overflow: auto; }
+/* Each line is as wide as the widest, so its colour runs the full width when scrolled. */
+.ch-lines { display: inline-block; min-width: 100%; }
+.ch-diff .dl { display: block; padding: 0 0.5rem; }
+.ch-diff .dl.add { background: #E6F4EA; color: #1E5E34; }
+.ch-diff .dl.del { background: #FBE9E7; color: #8A2A1E; }
+.ch-diff .dl.hunk { color: var(--ink3); background: #EEEEEA; }
+.ch-diff .dl.meta { color: var(--ink3); }
 .ch-cmds summary { font-size: var(--fs-xs); color: var(--ink3); cursor: pointer; }
 .ch-conflicts { margin: 0.25rem 0 0; padding-left: 1rem; }
 

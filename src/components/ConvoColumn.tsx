@@ -1,8 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { reviewUI } from '../features';
 import { liveStatus, LiveTurn } from '../data/liveStatus';
 import { harnessName, turnNotes } from '../data/turns';
-import { Level, QueuedTurn, SavedAgent, SessionDetail, ShellRun, Started, Turn } from '../types';
+import { Level, QueuedTurn, SavedAgent, SessionDetail, ShellRun, Started, Turn, TurnChanges } from '../types';
 import { useNow } from '../utils/useNow';
 import { Markdown } from './Markdown';
 import { formatCost, formatTokens, stateLabel, turnStateClass } from '../utils/format';
@@ -81,6 +80,10 @@ interface ConvoColumnProps {
   onRename?: (sessionId: string, title: string) => Promise<void>;
   // Given when the source keeps each turn's diff: opens a turn's changes.
   onChanges?: (turn: Turn) => void;
+  // What each turn changed, by turn id, as far as read: null when it changed
+  // no files. A turn not in it is read with onLoadChanges once it is shown.
+  changes?: Record<string, TurnChanges | null>;
+  onLoadChanges?: (turn: Turn) => void;
   // The session's "!" commands from before AgentBus 0.5, oldest first, shown
   // read-only between its turns. A "!" message now goes to the agent like
   // any other: it runs the command with its own shell tool.
@@ -223,6 +226,53 @@ export function cannotContinue(turns: Turn[]): string {
   return 'This conversation cannot take another message. Start a new one.';
 }
 
+// "3 files changed · Review" in an ended turn's header, once the turn's diff
+// says it changed files, and "applied" once it is in the person's folder.
+// The diff is read when the turn first comes into view.
+const TurnChangesLink: React.FC<{
+  turn: Turn;
+  changes: TurnChanges | null | undefined;
+  onLoad?: (turn: Turn) => void;
+  onOpen: (turn: Turn) => void;
+}> = ({ turn, changes, onLoad, onOpen }) => {
+  const ref = useRef<HTMLSpanElement>(null);
+  const unread = changes === undefined;
+  useEffect(() => {
+    if (!unread || !onLoad) return;
+    const el = ref.current;
+    if (!el || typeof IntersectionObserver === 'undefined') {
+      onLoad(turn);
+      return;
+    }
+    const seen = new IntersectionObserver((entries) => {
+      if (entries.some((e) => e.isIntersecting)) {
+        seen.disconnect();
+        onLoad(turn);
+      }
+    });
+    // The header, not this span: an empty span is not displayed, so never seen.
+    seen.observe(el.parentElement ?? el);
+    return () => seen.disconnect();
+    // The turn object changes with every list read; its id is what counts.
+  }, [unread, onLoad, turn.id]);
+  if (!changes || changes.count === 0) return <span ref={ref} className="tb-changes-at" />;
+  return (
+    <span ref={ref} className="tb-changes-at">
+      <button
+        type="button"
+        className="tb-changes"
+        onClick={(e) => {
+          e.stopPropagation();
+          onOpen(turn);
+        }}
+      >
+        {changes.count} {changes.count === 1 ? 'file' : 'files'} changed · Review
+      </button>
+      {changes.applied && <em className="tb-applied">applied</em>}
+    </span>
+  );
+};
+
 export const ConvoColumn: React.FC<ConvoColumnProps> = ({
   session,
   selectedTurn,
@@ -250,6 +300,8 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
   onPending,
   onRename,
   onChanges,
+  changes,
+  onLoadChanges,
   commands,
   onBack,
 }) => {
@@ -569,6 +621,14 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
                         </span>
                       </>
                     )}
+                    {onChanges && turn.state !== 'running' && turn.state !== 'queued' && (
+                      <TurnChangesLink
+                        turn={turn}
+                        changes={changes?.[turn.id]}
+                        onLoad={onLoadChanges}
+                        onOpen={onChanges}
+                      />
+                    )}
                   </div>
                   <OriginLine turn={turn} agents={agents} onOpenSession={onOpenSession} />
                   <div className={`m-user${turn.origin ? ' from-agent' : ''}`}>
@@ -626,18 +686,6 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
                         </>
                       ) : null}
                     </span>
-                    {onChanges && reviewUI() && turn.state !== 'running' && (
-                      <button
-                        type="button"
-                        className="tb-changes"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onChanges(turn);
-                        }}
-                      >
-                        Changes
-                      </button>
-                    )}
                   </div>
                 </div>
                 {placed.get(ti)?.map((r) => <ShellEntry key={r.id} run={r} />)}

@@ -373,6 +373,13 @@ export interface ApplyState {
   error?: string;
 }
 
+// What the cockpit keeps of a turn's diff for its header: how many files the
+// turn changed, and whether its changes are in the person's folder.
+export interface TurnChanges {
+  count: number;
+  applied: boolean;
+}
+
 export interface TurnDiff {
   turn: string;
   session: string;

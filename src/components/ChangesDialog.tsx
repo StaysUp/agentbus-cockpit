@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { ApplyState, TurnDiff } from '../types';
+import React, { useEffect, useRef, useState } from 'react';
+import { ApplyState, TurnDiff, TurnDiffFile } from '../types';
 
 interface ChangesDialogProps {
   turnNumber: number;
@@ -7,6 +7,9 @@ interface ChangesDialogProps {
   // Absent when the source cannot apply.
   apply?: () => Promise<ApplyState>;
   onClose: () => void;
+  // Told once the turn is applied: by this dialog's apply, or when an apply
+  // read again ends applied.
+  onApplied?: () => void;
   // How often an apply still queued or running is read again, from the diff.
   pollMs?: number;
 }
@@ -15,11 +18,13 @@ interface ChangesDialogProps {
 // diff, the commands the agent ran, and a button that applies the turn to
 // the person's folder. A refusal is shown in the API's words, with each file.
 // One dialog is one turn: the caller remounts it (a key) for another turn.
-export const ChangesDialog: React.FC<ChangesDialogProps> = ({ turnNumber, loadDiff, apply, onClose, pollMs = 2000 }) => {
+export const ChangesDialog: React.FC<ChangesDialogProps> = ({ turnNumber, loadDiff, apply, onClose, onApplied, pollMs = 2000 }) => {
   const [diff, setDiff] = useState<TurnDiff | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [applied, setApplied] = useState<ApplyState | null>(null);
   const [applying, setApplying] = useState(false);
+  const onAppliedRef = useRef(onApplied);
+  onAppliedRef.current = onApplied;
 
   useEffect(() => {
     let active = true;
@@ -37,7 +42,9 @@ export const ChangesDialog: React.FC<ChangesDialogProps> = ({ turnNumber, loadDi
     setApplying(true);
     setError(null);
     try {
-      setApplied(await apply());
+      const s = await apply();
+      setApplied(s);
+      if (s.state === 'applied') onAppliedRef.current?.();
     } catch (err) {
       setError((err as Error).message);
     }
@@ -57,6 +64,7 @@ export const ChangesDialog: React.FC<ChangesDialogProps> = ({ turnNumber, loadDi
           if (!active || d.apply.state === 'queued' || d.apply.state === 'running') return;
           setDiff(d);
           setApplied(null);
+          if (d.apply.state === 'applied') onAppliedRef.current?.();
         },
         () => {
           // A read that fails is tried again on the next tick.
@@ -86,16 +94,7 @@ export const ChangesDialog: React.FC<ChangesDialogProps> = ({ turnNumber, loadDi
             </div>
             <div className="ch-files">
               {files.changes.map((f) => (
-                <div key={f.path} className="ch-file">
-                  <div className="ch-path">
-                    <code>{f.path}</code> <span className={`ch-kind ${f.change}`}>{f.change}</span>
-                  </div>
-                  {f.diff ? (
-                    <pre className="ch-diff">{f.diff}</pre>
-                  ) : f.diff_left_out ? (
-                    <div className="nd-note">No diff here: binary, too big, or its earlier content is not kept.</div>
-                  ) : null}
-                </div>
+                <FileChange key={f.path} file={f} open={files.changes.length <= FOLD_OVER} />
               ))}
               {files.truncated && <div className="nd-note">More files changed than are listed.</div>}
             </div>
@@ -143,6 +142,52 @@ export const ChangesDialog: React.FC<ChangesDialogProps> = ({ turnNumber, loadDi
     </div>
   );
 };
+
+// Past this many files, each file starts folded to its name and counts.
+const FOLD_OVER = 3;
+
+// One changed file: its path, kind and line counts, and its diff with added
+// lines green, removed lines red and hunk headers quiet. The diff scrolls
+// sideways in its own box.
+const FileChange: React.FC<{ file: TurnDiffFile; open: boolean }> = ({ file: f, open }) => {
+  const lines = f.diff ? f.diff.replace(/\n$/, '').split('\n') : [];
+  const added = lines.filter((l) => l.startsWith('+') && !l.startsWith('+++')).length;
+  const removed = lines.filter((l) => l.startsWith('-') && !l.startsWith('---')).length;
+  return (
+    <details className="ch-file" open={open}>
+      <summary className="ch-path">
+        <code>{f.path}</code> <span className={`ch-kind ${f.change}`}>{f.change}</span>
+        {f.diff && (
+          <span className="ch-count">
+            <span className="ch-add">+{added}</span> <span className="ch-del">−{removed}</span>
+          </span>
+        )}
+      </summary>
+      {f.diff ? (
+        <pre className="ch-diff">
+          <span className="ch-lines">
+            {lines.map((l, i) => (
+              <span key={i} className={`dl ${lineKind(l)}`}>
+                {l === '' ? ' ' : l}
+              </span>
+            ))}
+          </span>
+        </pre>
+      ) : f.diff_left_out ? (
+        <div className="nd-note">No diff here: binary, too big, or its earlier content is not kept.</div>
+      ) : null}
+    </details>
+  );
+};
+
+function lineKind(l: string): string {
+  if (l.startsWith('+++') || l.startsWith('---')) return 'meta';
+  if (l.startsWith('@@')) return 'hunk';
+  if (l.startsWith('+')) return 'add';
+  if (l.startsWith('-')) return 'del';
+  if (l.startsWith('\\')) return 'meta';
+  return 'ctx';
+}
 
 // How many files an apply wrote or removed: count, when the list was cut.
 function appliedCount(s: ApplyState): number {

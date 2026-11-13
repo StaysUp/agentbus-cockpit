@@ -41,7 +41,9 @@ import {
   Started,
   SubscriptionList,
   Turn,
+  TurnChanges,
   TurnDetail,
+  TurnDiff,
   VersionInfo,
 } from './types';
 
@@ -247,6 +249,8 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
   const allSessionsRef = useRef<SessionSummary[] | null>(null);
   allSessionsRef.current = allSessions;
   const shownRef = useRef<Shown | null>(null);
+  // Clears turns' read changes (forgetChanges, below) for the stream.
+  const forgetChangesRef = useRef<(turnIds: string[]) => void>(() => {});
   shownRef.current = shown;
   // Events of the selected session that arrive while its turns load.
   const streamedRef = useRef<CockpitEvent[] | null>(null);
@@ -410,6 +414,9 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
         if (s && changesTurns(event, s.session.id) && !countedIn(s.cursor, event)) {
           refreshTurns.current(s.session.id);
         }
+        if (s && event.session === s.session.id && (event.kind === 'turn.changed' || event.kind === 'turn.applied')) {
+          forgetChangesRef.current(event.kind === 'turn.applied' ? s.session.turnsList.map((t) => t.id) : [event.turn ?? '']);
+        }
 
         // A call adds to its row's total now, unless the shown list already
         // counts it (its seq is at or below the list's) or it was seen before.
@@ -530,10 +537,56 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
   const [newSession, setNewSession] = useState<{ agent?: string } | null>(null);
   // The turn whose changes are open, from GET /api/v0/turns/<id>/diff.
   const [changesTurn, setChangesTurn] = useState<Turn | null>(null);
-  const loadChanges = useCallback(
-    () => dataSource.getTurnDiff!(changesTurn!.sessionId, changesTurn!.id),
-    [dataSource, changesTurn]
+  // What each turn changed, by turn id, for its header ("3 files changed"):
+  // null when the turn changed no files. Read from the turn's diff when the
+  // turn comes into view. A read in flight is dropped when its turn's entry
+  // was cleared meanwhile (a turn.changed or turn.applied arrived).
+  const [turnChanges, setTurnChanges] = useState<Record<string, TurnChanges | null>>({});
+  const changesReads = useRef(new Map<string, number>());
+  const changesGen = useRef(0);
+  const noteChanges = useCallback((turnId: string, d: TurnDiff) => {
+    setTurnChanges((cur) => ({
+      ...cur,
+      [turnId]: d.files && d.files.count > 0 ? { count: d.files.count, applied: d.apply.state === 'applied' } : null,
+    }));
+  }, []);
+  const loadTurnChanges = useCallback(
+    (turn: Turn) => {
+      if (!dataSource.getTurnDiff || changesReads.current.has(turn.id)) return;
+      const gen = changesGen.current;
+      changesReads.current.set(turn.id, gen);
+      dataSource.getTurnDiff(turn.sessionId, turn.id).then(
+        (d) => {
+          if (changesReads.current.get(turn.id) !== gen) return;
+          changesReads.current.delete(turn.id);
+          noteChanges(turn.id, d);
+        },
+        () => {
+          if (changesReads.current.get(turn.id) !== gen) return;
+          changesReads.current.delete(turn.id);
+          setTurnChanges((cur) => ({ ...cur, [turn.id]: null }));
+        }
+      );
+    },
+    [dataSource, noteChanges]
   );
+  // Read the changes of a session's turns again: an apply covers the earlier
+  // turns not yet applied, and a turn's changes are stored after it ends.
+  const forgetChanges = useCallback((turnIds: string[]) => {
+    changesGen.current++;
+    for (const id of turnIds) changesReads.current.delete(id);
+    setTurnChanges((cur) => {
+      const next = { ...cur };
+      for (const id of turnIds) delete next[id];
+      return next;
+    });
+  }, []);
+  forgetChangesRef.current = forgetChanges;
+  const loadChanges = useCallback(async () => {
+    const d = await dataSource.getTurnDiff!(changesTurn!.sessionId, changesTurn!.id);
+    noteChanges(changesTurn!.id, d);
+    return d;
+  }, [dataSource, changesTurn, noteChanges]);
   const loadContext = useMemo(
     () => (dataSource.getCallContext ? (t: string, x: string, full: boolean) => dataSource.getCallContext!(t, x, full) : undefined),
     [dataSource]
@@ -1226,6 +1279,8 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
           }}
           onRename={renameSession}
           onChanges={dataSource.getTurnDiff ? setChangesTurn : undefined}
+          changes={turnChanges}
+          onLoadChanges={dataSource.getTurnDiff ? loadTurnChanges : undefined}
           commands={commandsBySession[sessionView.id]}
           onBack={() => columns.back('convo')}
         />
@@ -1303,6 +1358,16 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
           turnNumber={changesTurn.turnNumber}
           loadDiff={loadChanges}
           apply={dataSource.applyTurn ? () => dataSource.applyTurn!(changesTurn.id) : undefined}
+          onApplied={() => {
+            // The apply carried the earlier turns not yet applied too: read
+            // theirs again. This turn's is known.
+            const ids = (shownRef.current?.session.turnsList ?? []).map((t) => t.id).filter((id) => id !== changesTurn.id);
+            forgetChanges(ids);
+            setTurnChanges((cur) => {
+              const c = cur[changesTurn.id];
+              return c ? { ...cur, [changesTurn.id]: { ...c, applied: true } } : cur;
+            });
+          }}
           onClose={() => setChangesTurn(null)}
         />
       )}

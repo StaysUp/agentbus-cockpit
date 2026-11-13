@@ -36,23 +36,93 @@ const diff: TurnDiff = {
   apply: { state: 'none' },
 };
 
-// The Changes button is off by default (src/features.ts); these tests turn
-// it on, except the one that checks the default.
+// The turn header's "N files changed · Review" is on by default: no flag.
 beforeEach(() => {
-  vi.stubEnv('VITE_REVIEW_UI', '1');
+  vi.stubEnv('VITE_REVIEW_UI', '');
 });
 afterEach(() => {
   vi.unstubAllEnvs();
 });
 
+const header = (r: { container: HTMLElement }, i = 0) => r.container.querySelectorAll('#convo .tb-h')[i] as HTMLElement;
+
 describe('Changes by default', () => {
-  it('is hidden: applies are asked for in the chat', async () => {
-    vi.stubEnv('VITE_REVIEW_UI', '');
-    const { source } = liveReplay(finished, { getTurnDiff: vi.fn(), applyTurn: vi.fn() });
+  it('a turn that changed files shows "2 files changed · Review" in its header, with no flag', async () => {
+    const getTurnDiff = vi.fn(async () => diff);
+    const { source } = liveReplay(finished, { getTurnDiff, applyTurn: vi.fn() });
     const r = await render(<App dataSource={source} />);
     await flush();
+    await flush();
+    const link = header(r).querySelector('.tb-changes');
+    expect(link).not.toBeNull();
+    expect(link!.textContent).toBe('2 files changed · Review');
+    expect(header(r).querySelector('.tb-applied')).toBeNull();
+    r.unmount();
+  });
+
+  it('a turn with no changes shows no control', async () => {
+    const getTurnDiff = vi.fn(async () => ({ ...diff, files: null }));
+    const { source } = liveReplay(finished, { getTurnDiff, applyTurn: vi.fn() });
+    const r = await render(<App dataSource={source} />);
+    await flush();
+    await flush();
+    expect(getTurnDiff).toHaveBeenCalledWith('c1', 'T1');
     expect(r.container.querySelector('#convo .tb')).not.toBeNull();
-    expect(r.container.querySelector('.tb-changes')).toBeNull();
+    expect(r.container.querySelector('#convo .tb-changes')).toBeNull();
+    r.unmount();
+  });
+
+  it('opening shows each file and its diff, coloured by line; Apply calls the apply route and the header then says applied', async () => {
+    const getTurnDiff = vi.fn(async () => diff);
+    const applyTurn = vi.fn(async () => ({ state: 'applied', files: ['a.txt', 'logo.png'] }) as ApplyState);
+    const { source } = liveReplay(finished, { getTurnDiff, applyTurn });
+    const r = await render(<App dataSource={source} />);
+    await flush();
+    await flush();
+    await click(header(r).querySelector('.tb-changes'));
+    await flush();
+    const dialog = r.container.querySelector('.changes-dialog')!;
+    expect(Array.from(dialog.querySelectorAll('.ch-path code')).map((c) => c.textContent)).toEqual(['a.txt', 'logo.png']);
+    const lines = (k: string) => Array.from(dialog.querySelectorAll(`.ch-diff .dl.${k}`)).map((l) => l.textContent);
+    expect(lines('add')).toEqual(['+two']);
+    expect(lines('del')).toEqual(['-one']);
+    expect(lines('hunk')).toEqual(['@@ -1 +1 @@']);
+    expect(dialog.querySelector('.ch-count')!.textContent).toBe('+1 −1');
+    const button = Array.from(dialog.querySelectorAll('button')).find((b) => b.textContent === 'Apply to my folder')!;
+    expect(button.className).toContain('btn-primary');
+    await click(button);
+    await flush();
+    expect(applyTurn).toHaveBeenCalledWith('T1');
+    expect(dialog.textContent).toContain('Applied to your folder. 2 files written.');
+    expect(header(r).querySelector('.tb-applied')!.textContent).toBe('applied');
+    r.unmount();
+  });
+
+  it('more than three files start folded to their names', async () => {
+    const many: TurnDiff = {
+      ...diff,
+      files: {
+        isolated: true,
+        count: 4,
+        changes: ['a', 'b', 'c', 'd'].map((p) => ({ path: `${p}.txt`, change: 'modified' as const, size: 1, diff: '@@ -1 +1 @@\n-x\n+y\n' })),
+      },
+    };
+    const r = await render(<ChangesDialog turnNumber={1} loadDiff={async () => many} onClose={() => {}} />);
+    await flush();
+    const files = Array.from(r.container.querySelectorAll('details.ch-file')) as HTMLDetailsElement[];
+    expect(files).toHaveLength(4);
+    expect(files.every((f) => !f.open)).toBe(true);
+    r.unmount();
+  });
+
+  it('a turn not in an isolated copy cannot be applied', async () => {
+    const r = await render(
+      <ChangesDialog turnNumber={1} loadDiff={async () => ({ ...diff, files: { ...diff.files!, isolated: false } })} apply={vi.fn()} onClose={() => {}} />
+    );
+    await flush();
+    expect(r.container.textContent).toContain('cannot be applied');
+    const button = Array.from(r.container.querySelectorAll('button')).find((b) => b.textContent === 'Apply to my folder')!;
+    expect((button as HTMLButtonElement).disabled).toBe(true);
     r.unmount();
   });
 });
@@ -110,7 +180,11 @@ describe('Changes', () => {
       ev({ seq: 8, session: 'c1', kind: 'model.responded', turn: 'T2', exchange: 'y1', status: 200, text: 'done' }),
       ev({ seq: 9, session: 'c1', kind: 'turn.completed', turn: 'T2', exchange: 'y1', outcome: 'finished' }),
     ];
-    const getTurnDiff = vi.fn((_s: string, turn: string) => (turn === 'T1' ? Promise.resolve(diff) : new Promise<TurnDiff>(() => {})));
+    // Each header reads its turn once; the dialog's read of T2 never ends.
+    let t2Reads = 0;
+    const getTurnDiff = vi.fn((_s: string, turn: string) =>
+      turn === 'T1' || ++t2Reads === 1 ? Promise.resolve(diff) : new Promise<TurnDiff>(() => {})
+    );
     const applyTurn = vi.fn();
     const { source } = liveReplay(two, { getTurnDiff, applyTurn });
     const r = await render(<App dataSource={source} />);
@@ -159,7 +233,7 @@ describe('Changes', () => {
     r.unmount();
   });
 
-  it('a source with no diff shows no Changes button', async () => {
+  it('a source with no diff shows no changes control', async () => {
     const { source } = liveReplay(finished);
     const r = await render(<App dataSource={source} />);
     await flush();
