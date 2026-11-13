@@ -21,7 +21,9 @@ interface FeedbackDialogProps {
 // exactly those and the AgentBus version, nothing from sessions, code,
 // prompts or folders. When sending fails it says why (the site's own words
 // when it answered), keeps the text to copy and send again, and links GitHub
-// Discussions. Escape closes it, before the cockpit behind it sees the key.
+// Discussions. All of this happens inside the one box: once sent, the fields
+// stay in view, disabled, and a short line takes the place of Send. Close and
+// Escape always close it; Escape before the cockpit behind it sees the key.
 export const FeedbackDialog: React.FC<FeedbackDialogProps> = ({ version, onClose }) => {
   const [message, setMessage] = useState('');
   const [email, setEmail] = useState('');
@@ -29,6 +31,8 @@ export const FeedbackDialog: React.FC<FeedbackDialogProps> = ({ version, onClose
   const [state, setState] = useState<'edit' | 'sending' | 'sent' | 'failed'>('edit');
   // The site's own words for a refusal; null when it could not be reached.
   const [refusal, setRefusal] = useState<string | null>(null);
+  // While sending and once sent, the fields and Send are disabled.
+  const locked = state === 'sending' || state === 'sent';
 
   // A capture listener on window runs before the cockpit's own Escape
   // handler, which leaves alone a key whose default is prevented.
@@ -44,7 +48,7 @@ export const FeedbackDialog: React.FC<FeedbackDialogProps> = ({ version, onClose
 
   const send = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!message.trim() || state === 'sending') return;
+    if (!message.trim() || locked) return;
     setState('sending');
     const body = {
       message: message.trim(),
@@ -76,67 +80,63 @@ export const FeedbackDialog: React.FC<FeedbackDialogProps> = ({ version, onClose
     <div className="modal-back feedback-back" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <form className="new-dialog feedback-dialog" role="dialog" aria-modal="true" aria-label="Feedback" onSubmit={send}>
         <div className="nd-title">Feedback</div>
-        {state === 'sent' ? (
-          <>
-            <div className="fb-done">Thanks — sent.</div>
-            <div className="nd-actions">
-              <button type="button" className="btn btn-secondary nd-cancel" onClick={onClose}>
-                Close
-              </button>
-            </div>
-          </>
-        ) : (
-          <>
-            <label>
-              <span>What's missing or broken?</span>
-              <textarea
-                name="message"
-                rows={5}
-                maxLength={MAX_MESSAGE}
-                value={message}
-                onChange={(e) => setMessage(e.target.value)}
-                autoFocus
-              />
-            </label>
-            <label>
-              <span>Email (optional)</span>
-              <input
-                type="email"
-                name="email"
-                maxLength={MAX_EMAIL}
-                autoComplete="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-              />
-            </label>
-            <Switch
-              className="fb-hosted"
-              name="wants_hosted"
-              label="Tell me when hosted Lorebug is ready"
-              on={wantsHosted}
-              onChange={setWantsHosted}
-            />
-            <div className="nd-note fb-what">This sends your message, and your email if given, to Lorebug.</div>
-            {state === 'failed' && (
-              <div className="form-error fb-failed" role="alert">
-                {refusal ? `It was not sent: ${refusal}` : 'It could not be sent.'} Your message is still in the box
-                above: copy it, or post it on{' '}
-                <a href={DISCUSSIONS_URL} target="_blank" rel="noreferrer">
-                  GitHub Discussions
-                </a>
-                .
-              </div>
-            )}
-            <div className="nd-actions">
-              <button type="submit" className="btn btn-primary fb-send" disabled={!message.trim() || state === 'sending'}>
-                {state === 'sending' ? 'Sending…' : state === 'failed' ? 'Send again' : 'Send'}
-              </button>
-              <button type="button" className="btn btn-secondary nd-cancel" onClick={onClose}>
-                {state === 'failed' ? 'Close' : 'Cancel'}
-              </button>
-            </div>
-          </>
+        <label>
+          <span>What's missing or broken?</span>
+          <textarea
+            name="message"
+            rows={5}
+            maxLength={MAX_MESSAGE}
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+            disabled={locked}
+            autoFocus
+          />
+        </label>
+        <label>
+          <span>Email (optional)</span>
+          <input
+            type="email"
+            name="email"
+            maxLength={MAX_EMAIL}
+            autoComplete="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            disabled={locked}
+          />
+        </label>
+        <Switch
+          className="fb-hosted"
+          name="wants_hosted"
+          label="Tell me when hosted Lorebug is ready"
+          on={wantsHosted}
+          onChange={setWantsHosted}
+          disabled={locked}
+        />
+        <div className="nd-note fb-what">This sends your message to the Lorebug team.</div>
+        {state === 'failed' && (
+          <div className="form-error fb-failed" role="alert">
+            {refusal ? `It was not sent: ${refusal}` : 'It could not be sent.'} Your message is still in the box above:
+            copy it, or post it on{' '}
+            <a href={DISCUSSIONS_URL} target="_blank" rel="noreferrer">
+              GitHub Discussions
+            </a>
+            .
+          </div>
         )}
+        <div className="nd-actions">
+          {state === 'sent' ? (
+            <div className="fb-done" role="status">
+              Sent. Thank you.
+            </div>
+          ) : (
+            <button type="submit" className="btn btn-primary fb-send" disabled={!message.trim() || locked}>
+              {state === 'sending' ? 'Sending…' : state === 'failed' ? 'Send again' : 'Send'}
+            </button>
+          )}
+          <button type="button" className="btn btn-secondary fb-close" onClick={onClose}>
+            Close
+          </button>
+        </div>
       </form>
     </div>,
     document.body
