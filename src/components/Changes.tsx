@@ -221,7 +221,7 @@ export const ApplyPanel: React.FC<ApplyPanelProps> = ({ preview, error, apply, r
         {error && <div className="form-error">{error}</div>}
         {!preview && !error && <p className="dim">Reading…</p>}
         {applied ? (
-          <p className="ap-done">Applied. Your folder matches this conversation.</p>
+          <p className="nd-note ok" role="status">Applied. Your folder matches this conversation.</p>
         ) : (
           preview && (
             <>
@@ -233,7 +233,7 @@ export const ApplyPanel: React.FC<ApplyPanelProps> = ({ preview, error, apply, r
                   : preview.why || 'your folder matches this conversation'}
               </div>
               {conflicted && (
-                <div className="ap-conflicts">
+                <div className="form-error ap-conflicts">
                   <b>{files(conflicts.length)} would be refused.</b> You changed{' '}
                   {conflicts.length === 1 ? 'this file' : 'these files'} in your folder since this conversation copied it:
                   <ul className="ch-conflicts">

@@ -173,7 +173,7 @@ describe('The apply preview', () => {
     await click(button(r.container.querySelector('#right')!, 'Apply to my folder'));
     await flush();
     expect(applyTurn).toHaveBeenCalledWith('T1');
-    expect(r.container.querySelector('#right')!.textContent).toContain('Applied. Your folder matches this conversation.');
+    expect(r.container.querySelector('#right .nd-note.ok[role="status"]')!.textContent).toBe('Applied. Your folder matches this conversation.');
     expect(button(r.container.querySelector('#right')!, 'Apply to my folder')).toBeUndefined();
     expect(bar(r.container)).toBeNull();
     r.unmount();
@@ -185,7 +185,7 @@ describe('The apply preview', () => {
     expect(r.container.querySelector('.ch-file.conflict .ch-conflict')!.textContent).toBe(
       'you changed this file since; it would be refused'
     );
-    const box = r.container.querySelector('.ap-conflicts')!;
+    const box = r.container.querySelector('.form-error.ap-conflicts')!;
     expect(box.textContent).toContain('1 file would be refused.');
     expect(box.querySelector('li')!.textContent).toBe('a.txt: changed in your folder since the checkpoint');
     expect(button(r.container, 'Apply to my folder')!.disabled).toBe(true);
