@@ -65,8 +65,9 @@ AgentBus API, so anything it shows, your own program can read too.
 ## Using it
 
 - **An agent is a saved setup**: a harness (Claude Code, Codex or Antigravity), how it reaches a
-  model (its own subscription, or an OpenRouter key read from an environment variable), the model
-  and a name. "+ Agent" makes one.
+  model (a subscription connected in Settings, or an OpenRouter key read from an environment
+  variable), the model and a name. "+ Agent" makes one. A subscription agent starts with no model,
+  so the tool picks its own; type a model name to pin one.
 - **+ Session** picks a machine, then a folder on it, and the first message. The session works on
   its own copy of the folder. Your folder does not change until a turn is applied.
 - **Any message may go to any agent.** Pick it beside Send. Messages sent while a turn runs wait
@@ -89,9 +90,11 @@ machine.
 
 ![The Settings page: the grants](docs/assets/cockpit-settings.png)
 
-For a subscription agent on runners that hold no sign-in, open the agent's form and use
-**Connect**. It runs the harness's own login on control. The token stays on control and is never
-shown. **Turn on for my runners** lets control use it for your runners.
+Connect each subscription once, in **Settings** under Subscriptions (or in a subscription agent's
+form), before its first turn. **Connect** runs the harness's own login on control. The token stays
+on control and is never shown. Every turn uses it, on one machine (`agentbus up`) as on many: a
+tool's own sign-in on the machine is not used. A code the login rejects says so at once, and
+**Cancel** stops a connect that is running.
 
 ## Build a static copy
 
