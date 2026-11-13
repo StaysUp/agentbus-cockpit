@@ -11,7 +11,7 @@
 [![Latest release](https://img.shields.io/github/v/release/staysup/agentbus-cockpit)](https://github.com/staysup/agentbus-cockpit/releases)
 [![CI](https://github.com/StaysUp/agentbus-cockpit/actions/workflows/ci.yml/badge.svg)](https://github.com/StaysUp/agentbus-cockpit/actions/workflows/ci.yml)
 
-[Quickstart](#quickstart) &nbsp;&bull;&nbsp; [Demo](#demo) &nbsp;&bull;&nbsp; [Releases](https://github.com/staysup/agentbus-cockpit/releases)
+[Quickstart](https://github.com/staysup/agentbus#quickstart) &nbsp;&bull;&nbsp; [Demo](#demo) &nbsp;&bull;&nbsp; [Releases](https://github.com/staysup/agentbus-cockpit/releases)
 
 </div>
 
@@ -20,18 +20,21 @@
 It shows your agents' sessions, every turn, every model call and its cost. It uses only the public
 AgentBus API, so anything it shows, your own program can read too.
 
+**The cockpit ships inside AgentBus.** `agentbus up` serves it on its own address and opens it
+signed in. To use it, follow the
+[AgentBus Quickstart](https://github.com/staysup/agentbus#quickstart). You do not need this
+repository for that.
+
+This repository is for working on the cockpit itself, with its dev server.
+
 ## Demo
 
 [![AgentBus cockpit demo](https://img.youtube.com/vi/si0HHQFcCD0/maxresdefault.jpg)](https://youtu.be/si0HHQFcCD0)
 
-## Prerequisites
+## Work on the cockpit
 
-- Node.js 20.19 or later in the 20 line, or 22.12 or later. Vite needs one of these.
-- A running AgentBus service (`agentbus up`) of the same version: this cockpit saves Settings with
-  `PATCH`, which control has from 0.5.2. See the
-  [AgentBus README](https://github.com/staysup/agentbus#quickstart).
-
-## Quickstart
+You need Node.js 20.19 or later in the 20 line, or 22.12 or later (Vite needs one of these), and a
+running AgentBus (`agentbus up`) of the same version.
 
 1. Start AgentBus:
 
@@ -39,11 +42,11 @@ AgentBus API, so anything it shows, your own program can read too.
    agentbus up
    ```
 
-   Any browser origin may call it, because every call needs the token. To allow only the cockpit,
-   start it with `agentbus up -origin http://localhost:5173` instead. That origin must then match
-   exactly: open the cockpit at `localhost`, not `127.0.0.1`, or pass that origin.
+   Any browser origin may call it, because every call needs the token. To allow only the dev
+   server, start it with `agentbus up -origin http://localhost:5173` instead. That origin must then
+   match exactly: open the cockpit at `localhost`, not `127.0.0.1`, or pass that origin.
 
-2. In this folder, install and start the cockpit:
+2. In this folder, install and start the dev server:
 
    ```sh
    npm ci
@@ -59,7 +62,8 @@ AgentBus API, so anything it shows, your own program can read too.
    pbcopy < ~/.local/share/agentbus/token   # macOS; on Linux, cat it and copy it
    ```
 
-   Paste it into the Token field and press Connect.
+   Paste it into the Token field and press Connect. The dev server never uses the sign-in link;
+   only the cockpit that `agentbus up` serves does.
 
 **Use recorded data** opens the cockpit on a recorded sample, with no service needed.
 
@@ -112,14 +116,17 @@ The agent form's **Model** offers the models the agent's access can use now, wit
 the source gives one. It says where the list came from and when, and **Refresh** reads it again. You
 can still type any name, and an empty one uses the tool's own default.
 
-## Build a static copy
+## Build
 
 ```sh
 npm run build
 ```
 
-This writes `dist/`. Serve it from any static host. Plain `agentbus up` accepts it; to lock the
-service to that host, pass its origin to `agentbus up -origin`.
+This writes `dist/`. An AgentBus release packs it into the `agentbus` binary, built at the cockpit
+tag of the same version (`tools/pack-cockpit.sh` in the AgentBus repository). To try a build of
+your own inside agentbus, run `tools/pack-cockpit.sh --from <this folder>/dist` there and build
+`agentbus`. You can also serve `dist/` from any static host: plain `agentbus up` accepts it; to
+lock the service to that host, pass its origin to `agentbus up -origin`.
 
 ## Test
 
