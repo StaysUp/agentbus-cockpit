@@ -341,7 +341,7 @@ describe('The event stream', () => {
     svc.fn.mockImplementation(async (input: string, init?: RequestInit) => {
       const p = new URL(input).pathname;
       if (p === '/api/v0/settings') return tagged({ version: 1, created: '2026-11-01T00:00:00Z', imported_files: [] });
-      if (p === '/api/v0/settings/permissions') return tagged({ sandbox: { mode: 'off', read: [] } });
+      if (p === '/api/v0/settings/permissions') return tagged({ sandbox: { mode: 'off' }, home_files: [] });
       if (p === '/api/v0/settings/instructions') return tagged({ text: '' });
       return base(input, init);
     });

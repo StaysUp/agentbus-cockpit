@@ -5,7 +5,7 @@ import { App } from '../App';
 import { ReplayDataSource } from '../data/ReplayDataSource';
 import { SettingsPage } from '../components/SettingsPage';
 import { LiveDataSource } from '../data/LiveDataSource';
-import { grantsOf, lines, networkOf, Policy, sandboxOffer, SettingsApi, SettingsInfo, withGrants } from '../data/settings';
+import { grantsOf, homeFilesOf, lines, networkOf, Policy, sandboxOffer, SettingsApi, SettingsInfo, withGrants, withHomeFiles } from '../data/settings';
 import { RunnerInfo } from '../types';
 import { click, ev, flush, jsonl, panelOpen, render, unmountAll } from './helpers';
 
@@ -20,7 +20,8 @@ function policy(): Policy {
     limits: { max_depth: 2 },
     agent_api: { scope: 'tree', apply: true, read: true },
     network: { contain: 'off', allow: [] },
-    sandbox: { mode: 'off', read: [] },
+    sandbox: { mode: 'off' },
+    home_files: [],
   };
 }
 
@@ -91,16 +92,26 @@ describe('the grants as policy keys', () => {
   it('writes the grants into their keys and keeps every other key', () => {
     const p = policy();
     const g = { ...grantsOf(p), network: 'list' as const, hosts: ['github.com'], sandbox: 'on' as const,
-      read: ['~/.aws/config'], agentsApply: false };
+      agentsApply: false };
     const out = withGrants(p, g);
     expect(out.network).toEqual({ contain: 'on', allow: ['github.com'] });
-    expect(out.sandbox).toEqual({ mode: 'on', read: ['~/.aws/config'] });
+    expect(out.sandbox).toEqual({ mode: 'on' });
+    expect(out.home_files).toEqual([]);
     expect(out.agent_api).toEqual({ scope: 'tree', apply: false, read: true });
     expect(out.forbid).toEqual(['git push']);
     expect(grantsOf(out)).toEqual(g);
     // Off empties the list; on keeps it.
     expect(withGrants(out, { ...g, network: 'off' }).network).toEqual({ contain: 'on', allow: [] });
     expect(withGrants(out, { ...g, network: 'on' }).network).toEqual({ contain: 'off', allow: ['github.com'] });
+  });
+
+  it('writes home files into home_files, outside the sandbox, and keeps every other key', () => {
+    const out = withHomeFiles(policy(), ['~/.aws/config']);
+    expect(out.home_files).toEqual(['~/.aws/config']);
+    expect(out.sandbox).toEqual({ mode: 'off' });
+    expect(out.forbid).toEqual(['git push']);
+    expect(homeFilesOf(out)).toEqual(['~/.aws/config']);
+    expect(homeFilesOf({})).toEqual([]);
   });
 
   it('reads one entry per line', () => {
@@ -191,8 +202,9 @@ describe('the Settings page', () => {
     const { container } = await render(<SettingsPage api={api} onBack={() => {}} />);
     await flush();
     // The first grant's editor is open; each other grant opens on a click.
-    await setValue(container.querySelector('textarea[name="read"]'), '~/.aws/config\n');
-    await pick(container, '[data-grant="sandbox"]');
+    // Home files are not a grant: they are a part of their own.
+    expect(container.querySelector('[data-grant="read"]')).toBeNull();
+    expect(container.querySelector('textarea[name="home_files"]')).toBeNull();
     await click(container.querySelector('button[name="sandbox"]'));
     await pick(container, '[data-grant="network"]');
     await click(container.querySelector('[aria-label="Network"] [role="radio"]:nth-child(2)'));
@@ -203,7 +215,6 @@ describe('the Settings page', () => {
     expect(container.querySelector('[data-grant="commands"]')).toBeNull();
     // The table shows the drafts before they are saved.
     const row = (k: string) => container.querySelector(`[data-grant="${k}"]`)!.textContent;
-    expect(row('read')).toContain('1 file');
     expect(row('sandbox')).toContain('On');
     expect(row('network')).toContain('A list · 2 hosts');
     expect(row('apply')).toContain('Off');
@@ -215,13 +226,32 @@ describe('the Settings page', () => {
       forbid: ['git push'],
       agent_api: { apply: false, scope: 'tree' },
       network: { contain: 'on', allow: ['github.com', 'registry.npmjs.org'] },
-      sandbox: { mode: 'on', read: ['~/.aws/config'] },
+      sandbox: { mode: 'on' },
+      home_files: [],
     });
     expect(container.textContent).toContain('Saved.');
     // The page read the policy again: the JSON shows what is stored now.
     await pick(container, '[data-part="policy"]');
     const json = (container.querySelector('textarea[name="policy"]') as HTMLTextAreaElement).value;
     expect(JSON.parse(json).agent_api.apply).toBe(false);
+  });
+
+  it('shows Home files as a part of its own, with its one line, and saves them into home_files', async () => {
+    const { api, state } = fakeApi();
+    const { container } = await render(<SettingsPage api={api} onBack={() => {}} />);
+    await flush();
+    await pick(container, '[data-part="home"]');
+    expect(container.textContent).toContain("Files from your home copied into each conversation's own home, such as ~/.aws/config.");
+    await setValue(container.querySelector('textarea[name="home_files"]'), '~/.aws/config\n\n~/.gitconfig');
+    expect(container.querySelector('[data-part="home"]')!.textContent).toContain('Unsaved');
+    await click(button(container, 'Save home files'));
+    await flush();
+    expect(api.putPolicy).toHaveBeenCalledTimes(1);
+    expect(api.putPolicy.mock.calls[0][1]).toBe('"3"');
+    expect(state.policy).toMatchObject({ forbid: ['git push'], sandbox: { mode: 'off' }, home_files: ['~/.aws/config', '~/.gitconfig'] });
+    expect(state.policy.sandbox).not.toHaveProperty('read');
+    expect(container.textContent).toContain('Saved.');
+    expect(container.querySelector('[data-part="home"]')!.textContent).not.toContain('Unsaved');
   });
 
   it('refuses a stale write and says so', async () => {
@@ -405,11 +435,11 @@ describe('the Settings page', () => {
     const { container } = await render(<SettingsPage api={api} onBack={() => {}} />);
     await flush();
     const parts = [...container.querySelectorAll('.pg-list [data-part]')].map((x) => x.getAttribute('data-part'));
-    expect(parts).toEqual(['grants', 'policy', 'instructions']);
+    expect(parts).toEqual(['grants', 'home', 'policy', 'instructions']);
     expect(container.querySelector('.pg-list .on')!.getAttribute('data-part')).toBe('grants');
     expect(container.querySelector('.pg-main .colhead')!.textContent).toContain('Grants');
-    expect(container.querySelectorAll('.pg-main tr[data-grant]')).toHaveLength(4);
-    expect(container.querySelector('.pg-side .colhead')!.textContent).toBe("Files in a session's home");
+    expect(container.querySelectorAll('.pg-main tr[data-grant]')).toHaveLength(3);
+    expect(container.querySelector('.pg-side .colhead')!.textContent).toBe('Sandbox');
     await pick(container, '[data-grant="network"]');
     expect(container.querySelector('.pg-side .colhead')!.textContent).toBe('Network');
     expect(container.querySelector('tr[data-grant="network"]')!.getAttribute('aria-selected')).toBe('true');
@@ -419,6 +449,7 @@ describe('the Settings page', () => {
     expect(saved).toContain('limits.max_depth2');
     expect(saved).toContain('forbidgit push');
     expect(saved).toContain('read_foldersnone');
+    expect(saved).toContain('home_filesnone');
   });
 
   it('saves the instructions', async () => {

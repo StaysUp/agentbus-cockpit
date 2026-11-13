@@ -20,12 +20,13 @@ export interface SettingsInfo {
 }
 
 // The policy as GET /api/v0/settings/permissions sends it, every value
-// filled. Only the keys the page shows as grants are named; the rest pass
-// through untouched.
+// filled. Only the keys the page shows as grants and home files are named;
+// the rest pass through untouched.
 export interface Policy {
   agent_api?: { apply?: boolean; [k: string]: unknown };
   network?: { contain?: string; allow?: string[] };
-  sandbox?: { mode?: string; read?: string[] };
+  sandbox?: { mode?: string; [k: string]: unknown };
+  home_files?: string[];
   [k: string]: unknown;
 }
 
@@ -36,7 +37,6 @@ export type NetworkGrant = 'off' | 'list' | 'on';
 
 // The grants: one global set, the same for every machine.
 export interface Grants {
-  read: string[];
   sandbox: 'off' | 'on';
   network: NetworkGrant;
   hosts: string[];
@@ -50,7 +50,6 @@ export function networkOf(p: Policy): NetworkGrant {
 
 export function grantsOf(p: Policy): Grants {
   return {
-    read: [...(p.sandbox?.read ?? [])],
     sandbox: p.sandbox?.mode === 'on' ? 'on' : 'off',
     network: networkOf(p),
     hosts: [...(p.network?.allow ?? [])],
@@ -67,8 +66,19 @@ export function withGrants(p: Policy, g: Grants): Policy {
     ...p,
     agent_api: { ...(p.agent_api ?? {}), apply: g.agentsApply },
     network: { ...(p.network ?? {}), contain: g.network === 'on' ? 'off' : 'on', allow },
-    sandbox: { ...(p.sandbox ?? {}), mode: g.sandbox, read: g.read },
+    sandbox: { ...(p.sandbox ?? {}), mode: g.sandbox },
   };
+}
+
+// homeFilesOf is the files from the person's home copied into each
+// conversation's own home (home_files), sandbox on or off.
+export function homeFilesOf(p: Policy): string[] {
+  return [...(p.home_files ?? [])];
+}
+
+// withHomeFiles is p with files as its home_files.
+export function withHomeFiles(p: Policy, files: string[]): Policy {
+  return { ...p, home_files: files };
 }
 
 // lines is text as a list: one entry per line, blank lines left out.

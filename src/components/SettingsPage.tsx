@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   Grants,
   grantsOf,
+  homeFilesOf,
   lines,
   Policy,
   SandboxOffer,
@@ -9,6 +10,7 @@ import {
   SettingsInfo,
   Versioned,
   withGrants,
+  withHomeFiles,
 } from "../data/settings";
 import { ColHead, PageFrame } from "./PageFrame";
 import { Button, Seg, Switch } from "./Controls";
@@ -17,8 +19,8 @@ import { ConnectStep, SubscriptionApi } from "./ConnectStep";
 import { SubscriptionList } from "../types";
 
 // The Settings page (/settings): control's settings, one global set for every machine.
-// The grants (files a session gets, the sandbox, the network, and two
-// actions), the whole policy as JSON, and the instructions every turn gets,
+// The grants (the sandbox, the network, and one action), the files from
+// the person's home each conversation gets, the whole policy as JSON, and the instructions every turn gets,
 // with when the settings last changed. Each part saves on its
 // own, with the version it read; a change made elsewhere in between is
 // refused, and the page reads everything again.
@@ -47,7 +49,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ api, onBack, sandbox
   const [loadError, setLoadError] = useState<string | null>(null);
   // The drafts, reset from what was read.
   const [grants, setGrants] = useState<Grants | null>(null);
-  const [readText, setReadText] = useState("");
+  const [homeText, setHomeText] = useState("");
   const [hostsText, setHostsText] = useState("");
   const [policyText, setPolicyText] = useState("");
   const [instructions, setInstructions] = useState("");
@@ -56,13 +58,13 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ api, onBack, sandbox
   const [message, setMessage] = useState<{ part: string; text: string; ok: boolean } | null>(null);
   // The part on screen, and the grant picked in it.
   const [part, setPart] = useState<Part>("grants");
-  const [grant, setGrant] = useState<GrantKey>("read");
+  const [grant, setGrant] = useState<GrantKey>("sandbox");
 
   // read reads the settings' state, and the parts named: each part read
   // resets its own drafts, and leaves the other part's as they are.
   // Which parts hold changes not saved, as of the last render: a read
   // after one part's save leaves another part's unsaved draft as it is.
-  const dirtyRef = useRef<Record<Part, boolean>>({ grants: false, policy: false, instructions: false, subscriptions: false });
+  const dirtyRef = useRef<Record<Part, boolean>>({ grants: false, home: false, policy: false, instructions: false, subscriptions: false });
   const read = useCallback(
     async (parts: { policy: boolean; instructions: boolean }, saved?: Part | "all") => {
       const keep = (p: Part) => saved !== "all" && p !== saved && dirtyRef.current[p];
@@ -80,9 +82,9 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ api, onBack, sandbox
         if (!keep("grants")) {
           const g = grantsOf(policy.value);
           setGrants(g);
-          setReadText(g.read.join("\n"));
           setHostsText(g.hosts.join("\n"));
         }
+        if (!keep("home")) setHomeText(homeFilesOf(policy.value).join("\n"));
         if (!keep("policy")) setPolicyText(json(policy.value));
       }
       if (ins && !keep("instructions")) setInstructions(ins.value);
@@ -152,13 +154,19 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ api, onBack, sandbox
       api.putPolicy(
         withGrants(loaded.policy.value, {
           ...grants,
-          read: lines(readText),
           hosts: lines(hostsText),
         }),
         loaded.policy.etag,
       ),
       { policy: true, instructions: false },
     );
+
+  const saveHomeFiles = () =>
+    loaded &&
+    save("home", () => api.putPolicy(withHomeFiles(loaded.policy.value, lines(homeText)), loaded.policy.etag), {
+      policy: true,
+      instructions: false,
+    });
 
   const savePolicy = () => {
     if (!loaded) return;
@@ -176,13 +184,14 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ api, onBack, sandbox
   const ready = !!(loaded && grants && info);
 
   // What each part holds that is not saved: its draft against what was read.
-  const grantsDraft = grants && { ...grants, read: lines(readText), hosts: lines(hostsText) };
+  const grantsDraft = grants && { ...grants, hosts: lines(hostsText) };
   const dirty: Record<Part, boolean> = {
     grants:
       !!loaded &&
       !!grantsDraft &&
       JSON.stringify(withGrants(loaded.policy.value, grantsDraft)) !==
         JSON.stringify(withGrants(loaded.policy.value, grantsOf(loaded.policy.value))),
+    home: !!loaded && JSON.stringify(lines(homeText)) !== JSON.stringify(homeFilesOf(loaded.policy.value)),
     policy: !!loaded && policyText !== json(loaded.policy.value),
     instructions: !!loaded && instructions !== loaded.instructions.value,
     // Each connect is done at once, so nothing waits to be saved.
@@ -218,7 +227,8 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ api, onBack, sandbox
 
   // The left column: the three parts, each saved on its own.
   const parts: [Part, string, string][] = [
-    ["grants", "Grants", "Files, sandbox, network and two actions"],
+    ["grants", "Grants", "Sandbox, network and one action"],
+    ["home", "Home files", "Files each conversation gets"],
     ["policy", "Policy", "All of it, as JSON"],
     ["instructions", "Instructions", "What every turn is told"],
   ];
@@ -325,7 +335,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ api, onBack, sandbox
                     >
                       <td className="c">›</td>
                       <td>{name}</td>
-                      <td className="nw">{grantValue(k, g, readText, hostsText)}</td>
+                      <td className="nw">{grantValue(k, g, hostsText)}</td>
                       <td className="nw">
                         <code>{key}</code>
                       </td>
@@ -344,20 +354,6 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ api, onBack, sandbox
         <div className="colbody pg-body">
           {ready && g && (
             <fieldset className="pg-edit" disabled={!!busy}>
-              {sel[0] === "read" && (
-                <label>
-                  <span className="pg-note">Files under ~ a session gets in its own home. Used when the sandbox is on.</span>
-                  <textarea
-                    name="read"
-                    rows={5}
-                    value={readText}
-                    onChange={(e) => setReadText(e.target.value)}
-                    placeholder="~/.aws/config"
-                    spellCheck={false}
-                  />
-                  <span className="nd-note">One per line, each starting with ~/.</span>
-                </label>
-              )}
               {sel[0] === "sandbox" && (
                 <>
                   <p className="pg-note">On, each session runs in a sandbox with its own home.</p>
@@ -430,6 +426,50 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ api, onBack, sandbox
               <p className="f-note">A change here is kept on this page until you save the grants.</p>
             </fieldset>
           )}
+        </div>
+      </>
+    );
+  } else if (part === "home") {
+    const n = lines(homeText).length;
+    main = (
+      <>
+        {head("Home files", saveBtn("Save home files", saveHomeFiles))}
+        <div className="colbody pg-body">
+          {status}
+          {ready && (
+            <>
+              <div className="tab-sum">
+                <b>{plural(n, "file")}</b>
+                <span className="sep">·</span>the same on every machine
+              </div>
+              {note("home")}
+              <fieldset className="pg-edit" disabled={!!busy}>
+                <label>
+                  <span className="pg-note">{HOME_FILES_LINE}</span>
+                  <textarea
+                    name="home_files"
+                    rows={5}
+                    value={homeText}
+                    onChange={(e) => setHomeText(e.target.value)}
+                    placeholder="~/.aws/config"
+                    spellCheck={false}
+                  />
+                  <span className="nd-note">One per line, each starting with ~/.</span>
+                </label>
+              </fieldset>
+            </>
+          )}
+        </div>
+      </>
+    );
+    side = (
+      <>
+        {head("How it applies")}
+        <div className="colbody pg-body">
+          <p className="pg-note">Copied at the start of each turn, with the sandbox on or off.</p>
+          <p className="f-note first">
+            A file the conversation already has is never replaced. Policy key <code>home_files</code>.
+          </p>
         </div>
       </>
     );
@@ -587,17 +627,20 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ api, onBack, sandbox
   );
 };
 
-type Part = "grants" | "policy" | "instructions" | "subscriptions";
+type Part = "grants" | "home" | "policy" | "instructions" | "subscriptions";
 const PART_NAMES: [Part, string][] = [
   ["grants", "Grants"],
+  ["home", "Home files"],
   ["policy", "Policy"],
   ["instructions", "Instructions"],
 ];
-type GrantKey = "read" | "sandbox" | "network" | "apply";
+type GrantKey = "sandbox" | "network" | "apply";
+
+// The one plain line that says what Home files are.
+const HOME_FILES_LINE = "Files from your home copied into each conversation's own home, such as ~/.aws/config.";
 
 // The grants as rows: the key, its name, and the policy key it writes.
 const GRANTS: [GrantKey, string, string][] = [
-  ["read", "Files in a session's home", "sandbox.read"],
   ["sandbox", "Sandbox", "sandbox.mode"],
   ["network", "Network", "network"],
   ["apply", "Agents may apply changes", "agent_api.apply"],
@@ -616,12 +659,8 @@ function flatKeys(v: unknown, at = ""): [string, string][] {
 const plural = (n: number, one: string) => `${n} ${n === 1 ? one : `${one}s`}`;
 
 // grantValue is a grant as the draft holds it now, in a few words.
-function grantValue(k: GrantKey, g: Grants, readText: string, hostsText: string): React.ReactNode {
+function grantValue(k: GrantKey, g: Grants, hostsText: string): React.ReactNode {
   switch (k) {
-    case "read": {
-      const n = lines(readText).length;
-      return n ? plural(n, "file") : <span className="dim">none</span>;
-    }
     case "sandbox":
       return g.sandbox === "on" ? "On" : "Off";
     case "network":
