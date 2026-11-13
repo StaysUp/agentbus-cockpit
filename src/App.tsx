@@ -10,6 +10,7 @@ import { usePage } from './page';
 import { sandboxOffer, type SettingsApi } from './data/settings';
 import { useTabShown } from './data/useTabShown';
 import { SubscriptionApi } from './components/ConnectStep';
+import { SignInDot, signInOf } from './components/SignInDot';
 import { NewSessionDialog } from './components/NewSessionDialog';
 import { ChangesDialog } from './components/ChangesDialog';
 import { RightPanel } from './components/RightPanel';
@@ -36,6 +37,7 @@ import {
   SessionSummary,
   ShellRun,
   Started,
+  SubscriptionList,
   Turn,
   TurnDetail,
   VersionInfo,
@@ -199,9 +201,16 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
   const [page, goPage] = usePage();
   // The saved agents: the rows of the Agents column, the picker beside Send
   // and each turn's agent name. Read at the start, whenever the agents form
-  // closes, and after a remove (agentsKey).
+  // closes, after a remove (agentsKey), and on coming back to the cockpit.
   const [savedAgents, setSavedAgents] = useState<SavedAgent[] | undefined>(undefined);
   const [agentsKey, setAgentsKey] = useState(0);
+  // The subscriptions control keeps, for each agent's sign-in dot: read
+  // with the agents, both again on coming back to the cockpit (Settings is
+  // where one is connected or a key set). Undefined before the first read, null when the
+  // service keeps none. No polling of its own.
+  const [subs, setSubs] = useState<SubscriptionList | null | undefined>(undefined);
+  // Settings opens on Subscriptions when an agent's sign-in dot sent it.
+  const [settingsAtSubs, setSettingsAtSubs] = useState(false);
   // An agent's name for a screen: a saved agent's, else its harness's.
   const nameOf = (id?: string) => (id ? agentNameOf(id, savedAgents) : undefined);
   // The sessions the service said are closed when one was opened
@@ -560,7 +569,7 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
     };
   }, [dataSource, sessionCount, picking]);
   useEffect(() => {
-    if (!dataSource.listAgents || agentsDialog !== null) return;
+    if (!dataSource.listAgents || agentsDialog !== null || page !== 'cockpit') return;
     let active = true;
     dataSource.listAgents().then(
       (list) => active && setSavedAgents(list),
@@ -569,7 +578,20 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
     return () => {
       active = false;
     };
-  }, [dataSource, agentsDialog, agentsKey]);
+  }, [dataSource, agentsDialog, agentsKey, page]);
+  // Read with the agents, so an agent's key_set and the OpenRouter key kept
+  // on control are read at the same moment.
+  useEffect(() => {
+    if (!dataSource.listSubscriptions || agentsDialog !== null || page !== 'cockpit') return;
+    let active = true;
+    dataSource.listSubscriptions().then(
+      (list) => active && setSubs(list),
+      () => undefined
+    );
+    return () => {
+      active = false;
+    };
+  }, [dataSource, agentsDialog, agentsKey, page]);
   // Removes a saved agent from its row, then lists the agents again. A
   // refusal throws the API's words for the row to show.
   // The runners, for the list at the foot of the Agents column.
@@ -585,6 +607,22 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
       putInstructions: (t, etag) => d.putInstructions!(t, etag),
     };
   }, [dataSource]);
+  // The Settings link opens Settings on its first part; an agent's sign-in
+  // dot opens it on Subscriptions, the one place to connect. Absent when the
+  // source has no Settings page or keeps no subscriptions.
+  const openSettings = () => {
+    setSettingsAtSubs(false);
+    goPage('settings');
+  };
+  const openSignIn =
+    settingsApi && subscriptionApi
+      ? () => {
+          setSettingsAtSubs(true);
+          goPage('settings');
+        }
+      : undefined;
+  // The sign-in dot beside the agent picker near Send.
+  const agentDot = (a: SavedAgent) => <SignInDot signIn={signInOf(a, subs)} onOpen={openSignIn} />;
   const loadRunners = useMemo(
     () =>
       dataSource.readRunners
@@ -1023,6 +1061,7 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
         onBack={() => goPage('cockpit')}
         sandbox={loadRunners ? sandboxOffer(runners.runners, runners.error) : undefined}
         subscriptions={subscriptionApi}
+        atSubscriptions={settingsAtSubs}
       />
     );
   }
@@ -1053,7 +1092,9 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
         onRunners={loadRunners ? () => goPage('runners') : undefined}
         runnersOnline={runnersOnline}
         version={version ? versionLabel(version) : undefined}
-        onSettings={settingsApi ? () => goPage('settings') : undefined}
+        onSettings={settingsApi ? openSettings : undefined}
+        subscriptions={subs}
+        onOpenSignIn={openSignIn}
       />
 
       <SessionsColumn
@@ -1096,6 +1137,7 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
           agents={savedAgents}
           defaultAgent={draft.req.agent}
           onAddAgent={canKeepAgents ? () => setAgentsDialog({}) : undefined}
+          agentDot={agentDot}
           onRename={async (_id, t) => setDraft((d) => (d ? { ...d, title: t.trim() } : d))}
         />
       ) : sessionView ? (
@@ -1122,6 +1164,7 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
           agentName={nameOf(sessionView.agent)}
           agents={savedAgents}
           onAddAgent={canKeepAgents ? () => setAgentsDialog({}) : undefined}
+          agentDot={agentDot}
           onOpenSession={(id) => {
             // A session not listed yet is opened once its row arrives, as for
             // a session just started.

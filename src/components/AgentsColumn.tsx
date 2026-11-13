@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { follow, PAGE_PATHS } from '../page';
-import { SavedAgent } from '../types';
+import { SavedAgent, SubscriptionList } from '../types';
 import { PlusIcon } from './Icons';
+import { SignInDot, signInOf } from './SignInDot';
 
 interface AgentsColumnProps {
   agents: SavedAgent[];
@@ -25,6 +26,11 @@ interface AgentsColumnProps {
   onSettings?: () => void;
   // The service's build, from GET /api/v0/version, shown on the AgentBus card.
   version?: string;
+  // The subscriptions control keeps (GET /api/v0/subscriptions), for each
+  // agent's sign-in dot; undefined before the first read, null when the
+  // service keeps none. onOpenSignIn opens Settings → Subscriptions.
+  subscriptions?: SubscriptionList | null;
+  onOpenSignIn?: () => void;
 }
 
 // The Agents column: the saved agents, in the order the service lists them,
@@ -45,6 +51,8 @@ export const AgentsColumn: React.FC<AgentsColumnProps> = ({
   runnersOnline,
   onSettings,
   version,
+  subscriptions,
+  onOpenSignIn,
 }) => {
   // A remove in flight, or refused. Remove takes one click: a saved agent
   // can be made again, and its sessions stay.
@@ -83,7 +91,10 @@ export const AgentsColumn: React.FC<AgentsColumnProps> = ({
             <>
               <span className={`mark ${a.harness}`}>{agentMark(a)}</span>
               <span className="ag-t">
-                <b>{a.name}</b>
+                <b>
+                  {a.name}
+                  <SignInDot signIn={signInOf(a, subscriptions)} onOpen={onOpenSignIn} />
+                </b>
                 <span className="q-l">{savedLine(a)}</span>
               </span>
             </>

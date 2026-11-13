@@ -55,6 +55,8 @@ interface ConvoColumnProps {
   // Opens the form for a new agent: the picker's "Add an agent first" when
   // no agent is saved.
   onAddAgent?: () => void;
+  // The picked agent's sign-in dot, shown beside the picker.
+  agentDot?: (agent: SavedAgent) => React.ReactNode;
   // Given only when the source can stop a turn. Rejects with the API's message.
   onStop?: (turn: Turn) => Promise<void>;
   // The turns the person asked to stop that have not ended yet.
@@ -224,6 +226,7 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
   onPrefillTaken,
   agents,
   onAddAgent,
+  agentDot,
   defaultAgent,
   onOpenSession,
   queuedTurn,
@@ -644,19 +647,22 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
             </button>
           )}
           {showPick && pickList.length > 0 && (
-            <Select
-              name="next_agent"
-              className="next-agent"
-              variant="quiet"
-              label="Agent for the next message"
-              title="Agent for the next message"
-              value={nextAgent}
-              placeholder="Pick an agent"
-              disabled={!canSend}
-              options={pickList.map((a) => ({ value: a.id, label: a.name }))}
-              onChange={setPicked}
-              align="right"
-            />
+            <span className="next-agent-at">
+              {agentDot && nextAgent !== '' && agentDot(pickList.find((a) => a.id === nextAgent)!)}
+              <Select
+                name="next_agent"
+                className="next-agent"
+                variant="quiet"
+                label="Agent for the next message"
+                title="Agent for the next message"
+                value={nextAgent}
+                placeholder="Pick an agent"
+                disabled={!canSend}
+                options={pickList.map((a) => ({ value: a.id, label: a.name }))}
+                onChange={setPicked}
+                align="right"
+              />
+            </span>
           )}
           {showStop ? (
             <button type="button" className="go stop" disabled={lastStopping} onClick={stop}>

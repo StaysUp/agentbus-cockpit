@@ -34,6 +34,9 @@ interface SettingsPageProps {
   // The subscriptions control keeps, which every turn uses. Absent: a
   // service that keeps none, and no Subscriptions part.
   subscriptions?: SubscriptionApi;
+  // Open on Subscriptions rather than Grants: an agent's sign-in dot
+  // brings the person here to connect.
+  atSubscriptions?: boolean;
 }
 
 interface Loaded {
@@ -44,7 +47,7 @@ interface Loaded {
 
 const json = (p: Policy) => JSON.stringify(p, null, 2);
 
-export const SettingsPage: React.FC<SettingsPageProps> = ({ api, onBack, sandbox, subscriptions }) => {
+export const SettingsPage: React.FC<SettingsPageProps> = ({ api, onBack, sandbox, subscriptions, atSubscriptions }) => {
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   // The drafts, reset from what was read.
@@ -57,7 +60,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ api, onBack, sandbox
   const [busy, setBusy] = useState<string | null>(null);
   const [message, setMessage] = useState<{ part: string; text: string; ok: boolean } | null>(null);
   // The part on screen, and the grant picked in it.
-  const [part, setPart] = useState<Part>("grants");
+  const [part, setPart] = useState<Part>(atSubscriptions && subscriptions ? "subscriptions" : "grants");
   const [grant, setGrant] = useState<GrantKey>("sandbox");
 
   // read reads the settings' state, and the parts named: each part read

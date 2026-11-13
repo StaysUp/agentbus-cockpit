@@ -86,9 +86,12 @@ code { font-size: .86em; }
 /* Stopping… stays readable while it waits for the turn to end. */
 #c-reply .go.stop:disabled { opacity: .5; }
 /* The agent for the next message, beside Send: quiet text until hovered (mockup v4, round 17). */
-#c-reply .box.with-pick { padding-right: 16.5rem; }
+#c-reply .box.with-pick { padding-right: 17.5rem; }
 #c-reply .next-agent { position: absolute; right: 6rem; bottom: 0.5rem; max-width: 10rem; }
 #c-reply .next-agent:disabled { cursor: default; opacity: .6; }
+/* The picker and the picked agent's sign-in dot, side by side. */
+#c-reply .next-agent-at { position: absolute; right: 6rem; bottom: 0.5rem; display: flex; align-items: center; gap: 0.4rem; }
+#c-reply .next-agent-at .next-agent { position: static; }
 
 /* ---------- right panel ---------- */
 #p-head { height: 3.75rem; flex: none; padding: 0 1rem 0 1.5rem; }
@@ -818,6 +821,12 @@ tr.ev-open > td { background: #FBFBFA; border-bottom: 1px solid var(--line); pad
 .rn-dot { display: inline-block; flex: none; width: 0.45rem; height: 0.45rem; border-radius: 50%; margin-right: 0.4rem; background: #23A56A; }
 .rn-dot.offline { background: var(--line2); }
 .rn-dot.pending { background: var(--amber); }
+/* An agent's sign-in dot (SignInDot.tsx): the same dot, green or yellow; a
+   click opens Settings → Subscriptions, over a hit area wider than the dot. */
+.signin-dot { position: relative; margin-right: 0; }
+.signin-dot.opens { cursor: pointer; }
+.signin-dot.opens::after { content: ''; position: absolute; inset: -0.35rem; border-radius: 50%; }
+.signin-dot.opens:focus-visible { outline: 2px solid var(--ink3); outline-offset: 2px; }
 .rn-sandbox-no { color: var(--amber); }
 /* Why Settings does not offer the sandbox: the machines' own reasons. */
 .pg-why { margin: 0.6rem 0 0; font-size: var(--fs-m); line-height: 1.45; color: var(--amber); }

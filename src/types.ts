@@ -471,6 +471,9 @@ export interface SubscriptionState {
 }
 export interface SubscriptionList {
   subscriptions: SubscriptionState[];
+  // Whether an OpenRouter key is kept on control (set in Settings). Never
+  // the key.
+  openrouter_key?: { set: boolean; set_at?: string };
 }
 
 export interface DataSource {
