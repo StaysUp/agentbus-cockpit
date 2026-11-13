@@ -98,8 +98,7 @@ export function liveReplay(base: CockpitEvent[], extra: Partial<DataSource> = {}
   let onEvent: ((e: CockpitEvent) => void) | null = null;
   let unsubscribed = 0;
   const source: DataSource = {
-    getAgents: () => replay.getAgents(),
-    getSessions: (a) => replay.getSessions(a),
+    getSessions: () => replay.getSessions(),
     getTurns: (id) => replay.getTurns(id),
     getTurn: (s, t) => replay.getTurn(s, t),
     subscribe: (cb, onSnapshot) => {

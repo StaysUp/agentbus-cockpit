@@ -3,7 +3,6 @@ import {
   ConnectView,
   SubscriptionList,
   SubscriptionState,
-  AgentSummary,
   CallContext,
   CockpitEvent,
   DataSource,
@@ -28,7 +27,7 @@ import { FolderInfo } from './folders';
 import { Policy, SettingsInfo, Versioned } from './settings';
 import { COMMAND_KINDS, shellRun } from './shell';
 import { ApiTurn } from './jobs';
-import { buildAgents, extractCleanPrompt, sessionGroup, turnDetail, turnOrigin } from './turns';
+import { extractCleanPrompt, turnDetail, turnOrigin } from './turns';
 
 export interface LiveDataSourceConfig {
   baseUrl?: string; // defaults to http://127.0.0.1:8787
@@ -146,19 +145,14 @@ export class LiveDataSource implements DataSource {
     return isClosed(data?.session?.closed) || isClosed(data?.copy?.closed);
   }
 
-  async getAgents(): Promise<AgentSummary[]> {
-    return buildAgents(await this.getSessions());
-  }
-
   // The list with the store and seq it was computed at, so the screen can
   // order it against the stream.
   async getSessionList(): Promise<SessionList> {
     return this.snapshot();
   }
 
-  async getSessions(agentId?: string): Promise<SessionSummary[]> {
-    const { sessions } = await this.snapshot();
-    return agentId === undefined ? sessions : sessions.filter((s) => sessionGroup(s) === agentId);
+  async getSessions(): Promise<SessionSummary[]> {
+    return (await this.snapshot()).sessions;
   }
 
   // GET /api/v0/turns?session=<id>: one session's turns, newest first, a page

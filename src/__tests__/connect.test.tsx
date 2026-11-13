@@ -279,14 +279,13 @@ describe('Connect checks that are overtaken', () => {
 });
 
 describe('AgentsColumn', () => {
-  it('shows name and session count, and no quota text', async () => {
-    const agents = [
-      { id: 'claude', name: 'Claude Code', vendor: 'anthropic', mark: 'C', sessionCount: 2, openCount: 1, usage: {} },
-    ];
-    const r = await render(<AgentsColumn agents={agents as never} selectedAgentId="claude" onSelectAgent={() => {}} />);
+  it('shows name and access, no sessions, and no quota text', async () => {
+    const agents = [{ id: 'claude', name: 'Claude Code', harness: 'claude', access: 'subscription', model: 'haiku' }];
+    const r = await render(<AgentsColumn agents={agents} selectedAgentId="claude" onSelectAgent={() => {}} />);
     const row = r.container.querySelector('.agent')!;
     expect(row.textContent).toContain('Claude Code');
-    expect(row.textContent).toContain('2 sessions');
+    expect(row.textContent).toContain('subscription · haiku');
+    expect(row.textContent).not.toMatch(/session|running/);
     expect(row.textContent).not.toMatch(/left|limit|%/);
     expect(row.querySelector('.quota')).toBeNull();
     r.unmount();

@@ -106,8 +106,7 @@ describe('Context tab, codex', () => {
     const { load } = loader({ c2: replayedCall });
     const base2 = new ReplayDataSource(jsonl(evs));
     const source: DataSource = {
-      getAgents: () => base2.getAgents(),
-      getSessions: (a) => base2.getSessions(a),
+      getSessions: () => base2.getSessions(),
       getTurns: (id) => base2.getTurns(id),
       getTurn: (s, t) => base2.getTurn(s, t),
       getCallContext: load,

@@ -70,6 +70,9 @@ AgentBus API, so anything it shows, your own program can read too.
   so the tool picks its own; type a model name to pin one.
 - **+ Session** picks a machine, then a folder on it, and the first message. The session works on
   its own copy of the folder. Your folder does not change until a turn is applied.
+- **Sessions lists every conversation, newest first.** A conversation is a list of turns, and each
+  turn names its agent, so a row shows the agents that took part. The Agents column lists only the
+  saved agents.
 - **Any message may go to any agent.** Pick it beside Send. Messages sent while a turn runs wait
   and run next.
 - **Other agents answer in the conversation.** Ask in the chat, for example "ask codex to add a

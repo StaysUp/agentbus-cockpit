@@ -1211,7 +1211,7 @@ describe('Agents', () => {
     expect(r.container.querySelector('.agent-form')).toBeNull();
     await settle();
     const rows = Array.from(r.container.querySelectorAll('#agents [data-agent]')).map((x) => x.textContent);
-    expect(rows.some((t) => t!.includes('Claude Code · qwen/qwen3-coder:free') && t!.includes('0 sessions') && t!.includes('OpenRouter · qwen/qwen3-coder:free'))).toBe(true);
+    expect(rows.some((t) => t!.includes('Claude Code · qwen/qwen3-coder:free') && t!.includes('OpenRouter · qwen/qwen3-coder:free'))).toBe(true);
     r.unmount();
   });
 
@@ -1265,16 +1265,40 @@ describe('Agents', () => {
     await settle();
     expect(r.container.querySelector('#agents .manage-agents')).toBeNull();
     const ids = Array.from(r.container.querySelectorAll('#agents [data-agent]')).map((x) => x.getAttribute('data-agent'));
-    expect(ids).toEqual(expect.arrayContaining(['claude', 'codex']));
-    // codex has no session, and is listed all the same.
-    expect(r.container.querySelector('#agents [data-agent="codex"]')!.textContent).toContain('0 sessions');
+    expect(ids).toEqual(['claude', 'codex']);
+    r.unmount();
+  });
+
+  // A session is a list of turns, each naming its agent: no session belongs
+  // to an agent, so the Agents column lists only the saved agents.
+  it('the saved agents list holds no sessions, and no row for a removed agent', async () => {
+    const svc = fakeService({
+      sessions: [
+        // Started on a saved agent since removed, then switched to codex.
+        row('s2', { agent: 'codex', first_agent: 'claude', first_agent_id: 'a_gone', last: '2026-11-05T09:20:00Z' }),
+        row('s1', { first_agent: 'claude', first_agent_id: 'claude' }),
+      ],
+      events: { s1: oneTurn('s1', 'one'), s2: oneTurn('s2', 'two') },
+      agents: AGENTS,
+    });
+    const r = await mount(svc);
+    await settle();
+    const rows = Array.from(r.container.querySelectorAll('#agents [data-agent]'));
+    expect(rows.map((x) => x.getAttribute('data-agent'))).toEqual(['claude', 'codex']);
+    for (const x of rows) expect(x.textContent).not.toMatch(/session|running/);
+    expect(r.container.querySelector('#agents [data-session], #agents .sess')).toBeNull();
+    expect(r.container.textContent).not.toContain('removed agent');
+    // Both sessions are in the Sessions column, each with its agents.
+    const ran = (id: string) => r.container.querySelector(`#sessions [data-session="${id}"] .s-ag`)?.textContent;
+    expect(ran('s2')).toBe('Claude Code, Codex');
+    expect(ran('s1')).toBe('Claude Code');
     r.unmount();
   });
 
   it('opens on the newest session\'s agent even when the saved agents arrive first', async () => {
     let release: () => void = () => {};
     const gate = new Promise<void>((res) => (release = res));
-    const svc = fakeService({ sessions: [row('s1')], events: { s1: oneTurn('s1', 'hi') }, agents: AGENTS,
+    const svc = fakeService({ sessions: [row('s1', { first_agent: 'claude', first_agent_id: 'claude' })], events: { s1: oneTurn('s1', 'hi') }, agents: AGENTS,
       saved: [{ id: 'a_empty', name: 'Empty', harness: 'codex', access: 'subscription' }, ...SAVED] });
     const inner = svc.fn.getMockImplementation()!;
     svc.fn.mockImplementation(async (input: string, init?: RequestInit) => {

@@ -3,7 +3,6 @@ import { act } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { App } from '../App';
 import { ReplayDataSource } from '../data/ReplayDataSource';
-import { buildAgents } from '../data/turns';
 import { CockpitEvent, DataSource, SessionSummary } from '../types';
 import { click, ev, flush, jsonl, liveReplay, render, openCall, rowSession, shownSession } from './helpers';
 
@@ -132,8 +131,7 @@ describe('App', () => {
     let current = before;
     let reset: ((sessions: SessionSummary[]) => void) | undefined;
     const source: DataSource = {
-      getAgents: () => current.getAgents(),
-      getSessions: (a) => current.getSessions(a),
+      getSessions: () => current.getSessions(),
       getTurns: (id) => current.getTurns(id),
       getTurn: (s, t) => current.getTurn(s, t),
       subscribe: (_cb, onSnapshot) => {
@@ -165,7 +163,6 @@ describe('App', () => {
     let rows = [row('sel', '2026-11-05T09:30:00Z', 1, 10), row('other', '2026-11-05T09:20:00Z', 1, 10)];
     let push: ((e: CockpitEvent) => void) | null = null;
     const source: DataSource = {
-      getAgents: async () => buildAgents(rows),
       getSessions: async () => rows,
       getTurns: async () => ({ turns: [] }),
       getTurn: async () => null,
@@ -198,23 +195,21 @@ describe('App', () => {
     r.unmount();
   });
 
-  it('R4#1 sessions with the empty agent "" get a visible agent row and show in Sessions', async () => {
+  it('R4#1 a session with the empty agent "" shows in Sessions, named after its client, with no agent row', async () => {
     const rows: SessionSummary[] = [{
       id: 'plain', agent: '', client: 'claude-cli/2.1.318', title: 'plain', started: '2026-11-05T09:00:00Z',
       last: '2026-11-05T09:10:00Z', open: false, turns: 1, usage: { input_tokens: 1, output_tokens: 0 },
     }];
     const source: DataSource = {
-      getAgents: async () => buildAgents(rows),
-      getSessions: async (a) => (a === undefined ? rows : rows.filter((r) => r.agent === a)),
+      getSessions: async () => rows,
       getTurns: async () => ({ turns: [] }),
       getTurn: async () => null,
     };
     const r = await render(<App dataSource={source} />);
     await flush();
     await flush();
-    const agent = r.container.querySelector('#agents .agent');
-    expect(agent?.querySelector('b')?.textContent).toBe('claude-cli');
-    expect(agent?.className).toContain('on');
+    expect(r.container.querySelector('#agents .agent')).toBeNull();
+    expect(r.container.querySelector('#sessions [data-session="plain"] .s-ag')?.textContent).toBe('claude-cli');
     expect(r.container.querySelector('#sessions .sess code')?.textContent).toBe('plain');
     expect(shownSession(r.container)).toBe('plain');
     r.unmount();
@@ -230,7 +225,6 @@ describe('App', () => {
     // The stream's snapshot (seq 20): "other" has three.
     const streamed = [row('abc', '2026-11-05T09:30:00Z', 1), row('other', '2026-11-05T09:10:00Z', 3)];
     const source: DataSource = {
-      getAgents: async () => buildAgents(older),
       getSessions: async () => older,
       getTurns: async () => ({ turns: [] }),
       getTurn: async () => null,

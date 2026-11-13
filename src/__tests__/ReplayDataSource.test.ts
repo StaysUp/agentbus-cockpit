@@ -6,14 +6,13 @@ import { openSession } from './helpers';
 describe('ReplayDataSource', () => {
   const dataSource = new ReplayDataSource(jsonlContent);
 
-  it('parses agents correctly', async () => {
-    const agents = await dataSource.getAgents();
-    expect(agents.length).toBe(1);
-    expect(agents[0].id).toBe('claude');
-    expect(agents[0].name).toBe('Claude Code');
-    expect(agents[0].sessionCount).toBe(2);
-    expect(agents[0].usage.input_tokens).toBeGreaterThan(0);
-    expect(agents[0].usage.output_tokens).toBeGreaterThan(0);
+  it('names the agent of every session, with its usage', async () => {
+    const sessions = await dataSource.getSessions();
+    expect(sessions.map((s) => s.agent)).toEqual(['claude', 'claude']);
+    for (const s of sessions) {
+      expect(s.usage.input_tokens).toBeGreaterThan(0);
+      expect(s.usage.output_tokens).toBeGreaterThan(0);
+    }
   });
 
   it('parses sessions correctly', async () => {

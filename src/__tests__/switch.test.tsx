@@ -5,7 +5,7 @@ import { act } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { App } from '../App';
 import { QueueSource } from '../data/jobs';
-import { buildAgents, createEmptyUsage } from '../data/turns';
+import { createEmptyUsage, sessionAgents } from '../data/turns';
 import { CockpitEvent, DataSource, SavedAgent, SessionSummary } from '../types';
 import { choose, click, ev, flush, liveReplay, optionsOf, render } from './helpers';
 
@@ -32,7 +32,7 @@ function source(events: CockpitEvent[]) {
   const sendMessage = vi.fn(async (id: string) => ({ session: id, turn: 'Tnext', state: 'running' as const }));
   const src: DataSource = {
     ...base.source,
-    getSessions: async (a) => resumable(await base.source.getSessions(a)),
+    getSessions: async () => resumable(await base.source.getSessions()),
     subscribe: (cb, snap) => base.source.subscribe!(cb, (list, c) => snap?.(resumable(list), c)),
     listAgents: async () => SAVED,
     sendMessage,
@@ -204,24 +204,33 @@ describe('the Send menu', () => {
   });
 });
 
-describe('a mixed session in the Agents column', () => {
-  it('is listed under its first agent', () => {
-    const row = (id: string, agent: string, first?: string): SessionSummary => ({
-      id,
-      agent,
-      first_agent: first,
-      client: '',
-      title: id,
-      started: '',
-      last: '',
-      open: false,
-      turns: 1,
-      usage: createEmptyUsage(),
-    });
-    const groups = buildAgents([row('s1', 'codex', 'claude'), row('s2', 'claude', 'claude'), row('s3', 'codex')]);
-    expect(groups.map((g) => [g.id, g.sessionCount])).toEqual([
-      ['claude', 2],
-      ['codex', 1],
-    ]);
+describe('the agents that took part in a session', () => {
+  const row = (agent: string, first?: string, firstId?: string): SessionSummary => ({
+    id: 's',
+    agent,
+    first_agent: first,
+    ...(firstId ? { first_agent_id: firstId } : {}),
+    client: '',
+    title: 's',
+    started: '',
+    last: '',
+    open: false,
+    turns: 2,
+    usage: createEmptyUsage(),
+  });
+  const saved = [{ id: 'a_haiku', name: 'Claude Code · haiku', harness: 'claude', access: 'subscription' }];
+
+  it('a session that switched agents lists both, first then latest', () => {
+    expect(sessionAgents(row('codex', 'claude'))).toEqual(['Claude Code', 'Codex']);
+    expect(sessionAgents(row('codex', 'claude', 'a_haiku'), saved)).toEqual(['Claude Code · haiku', 'Codex']);
+  });
+
+  it('a session on one agent lists it once', () => {
+    expect(sessionAgents(row('claude', 'claude', 'a_haiku'), saved)).toEqual(['Claude Code · haiku']);
+    expect(sessionAgents(row('codex'))).toEqual(['Codex']);
+  });
+
+  it('a saved agent since removed is named by its harness, never as a removed agent', () => {
+    expect(sessionAgents(row('claude', 'claude', 'a_gone'), saved)).toEqual(['Claude Code']);
   });
 });

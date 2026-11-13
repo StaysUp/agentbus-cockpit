@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { liveStatus, LiveTurns } from '../data/liveStatus';
-import { SessionSummary } from '../types';
+import { sessionAgents } from '../data/turns';
+import { SavedAgent, SessionSummary } from '../types';
 import { useNow } from '../utils/useNow';
 import { formatAgo, formatCost, formatTokens } from '../utils/format';
 import { Cost } from './Cost';
@@ -22,6 +23,8 @@ interface SessionsColumnProps {
   // Given when the source can name sessions: a new title for one. Rejects
   // with the API's words.
   onRename?: (sessionId: string, title: string) => Promise<void>;
+  // The saved agents, to name the agents that took part in each session.
+  agents?: SavedAgent[];
 }
 
 export const SessionsColumn: React.FC<SessionsColumnProps> = ({
@@ -32,6 +35,7 @@ export const SessionsColumn: React.FC<SessionsColumnProps> = ({
   empty,
   live,
   onRename,
+  agents,
 }) => {
   // The session whose name is being edited, if any.
   const [editing, setEditing] = useState<string | null>(null);
@@ -95,6 +99,9 @@ export const SessionsColumn: React.FC<SessionsColumnProps> = ({
               {ago ? ` · ${ago}` : ''}
             </span>
           );
+          // The agents that took part, from the session's first and latest turns.
+          const who = sessionAgents(s, agents);
+          const ran = who.length > 0 ? <span className="s-ag">{who.join(', ')}</span> : null;
           const isEditing = editing === s.id && !!onRename;
           // While its turn runs, the cost moves to the title line (as in the sketch).
           // The selected card's name starts a rename when clicked.
@@ -132,6 +139,7 @@ export const SessionsColumn: React.FC<SessionsColumnProps> = ({
               <div key={s.id} className="sess-row">
                 <div className={`sess pick${isSelected ? ' on' : ''}`} data-session={s.id}>
                   {title}
+                  {ran}
                   {meta}
                   {isSelected && (
                     <span className="s-id">
@@ -148,6 +156,7 @@ export const SessionsColumn: React.FC<SessionsColumnProps> = ({
             <div key={s.id} className="sess-row">
               <button className="sess pick" data-session={s.id} onClick={() => onSelectSession(s.id)}>
                 {title}
+                {ran}
                 {meta}
               </button>
               {pencil}

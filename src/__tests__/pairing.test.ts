@@ -85,8 +85,6 @@ describe('replay pairing and grouping (CLIENT_API "Turns")', () => {
     const s = (await src.getSessions()).find((x) => x.id === 's7')!;
     expect(s.agent).toBe('codex');
     expect(s.folder).toBe('/Users/ana/Sites/x');
-    const agents = await src.getAgents();
-    expect(agents.map((a) => a.id)).toEqual(['codex']);
   });
 
   it('reads agent and folder from the latest run turn or session.opened, as GET /sessions does', async () => {

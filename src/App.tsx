@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import rawSessionsJsonl from '../testdata/sessions-v0.jsonl?raw';
 import { AgentsColumn } from './components/AgentsColumn';
-import { ConvoColumn, Pending, PendingUpdate } from './components/ConvoColumn';
+import { agentNameOf, ConvoColumn, Pending, PendingUpdate } from './components/ConvoColumn';
 import { AgentsDialog } from './components/AgentsDialog';
 import { SettingsPage } from './components/SettingsPage';
 import { RunnersPage } from './components/RunnersPage';
@@ -23,7 +23,7 @@ import { versionLabel } from './utils/format';
 import { ApiTurn, QueueSource } from './data/jobs';
 import { useQueue } from './data/useJobs';
 import { addRun } from './data/shell';
-import { addStreamedCost, addTurnEvents, buildAgents, createEmptyUsage, sessionGroup, turnDetail } from './data/turns';
+import { addStreamedCost, addTurnEvents, createEmptyUsage, turnDetail } from './data/turns';
 import {
   CockpitEvent,
   DataSource,
@@ -131,9 +131,8 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
   // column lists all of them, whatever agent is selected: a session can use
   // many agents. null until the first list arrives.
   const [allSessions, setAllSessions] = useState<SessionSummary[] | null>(null);
-  // The agent selected in the Agents column: "+ Session" starts on it. It
-  // does not filter the sessions. null means nothing is selected; "" is a
-  // real agent id: sessions no run started.
+  // The saved agent selected in the Agents column: "+ Session" starts on it.
+  // It does not filter the sessions. null means nothing is selected.
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
 
@@ -203,7 +202,8 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
   // closes, and after a remove (agentsKey).
   const [savedAgents, setSavedAgents] = useState<SavedAgent[] | undefined>(undefined);
   const [agentsKey, setAgentsKey] = useState(0);
-  const agents = useMemo(() => buildAgents(allSessions ?? [], savedAgents), [allSessions, savedAgents]);
+  // An agent's name for a screen: a saved agent's, else its harness's.
+  const nameOf = (id?: string) => (id ? agentNameOf(id, savedAgents) : undefined);
   // The sessions the service said are closed when one was opened
   // (GET /api/v0/sessions/<id>), for a list that does not say it yet.
   const [closedIds, setClosedIds] = useState<ReadonlySet<string>>(() => new Set());
@@ -455,16 +455,19 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
   }, [dataSource, listKey]);
 
   // After any list change, keep the agent and session if they still exist;
-  // otherwise take the first available: the newest session, and its agent.
-  // Nothing is picked before the sessions are read: a saved agent listed
-  // first would otherwise be kept, empty, once they arrive.
+  // otherwise take the newest session, and the saved agent it started on
+  // (none when that agent is not saved). With no session, the first saved
+  // agent. Nothing is picked before the sessions are read: a saved agent
+  // listed first would otherwise be kept once they arrive.
   useEffect(() => {
     if (allSessions === null) return;
+    const saved = savedAgents ?? [];
+    const has = (id?: string | null) => !!id && saved.some((a) => a.id === id);
     const newest = allSessions[0];
     setSelectedAgentId((cur) =>
-      cur !== null && agents.some((a) => a.id === cur) ? cur : newest ? sessionGroup(newest) : (agents[0]?.id ?? null)
+      has(cur) ? cur : newest ? (has(newest.first_agent_id) ? newest.first_agent_id! : null) : (saved[0]?.id ?? null)
     );
-  }, [agents]);
+  }, [allSessions, savedAgents]);
   useEffect(() => {
     if (selectedSessionId !== null && sessions.some((s) => s.id === selectedSessionId)) return;
     const next = sessions[0]?.id ?? null;
@@ -1036,7 +1039,7 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
     <FoldersContext.Provider value={folders}>
     <div id="app" className={panelOpen ? 'panel' : 'nopanel'}>
       <AgentsColumn
-        agents={agents}
+        agents={savedAgents ?? []}
         selectedAgentId={selectedAgentId}
         sourceLabel={sourceLabel}
         onDisconnect={onDisconnect}
@@ -1045,7 +1048,7 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
         // screen and the list stay.
         onSelectAgent={setSelectedAgentId}
         onAddAgent={canKeepAgents ? () => setAgentsDialog({}) : undefined}
-        onEditAgent={canKeepAgents && dataSource.updateAgent ? (a) => a.saved && setAgentsDialog({ edit: a.saved }) : undefined}
+        onEditAgent={canKeepAgents && dataSource.updateAgent ? (a) => setAgentsDialog({ edit: a }) : undefined}
         onRemoveAgent={canKeepAgents && dataSource.removeAgent ? removeAgent : undefined}
         onRunners={loadRunners ? () => goPage('runners') : undefined}
         runnersOnline={runnersOnline}
@@ -1065,8 +1068,9 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
           chooseSession(sessId);
         }}
         // New session starts on the selected agent when it is a saved one.
-        onNewSession={canStart ? () => setNewSession({ agent: agents.find((a) => a.id === selectedAgentId)?.saved?.id }) : undefined}
+        onNewSession={canStart ? () => setNewSession({ agent: savedAgents?.find((a) => a.id === selectedAgentId)?.id }) : undefined}
         onRename={renameSession}
+        agents={savedAgents}
         empty={sessions.length === 0}
       />
 
@@ -1088,7 +1092,7 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
           onSelectTurn={() => undefined}
           level="session"
           panelOpen={false}
-          agentName={agents.find((x) => x.id === draft.req.agent)?.name}
+          agentName={nameOf(draft.req.agent)}
           agents={savedAgents}
           defaultAgent={draft.req.agent}
           onRename={async (_id, t) => setDraft((d) => (d ? { ...d, title: t.trim() } : d))}
@@ -1114,7 +1118,7 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
           onSelectTurn={clickTurn}
           level={shownLevel}
           panelOpen={panelOpen}
-          agentName={agents.find((x) => x.id === sessionView.agent)?.name}
+          agentName={nameOf(sessionView.agent)}
           agents={savedAgents}
           onOpenSession={(id) => {
             // A session not listed yet is opened once its row arrives, as for
@@ -1160,7 +1164,7 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
         session={sessionView}
         sessionCostUsd={sessionView?.cost_usd}
         sessionCostComplete={sessionView?.cost_complete}
-        agentName={agents.find((a) => a.id === sessionView?.agent)?.name}
+        agentName={nameOf(sessionView?.agent)}
         callId={selectedCallId}
         onLevel={(l) => (l === 'session' ? selectSessionLevel() : setLevel(l))}
         onSelectTurn={selectTurnLevel}

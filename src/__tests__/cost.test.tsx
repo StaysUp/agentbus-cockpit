@@ -239,7 +239,6 @@ describe('live rows in the app', () => {
     const lists: SessionList[] = [];
     let push: ((e: CockpitEvent) => void) | null = null;
     const source: DataSource = {
-      getAgents: () => replay.getAgents(),
       getSessions: async () => rowsAt(0.3),
       getSessionList: async () => lists.shift() ?? { store: 'st', seq: 10, sessions: rowsAt(0.3) },
       getTurns: (id) => replay.getTurns(id),
@@ -347,7 +346,6 @@ describe('switching sessions', () => {
     let releaseB: () => void = () => {};
     const bGate = new Promise<void>((res) => (releaseB = res));
     const source: DataSource = {
-      getAgents: () => replay.getAgents(),
       getSessions: async () => rowsAt(1),
       getSessionList: async () => lists.shift() ?? { store: 'st', seq: 10, sessions: rowsAt(1) },
       getTurns: async (id) => {
@@ -419,7 +417,6 @@ describe('the switch window', () => {
     const bGate = new Promise<void>((res) => (releaseB = res));
     const sent: string[] = [];
     const source: DataSource = {
-      getAgents: () => replay.getAgents(),
       getSessions: async () => rows,
       getTurns: async (id) => {
         if (id === 'b') await bGate;

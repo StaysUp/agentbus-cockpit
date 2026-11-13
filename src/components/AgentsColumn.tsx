@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
 import { follow, PAGE_PATHS } from '../page';
-import { AgentSummary } from '../types';
+import { SavedAgent } from '../types';
 import { PlusIcon } from './Icons';
 
 interface AgentsColumnProps {
-  agents: AgentSummary[];
+  agents: SavedAgent[];
   selectedAgentId: string | null;
   onSelectAgent: (agentId: string) => void;
   sourceLabel?: string;
@@ -14,7 +14,7 @@ interface AgentsColumnProps {
   // and a saved agent's row can be edited and removed. A remove answers
   // with the API's words when it is refused.
   onAddAgent?: () => void;
-  onEditAgent?: (agent: AgentSummary) => void;
+  onEditAgent?: (agent: SavedAgent) => void;
   onRemoveAgent?: (agentId: string) => Promise<void>;
   // Given only when the source lists runners (GET /api/v0/runners): opens
   // the Runners page. runnersOnline is how many are online; undefined
@@ -27,11 +27,10 @@ interface AgentsColumnProps {
   version?: string;
 }
 
-// The Agents column: every saved agent, even one with no session yet, with
-// its access and how many sessions started on it. Selecting one marks it for
-// "+ Session"; the Sessions column lists every session either way. Sessions
-// no saved agent started are counted under their harness, after the saved
-// agents.
+// The Agents column: the saved agents, in the order the service lists them,
+// each with its access and model. A session is a list of turns and each turn
+// names its own agent, so no session is listed under an agent here: the
+// Sessions column lists them all. Selecting an agent marks it for "+ Session".
 export const AgentsColumn: React.FC<AgentsColumnProps> = ({
   agents,
   selectedAgentId,
@@ -80,21 +79,16 @@ export const AgentsColumn: React.FC<AgentsColumnProps> = ({
         {agents.length === 0 && <p className="empty agents-empty">No agents yet.</p>}
         {agents.map((a) => {
           const isSelected = selectedAgentId === a.id;
-          const count = `${a.sessionCount} ${a.sessionCount === 1 ? 'session' : 'sessions'}`;
           const body = (
             <>
-              <span className={`mark ${a.saved?.harness ?? a.id}`}>{a.mark}</span>
+              <span className={`mark ${a.harness}`}>{agentMark(a)}</span>
               <span className="ag-t">
                 <b>{a.name}</b>
-                <span>
-                  {count}
-                  {a.openCount > 0 ? ` · ${a.openCount} running` : ''}
-                </span>
-                {a.line && <span className="q-l">{a.line}</span>}
+                <span className="q-l">{savedLine(a)}</span>
               </span>
             </>
           );
-          const canChange = !!a.saved && (onEditAgent || onRemoveAgent);
+          const canChange = !!(onEditAgent || onRemoveAgent);
           // The selected saved agent's row carries Edit and Remove, so it is
           // not a button itself.
           if (isSelected && canChange) {
@@ -183,3 +177,16 @@ export const AgentsColumn: React.FC<AgentsColumnProps> = ({
     </aside>
   );
 };
+
+// The letter on an agent's mark: its harness's, else its name's first.
+function agentMark(a: SavedAgent): string {
+  if (a.harness === 'claude') return 'C';
+  if (a.harness === 'codex') return 'X';
+  return a.name.charAt(0).toUpperCase();
+}
+
+// A saved agent's access and model, in a few words, such as "subscription · haiku".
+function savedLine(a: SavedAgent): string {
+  const access = a.access === 'subscription' ? 'subscription' : a.access === 'openrouter' ? 'OpenRouter' : a.access;
+  return a.model ? `${access} · ${a.model}` : access;
+}

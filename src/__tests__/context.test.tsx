@@ -114,8 +114,7 @@ describe('Context tab', () => {
     const { load, calls, turns } = loader({ x2: replayedCall, x1: firstCall });
     const base = new ReplayDataSource(jsonl(events()));
     const source: DataSource = {
-      getAgents: () => base.getAgents(),
-      getSessions: (a) => base.getSessions(a),
+      getSessions: () => base.getSessions(),
       getTurns: (id) => base.getTurns(id),
       getTurn: (s, t) => base.getTurn(s, t),
       getCallContext: load,
@@ -332,8 +331,7 @@ describe('Context tab, a three-turn chain', () => {
     const { load } = loader({ y3: call3 });
     const base = new ReplayDataSource(jsonl(evs));
     const source: DataSource = {
-      getAgents: () => base.getAgents(),
-      getSessions: (a) => base.getSessions(a),
+      getSessions: () => base.getSessions(),
       getTurns: (id) => base.getTurns(id),
       getTurn: (s, t) => base.getTurn(s, t),
       getCallContext: load,

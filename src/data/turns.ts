@@ -2,7 +2,6 @@
 // replay source's own grouping of a recorded file into turns and sessions.
 // The rules come from CLIENT_API.md, "Turns".
 import {
-  AgentSummary,
   SavedAgent,
   CockpitEvent,
   ModelCallPair,
@@ -413,63 +412,30 @@ function guessFolder(events: CockpitEvent[]): string {
   return '';
 }
 
-// The agent a session is listed under: its first. A session whose later
-// turns ran on another agent stays in one place.
-// The agent a session is listed under: the saved agent it started on, else
-// the harness of its first turn. A later turn on another agent never moves it.
-export function sessionGroup(s: SessionSummary): string {
-  return s.first_agent_id || s.first_agent || s.agent;
+// The harnesses' own names, for an agent no saved agent names.
+const HARNESS_NAMES: Record<string, string> = { claude: 'Claude Code', codex: 'Codex' };
+
+export function harnessName(harness: string): string {
+  return HARNESS_NAMES[harness] ?? harness;
 }
 
-// The rows of the Agents column: every saved agent, in the order the service
-// lists them, even one with no session, each with its sessions; then one row
-// for each other group sessions fall in (a harness alone, or an agent since
-// removed), named as before saved agents existed.
-export function buildAgents(sessions: SessionSummary[], saved: SavedAgent[] = []): AgentSummary[] {
-  const groups = new Map<string, SessionSummary[]>();
-  for (const a of saved) groups.set(a.id, []);
-  for (const s of sessions) {
-    const g = sessionGroup(s);
-    if (!groups.has(g)) groups.set(g, []);
-    groups.get(g)!.push(s);
+// The agents that took part in a session, as far as its row in GET
+// /api/v0/sessions says: the agent of its first turn (its saved agent's name,
+// else its harness's), then the harness of its latest turn when that is
+// another one. The row names no turn in between, and names only the harness
+// of the latest turn, so a switch between two saved agents on one harness
+// shows the first alone. A saved agent since removed is named by its harness.
+// A session no run started is named after the client that sent it.
+export function sessionAgents(s: SessionSummary, saved: SavedAgent[] = []): string[] {
+  const names: string[] = [];
+  const first = s.first_agent || s.agent;
+  if (first) {
+    const a = s.first_agent_id ? saved.find((x) => x.id === s.first_agent_id) : undefined;
+    names.push(a ? a.name : harnessName(first));
   }
-  const byId = new Map(saved.map((a) => [a.id, a]));
-  return Array.from(groups.entries()).map(([id, list]) => {
-    const usage = createEmptyUsage();
-    for (const s of list) addUsage(usage, s.usage);
-    const a = byId.get(id);
-    const harness = a?.harness ?? (list.find((s) => s.first_agent)?.first_agent || id);
-    const name = a ? a.name : agentName(id, list);
-    return {
-      id,
-      name,
-      vendor: harness === 'claude' ? 'anthropic' : harness === 'codex' ? 'openai' : 'unknown',
-      mark: harness === 'claude' ? 'C' : harness === 'codex' ? 'X' : name.charAt(0).toUpperCase(),
-      sessionCount: list.length,
-      openCount: list.filter((s) => s.open).length,
-      usage,
-      ...(a ? { saved: a, line: savedLine(a) } : {}),
-    };
-  });
-}
-
-// A saved agent's access and model, in a few words.
-function savedLine(a: SavedAgent): string {
-  const access = a.access === 'subscription' ? 'subscription' : a.access === 'openrouter' ? 'OpenRouter' : a.access;
-  return a.model ? `${access} · ${a.model}` : access;
-}
-
-// The agent "" holds sessions no run started. Name it after the
-// harness that sent them (the client up to its version), or "unknown agent".
-// A saved agent's id that is no longer saved names its harness.
-function agentName(id: string, sessions: SessionSummary[]): string {
-  if (id === 'claude') return 'Claude Code';
-  if (id === 'codex') return 'codex';
-  const first = sessions.find((s) => s.first_agent)?.first_agent;
-  if (id !== '' && first && first !== id) return `${first === 'claude' ? 'Claude Code' : first} (removed agent)`;
-  if (id !== '') return id;
-  const client = sessions.find((s) => s.client)?.client ?? '';
-  return client.split('/')[0] || 'unknown agent';
+  if (s.agent && first && s.agent !== first) names.push(harnessName(s.agent));
+  if (names.length === 0 && s.client) names.push(s.client.split('/')[0]);
+  return names;
 }
 
 // One model call of a turn with the tool calls its reply asked for.

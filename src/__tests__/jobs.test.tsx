@@ -91,7 +91,7 @@ function source(events: CockpitEvent[], extra: Partial<DataSource> = {}) {
   const sendMessage = vi.fn(async (id: string) => ({ session: id, turn: 'Tdirect', state: 'running' as const }));
   const src: DataSource = {
     ...base.source,
-    getSessions: async (a) => resumable(await base.source.getSessions(a)),
+    getSessions: async () => resumable(await base.source.getSessions()),
     subscribe: (cb, snap) => base.source.subscribe!(cb, (list, c) => snap?.(resumable(list), c)),
     getHarnesses: async () => [
       { name: 'claude', found: true },

@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { reviewUI } from '../features';
 import { liveStatus, LiveTurn } from '../data/liveStatus';
-import { turnNotes } from '../data/turns';
+import { harnessName, turnNotes } from '../data/turns';
 import { Level, QueuedTurn, SavedAgent, SessionDetail, ShellRun, Started, Turn } from '../types';
 import { useNow } from '../utils/useNow';
 import { formatCost, formatTokens, stateLabel, turnStateClass } from '../utils/format';
@@ -80,22 +80,19 @@ interface ConvoColumnProps {
   commands?: ShellRun[];
 }
 
-// The harnesses' own names, for a turn no saved agent names.
-const HARNESS_NAMES: Record<string, string> = { claude: 'Claude Code', codex: 'Codex' };
-
 // The name of the agent that ran a turn: its saved agent's, else its
 // harness's. Empty when the turn names none.
 export function turnAgentName(turn: Turn, agents?: SavedAgent[]): string {
   const id = turn.agentId ?? turn.agent;
   const saved = id ? agents?.find((a) => a.id === id) : undefined;
   if (saved) return saved.name;
-  return turn.agent ? (HARNESS_NAMES[turn.agent] ?? turn.agent) : '';
+  return turn.agent ? harnessName(turn.agent) : '';
 }
 
 // The name of an agent an origin names: a saved agent's id, else a harness.
 export function agentNameOf(id: string | undefined, agents?: SavedAgent[]): string {
   if (!id) return 'an agent';
-  return agents?.find((a) => a.id === id)?.name ?? HARNESS_NAMES[id] ?? id;
+  return agents?.find((a) => a.id === id)?.name ?? harnessName(id);
 }
 
 // The line above a turn's message when the person did not type it: a

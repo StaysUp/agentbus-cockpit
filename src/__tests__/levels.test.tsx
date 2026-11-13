@@ -33,8 +33,15 @@ function events() {
 }
 
 // The app with every turn's details shown and the panel opened on turn 1.
-async function app() {
-  const r = await render(<App dataSource={new ReplayDataSource(jsonl(events()))} />);
+// A recorded file with one saved agent, so the Agents column has a row to pick.
+function withSaved(src: ReplayDataSource): DataSource {
+  return Object.assign(src, {
+    listAgents: async () => [{ id: 'a_1', name: 'Claude Code · haiku', harness: 'claude', access: 'subscription', model: 'haiku' }],
+  });
+}
+
+async function app(source: DataSource = new ReplayDataSource(jsonl(events()))) {
+  const r = await render(<App dataSource={source} />);
   await flush();
   await flush();
   await click(r.container.querySelector('#convo .tb'));
@@ -121,9 +128,10 @@ describe('selection levels', () => {
 
   it('picking an agent or a session leaves a closed panel closed', async () => {
     const both = [...events(), ...events().map((e) => ({ ...e, id: `o-${e.id}`, seq: (e.seq ?? 0) + 100, session: 'other' }))];
-    const r = await render(<App dataSource={new ReplayDataSource(jsonl(both))} />);
+    const r = await render(<App dataSource={withSaved(new ReplayDataSource(jsonl(both)))} />);
     await flush();
     await flush();
+    expect(r.container.querySelector('#agents .agent')).not.toBeNull();
     await click(r.container.querySelector('#agents .agent'));
     await flush();
     expect(panelOpen(r.container)).toBe(false);
@@ -155,7 +163,8 @@ describe('selection levels', () => {
   });
 
   it('picking an agent leaves the panel, the level and the session as they were', async () => {
-    const a = await app();
+    const a = await app(withSaved(new ReplayDataSource(jsonl(events()))));
+    expect(a.q('#agents .agent')).not.toBeNull();
     const before = { open: a.open(), marks: a.marks().length, head: a.head(), on: a.q('#sessions .sess.on code')?.textContent };
     await click(a.q('#agents .agent'));
     expect({ open: a.open(), marks: a.marks().length, head: a.head(), on: a.q('#sessions .sess.on code')?.textContent }).toEqual(before);
@@ -435,7 +444,6 @@ describe('selection edge cases', () => {
     };
     let snapshot: ((s: SessionSummary[]) => void) | null = null;
     const source: DataSource = {
-      getAgents: () => replay.getAgents(),
       getSessions: () => replay.getSessions(),
       getTurns: async (id) => (id === 'fresh' ? (turns === 0 ? { turns: [] } : freshReplay.getTurns(id)) : replay.getTurns(id)),
       getTurn: (s, t) => (s === 'fresh' ? freshReplay.getTurn(s, t) : replay.getTurn(s, t)),
@@ -585,7 +593,6 @@ describe('failed calls and hidden details', () => {
     let release: () => void = () => {};
     const gate = new Promise<void>((res) => (release = res));
     const source: DataSource = {
-      getAgents: () => replay.getAgents(),
       getSessions: async () => (await replay.getSessions()).slice().sort((x) => (x.id === 'lv' ? -1 : 1)),
       getTurns: async (id) => {
         if (id === 'bee') await gate;

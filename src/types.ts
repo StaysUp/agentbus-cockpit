@@ -216,20 +216,6 @@ export interface SessionDetail extends SessionSummary {
   turnsList: Turn[];
 }
 
-export interface AgentSummary {
-  id: string;
-  name: string;
-  vendor: string;
-  mark: string;
-  sessionCount: number;
-  openCount: number;
-  usage: Usage;
-  // The saved agent this row is, when it is one: it can be edited and removed.
-  saved?: SavedAgent;
-  // How it reaches its model, in a few words, such as "subscription · haiku".
-  line?: string;
-}
-
 // One way a harness reaches a model, from GET /api/v0/harnesses.
 export interface AccessOption {
   kind: string; // subscription, openrouter or api
@@ -488,8 +474,7 @@ export interface SubscriptionList {
 }
 
 export interface DataSource {
-  getAgents(): Promise<AgentSummary[]>;
-  getSessions(agentId?: string): Promise<SessionSummary[]>;
+  getSessions(): Promise<SessionSummary[]>;
   // The sessions with the cursor they were taken at. A source without it is
   // read through getSessions, and its lists always replace the shown one.
   getSessionList?(): Promise<SessionList>;
