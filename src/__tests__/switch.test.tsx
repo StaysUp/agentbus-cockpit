@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 // Switching agent per message: a picker beside Send, each turn's agent in
-// its header, and a mixed session listed under its first agent.
+// its header, and the agents a mixed session names in its row.
 import { act } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { App } from '../App';
@@ -37,7 +37,7 @@ function source(events: CockpitEvent[]) {
     listAgents: async () => SAVED,
     sendMessage,
   };
-  return { src, sendMessage };
+  return { src, sendMessage, push: base.push };
 }
 
 async function waitFor(check: () => boolean, what: string) {
@@ -157,32 +157,95 @@ describe('switching agent per message', () => {
     r.unmount();
   });
 
-  it('keeps a session whose agent is not saved in the list, by its harness name', async () => {
+  // The box holds only a saved agent: a session whose last agent was removed
+  // starts on none, and Send waits for a pick.
+  it('a session whose last agent was removed starts with an empty box, and Send waits for a pick', async () => {
     const events = mixed().map((e) => (e.turn === 'T2' && e.kind === 'turn.started' ? { ...e, agent_id: 'a_gone' } : e));
-    const { src } = source(events);
+    const { src, sendMessage } = source(events);
     const r = await render(<App dataSource={src} />);
     await waitFor(() => r.container.querySelector('#c-reply .next-agent') !== null, 'the picker');
     const pick = r.container.querySelector('#c-reply .next-agent') as HTMLButtonElement;
-    expect(pick.value).toBe('a_gone');
-    expect((await optionsOf(r.container, 'next_agent'))[0][1]).toBe('Codex');
+    expect(pick.value).toBe('');
+    expect(pick.textContent).toContain('Pick an agent');
+    expect((await optionsOf(r.container, 'next_agent')).map((o) => o[0])).toEqual(['claude', 'a_haiku', 'codex']);
+    await setValue(r.container.querySelector('#c-reply textarea'), 'hi');
+    const go = r.container.querySelector('#c-reply button.go') as HTMLButtonElement;
+    expect(go.disabled).toBe(true);
+    await send(r.container, 'hi');
+    expect(sendMessage).not.toHaveBeenCalled();
+    await choose(r.container, 'next_agent', 'codex');
+    expect((r.container.querySelector('#c-reply button.go') as HTMLButtonElement).disabled).toBe(false);
+    await send(r.container, 'hi');
+    await waitFor(() => sendMessage.mock.calls.length === 1, 'the send');
+    expect((sendMessage.mock.calls[0] as unknown[])[1]).toMatchObject({ agent: 'codex', prompt: 'hi' });
     r.unmount();
   });
 
-  // A conversation keeps no agent of its own: a message names the box's
-  // agent even when it is no longer saved, and the service's refusal ("was
-  // removed, pick another") shows on the message.
-  it('names the box\'s agent even when it was removed, and shows the service\'s words', async () => {
-    const events = mixed().map((e) => (e.turn === 'T2' && e.kind === 'turn.started' ? { ...e, agent_id: 'a_gone' } : e));
-    const { src, sendMessage } = source(events);
+  it('with no saved agent the box says "Add an agent first", which opens the form, and Send waits', async () => {
+    const { src, sendMessage } = source(mixed());
+    src.listAgents = async () => [];
+    src.getHarnesses = async () => [{ name: 'claude', found: true }];
+    src.createAgent = async () => SAVED[0];
+    const r = await render(<App dataSource={src} />);
+    await waitFor(() => r.container.querySelector('#c-reply .add-first') !== null, 'the add button');
+    expect(r.container.querySelector('#c-reply .add-first')!.textContent).toBe('Add an agent first');
+    await setValue(r.container.querySelector('#c-reply textarea'), 'hi');
+    expect((r.container.querySelector('#c-reply button.go') as HTMLButtonElement).disabled).toBe(true);
+    await send(r.container, 'hi');
+    expect(sendMessage).not.toHaveBeenCalled();
+    await click(r.container.querySelector('#c-reply .add-first'));
+    await waitFor(() => r.container.querySelector('.agent-form') !== null, 'the agents form');
+    r.unmount();
+  });
+
+  // An agent removed after the list was read is refused by the service. The
+  // refusal names the agent, never its id, and leaves out the API's pointer.
+  it('a refusal names the agent, not its id, without the API hint', async () => {
+    const { src, sendMessage } = source(mixed());
     sendMessage.mockImplementation(async () => {
-      throw new Error('agent "a_gone" was removed; pick another (GET /api/v0/agents lists them)');
+      throw new Error('agent "codex" was removed; pick another (GET /api/v0/agents lists them)');
     });
     const r = await render(<App dataSource={src} />);
     await waitFor(() => r.container.querySelector('#c-reply .next-agent') !== null, 'the picker');
     await send(r.container, 'still there?');
-    await waitFor(() => sendMessage.mock.calls.length === 1, 'the send');
-    expect((sendMessage.mock.calls[0] as unknown[])[1]).toMatchObject({ agent: 'a_gone', prompt: 'still there?' });
-    await waitFor(() => (r.container.textContent ?? '').includes('was removed; pick another'), 'the refusal');
+    await waitFor(() => !!r.container.querySelector('.tb.pending.failed .form-error'), 'the refusal');
+    expect(r.container.querySelector('.tb.pending.failed .form-error')!.textContent).toBe('agent "Codex" was removed; pick another');
+    r.unmount();
+  });
+
+  // A refused message stays where it was sent, with Edit and Dismiss; a
+  // later turn goes below it, never above.
+  it('a refused message stays above a later turn, and Dismiss clears it', async () => {
+    const { src, sendMessage, push } = source(mixed());
+    sendMessage.mockImplementationOnce(async () => {
+      throw new Error('agent "codex" was removed; pick another');
+    });
+    const r = await render(<App dataSource={src} />);
+    await waitFor(() => r.container.querySelector('#c-reply .next-agent') !== null, 'the picker');
+    await send(r.container, 'hi');
+    await waitFor(() => !!r.container.querySelector('.tb.pending.failed'), 'the refusal');
+    await choose(r.container, 'next_agent', 'a_haiku');
+    await send(r.container, 'hi');
+    await waitFor(() => sendMessage.mock.calls.length === 2, 'the second send');
+    await act(async () => {
+      for (const e of [
+        ev({ session: 's1', kind: 'turn.started', turn: 'T3', text: 'hi', agent: 'claude', agent_id: 'a_haiku', folder: '/w' }),
+        ev({ session: 's1', kind: 'model.requested', turn: 'T3', exchange: 'x-T3', model: 'claude-haiku' }),
+        ev({ session: 's1', kind: 'model.responded', turn: 'T3', exchange: 'x-T3', status: 200, text: 'hello', stop_reason: 'end_turn' }),
+        ev({ session: 's1', kind: 'turn.completed', turn: 'T3', exchange: 'x-T3', outcome: 'finished' }),
+      ])
+        push(e);
+    });
+    await waitFor(() => r.container.querySelectorAll('#convo .tb-agent').length === 3, 'the new turn');
+    const failed = r.container.querySelector('#convo .tb.pending.failed')!;
+    expect(failed).not.toBeNull();
+    const turns = [...r.container.querySelectorAll('#convo .tb:not(.pending)')];
+    const newest = turns[turns.length - 1];
+    // The failure comes before the newest turn in the page.
+    expect(failed.compareDocumentPosition(newest) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(failed.querySelector('.pend-back')?.textContent).toBe('Edit');
+    await click(failed.querySelector('.pend-dismiss'));
+    expect(r.container.querySelector('#convo .tb.pending.failed')).toBeNull();
     r.unmount();
   });
 });

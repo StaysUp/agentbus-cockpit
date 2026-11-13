@@ -202,7 +202,7 @@ tr.ev-open > td { background: #FBFBFA; border-bottom: 1px solid var(--line); pad
 #sessions .s-t .live { width: 0.375rem; height: 0.375rem; }
 #sessions .s-m { font-size: var(--fs-s); margin-left: 1rem; }
 #sessions .s-from { font-size: var(--fs-s); color: var(--ink3); margin-left: 1rem; }
-#sessions .s-ag { font-size: var(--fs-s); color: var(--ink3); margin-left: 1rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#sessions .s-ag { font-size: var(--fs-s); color: var(--ink3); margin-left: 1rem; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #sessions .ended .s-t, #sessions .ended .s-m { margin-left: 0; }
 #sessions .ended .s-m { margin-left: 0; }
 

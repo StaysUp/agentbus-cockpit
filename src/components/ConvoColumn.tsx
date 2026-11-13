@@ -52,6 +52,9 @@ interface ConvoColumnProps {
   agents?: SavedAgent[];
   // The agent the picker shows while the session has no turn yet.
   defaultAgent?: string;
+  // Opens the form for a new agent: the picker's "Add an agent first" when
+  // no agent is saved.
+  onAddAgent?: () => void;
   // Given only when the source can stop a turn. Rejects with the API's message.
   onStop?: (turn: Turn) => Promise<void>;
   // The turns the person asked to stop that have not ended yet.
@@ -87,6 +90,14 @@ export function turnAgentName(turn: Turn, agents?: SavedAgent[]): string {
   const saved = id ? agents?.find((a) => a.id === id) : undefined;
   if (saved) return saved.name;
   return turn.agent ? harnessName(turn.agent) : '';
+}
+
+// A refusal of a message, for the screen: the agent named by its name, never
+// its id, and without the API's pointer to its own routes.
+export function refusalText(msg: string, agentId?: string, agentName?: string): string {
+  let out = msg;
+  if (agentId && agentName) out = out.split(agentId).join(agentName);
+  return out.replace(/\s*\((?:GET|POST|PUT|PATCH|DELETE) \/api\/[^)]*\)/g, '').trim();
 }
 
 // The name of an agent an origin names: a saved agent's id, else a harness.
@@ -212,6 +223,7 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
   prefill,
   onPrefillTaken,
   agents,
+  onAddAgent,
   defaultAgent,
   onOpenSession,
   queuedTurn,
@@ -307,19 +319,21 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
     }
   };
 
-  // The picker: the saved agents, and the session's own agent when it is not
-  // one of them (removed since, or a harness with no saved agent).
+  // The picker holds only a saved agent. It starts on the session's last
+  // agent; when that one is not saved (removed since, or a harness with no
+  // saved agent) it starts empty on "Pick an agent". With no saved agent at
+  // all it offers "Add an agent first".
   const current = currentAgent(session.turnsList) || defaultAgent || '';
-  const showPick = !!onSend && !!agents && agents.length > 0;
-  const pickList = !showPick
-    ? []
-    : current && !agents!.some((a) => a.id === current)
-      ? [{ id: current, name: lastTurn ? turnAgentName(lastTurn, agents) || current : current }, ...agents!]
-      : agents!;
+  const showPick = !!onSend && !!agents;
+  const pickList = showPick ? agents! : [];
   // A pick no longer in the list (its agent was removed) counts as none.
   const pickedShown = picked !== null && pickList.some((a) => a.id === picked) ? picked : null;
-  const nextAgent = pickedShown ?? current;
+  const nextAgent = showPick ? (pickedShown ?? (pickList.some((a) => a.id === current) ? current : '')) : current;
   const nextName = pickList.find((a) => a.id === nextAgent)?.name;
+  // A message waits for a pick when the session's last agent is not saved,
+  // and while no agent is saved at all. A session whose turns name no agent
+  // (one a run did not start) still sends with none, and the service picks.
+  const needsAgent = showPick && nextAgent === '' && (current !== '' || pickList.length === 0);
   // Once the session's latest turn ran on the picked agent, or the pick left
   // the list, the pick follows the session again, so a later switch made
   // elsewhere shows here.
@@ -340,7 +354,7 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
   const send = async (e: React.FormEvent) => {
     e.preventDefault();
     const prompt = draft;
-    if (!canSend || prompt.trim() === '') return;
+    if (!canSend || needsAgent || prompt.trim() === '') return;
     const p: Pending = {
       key: messageKey(),
       prompt,
@@ -358,9 +372,11 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
       if (started && started.state === 'queued') set({ state: 'queued', ahead: started.ahead, turn: started.turn });
       else set({ state: 'accepted', turn: started ? started.turn : undefined });
     } catch (err) {
-      set({ state: 'failed', error: (err as Error).message });
+      set({ state: 'failed', error: refusalText((err as Error).message, p.agent, nextName) });
     }
   };
+  // A refused message leaves the screen when it is dismissed.
+  const dismiss = (p: Pending) => setPending((list) => list.filter((x) => x.key !== p.key));
   // Back to the box: the failed message leaves the list, its text goes
   // after whatever is typed there.
   const takeBack = (p: Pending) => {
@@ -394,6 +410,42 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
       clearInterval(id);
     };
   }, [waiting, queuedTurn, sessionId]);
+
+  // One message not yet a turn. A refused one carries the service's words,
+  // Edit (back to the box) and Dismiss.
+  const pendingRow = (p: Pending) => (
+    <div key={p.key} className={`tb pending${p.state === 'queued' ? ' queued' : ''}${p.state === 'failed' ? ' failed' : ''}`} data-key={p.key}>
+      <div className="m-user">
+        <div className="bubble prog">{p.prompt}</div>
+      </div>
+      {p.state === 'failed' ? (
+        <div className="tb-foot">
+          <span className="form-error">{p.error}</span>
+          <button type="button" className="pend-back" onClick={() => takeBack(p)}>
+            Edit
+          </button>
+          <button type="button" className="pend-dismiss" onClick={() => dismiss(p)}>
+            Dismiss
+          </button>
+        </div>
+      ) : (
+        <div className="tb-foot">
+          <span className="tb-state">
+            {p.state === 'sending'
+              ? 'sending'
+              : p.state === 'queued'
+                ? p.ahead
+                  ? `queued · runs after ${p.ahead === 1 ? 'the running turn' : `${p.ahead} turns`}`
+                  : 'queued · waiting for a runner'
+                : 'waiting for the agent'}
+          </span>
+        </div>
+      )}
+    </div>
+  );
+  // A refused message stays where it was sent: after the turns there were
+  // then, so it never sits below a later turn. Other messages are last.
+  const refusedAfter = (n: number) => pending.filter((p) => p.state === 'failed' && p.turnsAtSend === n && n < turnCount);
 
   // Each "!" command goes after the turn that started before it.
   const placed = commandsAfter(session.turnsList, commands ?? []);
@@ -434,6 +486,7 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
       <div id="c-msgs">
         <div className="c-in">
           {placed.get(-1)?.map((r) => <ShellEntry key={r.id} run={r} />)}
+          {refusedAfter(0).map(pendingRow)}
           {session.turnsList.map((turn, ti) => {
             const isSelected = selectedTurn?.id === turn.id;
             // The selected turn carries the mark at the turn and call levels.
@@ -560,37 +613,11 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
                   </div>
                 </div>
                 {placed.get(ti)?.map((r) => <ShellEntry key={r.id} run={r} />)}
+                {refusedAfter(ti + 1).map(pendingRow)}
               </React.Fragment>
             );
           })}
-          {pending.map((p) => (
-            <div key={p.key} className={`tb pending${p.state === 'queued' ? ' queued' : ''}${p.state === 'failed' ? ' failed' : ''}`} data-key={p.key}>
-              <div className="m-user">
-                <div className="bubble prog">{p.prompt}</div>
-              </div>
-              {p.state === 'failed' && (
-                <div className="tb-foot">
-                  <span className="form-error">{p.error}</span>
-                  <button type="button" className="pend-back" onClick={() => takeBack(p)}>
-                    Edit
-                  </button>
-                </div>
-              )}
-              {p.state !== 'failed' && (
-              <div className="tb-foot">
-                <span className="tb-state">
-                  {p.state === 'sending'
-                    ? 'sending'
-                    : p.state === 'queued'
-                      ? p.ahead
-                        ? `queued · runs after ${p.ahead === 1 ? 'the running turn' : `${p.ahead} turns`}`
-                        : 'queued · waiting for a runner'
-                      : 'waiting for the agent'}
-                </span>
-              </div>
-              )}
-            </div>
-          ))}
+          {pending.filter((p) => !(p.state === 'failed' && p.turnsAtSend < turnCount)).map(pendingRow)}
         </div>
       </div>
 
@@ -611,7 +638,12 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
             }}
             disabled={!canSend}
           />
-          {showPick && (
+          {showPick && pickList.length === 0 && (
+            <button type="button" className="next-agent add-first btn btn-quiet" onClick={onAddAgent} disabled={!onAddAgent}>
+              Add an agent first
+            </button>
+          )}
+          {showPick && pickList.length > 0 && (
             <Select
               name="next_agent"
               className="next-agent"
@@ -619,7 +651,7 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
               label="Agent for the next message"
               title="Agent for the next message"
               value={nextAgent}
-              placeholder="Agent"
+              placeholder="Pick an agent"
               disabled={!canSend}
               options={pickList.map((a) => ({ value: a.id, label: a.name }))}
               onChange={setPicked}
@@ -632,7 +664,7 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
             </button>
           ) : (
             <span className="go-split">
-              <button type="submit" className="go" disabled={!canSend || draft.trim() === ''}>
+              <button type="submit" className="go" disabled={!canSend || needsAgent || draft.trim() === ''}>
                 {sendLabel}
               </button>
               {/* How to send. Fork (run in parallel from the same point) is

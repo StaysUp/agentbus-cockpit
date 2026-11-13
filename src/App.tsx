@@ -1095,6 +1095,7 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
           agentName={nameOf(draft.req.agent)}
           agents={savedAgents}
           defaultAgent={draft.req.agent}
+          onAddAgent={canKeepAgents ? () => setAgentsDialog({}) : undefined}
           onRename={async (_id, t) => setDraft((d) => (d ? { ...d, title: t.trim() } : d))}
         />
       ) : sessionView ? (
@@ -1120,6 +1121,7 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
           panelOpen={panelOpen}
           agentName={nameOf(sessionView.agent)}
           agents={savedAgents}
+          onAddAgent={canKeepAgents ? () => setAgentsDialog({}) : undefined}
           onOpenSession={(id) => {
             // A session not listed yet is opened once its row arrives, as for
             // a session just started.
