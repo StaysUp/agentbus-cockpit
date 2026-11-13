@@ -27,7 +27,8 @@ AgentBus API, so anything it shows, your own program can read too.
 ## Prerequisites
 
 - Node.js 20.19 or later in the 20 line, or 22.12 or later. Vite needs one of these.
-- A running AgentBus service (`agentbus up`). See the
+- A running AgentBus service (`agentbus up`) of the same version: this cockpit saves Settings with
+  `PATCH`, which control has from 0.5.2. See the
   [AgentBus README](https://github.com/staysup/agentbus#quickstart).
 
 ## Quickstart
@@ -89,9 +90,10 @@ shows and press Approve. An offline machine can be removed. The steps are in the
 ![The Runners page: a machine waiting for approval](docs/assets/cockpit-runners.png)
 
 **Settings** holds what every turn may do and the instructions every turn gets, the same on every
-machine.
+machine. Each setting has its own control, in groups: Agents, Files, Home files, Commands, Network,
+Sandbox and Limits. A save sends only what you changed. The policy as JSON is under **Advanced**.
 
-![The Settings page: the grants](docs/assets/cockpit-settings.png)
+![The Settings page](docs/assets/cockpit-settings.png)
 
 Connect each subscription once, in **Settings** under Subscriptions (or in a subscription agent's
 form), before its first turn. **Connect** runs the harness's own login on control. The token stays
