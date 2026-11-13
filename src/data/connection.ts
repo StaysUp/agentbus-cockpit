@@ -125,3 +125,58 @@ function isSnapshot(body: unknown): boolean {
   const b = body as Record<string, unknown>;
   return typeof b.store === 'string' && typeof b.seq === 'number' && Array.isArray(b.sessions);
 }
+
+// Served by agentbus itself (agentbus up packs the cockpit): index.html then
+// carries <meta name="agentbus" content="served">, and the API is this page's
+// own origin. From the dev server there is no such tag.
+export function servedByAgentbus(doc: Document = document): boolean {
+  return doc.querySelector('meta[name="agentbus"][content="served"]') !== null;
+}
+
+// The one-time code of agentbus up's sign-in link, /?t=<code>. Read once and
+// removed from the address bar at once, so it is not kept in history or
+// bookmarks. Null when there is none.
+export function takeSignInCode(loc: Location = window.location, hist: History = window.history): string | null {
+  const url = new URL(loc.href);
+  const code = url.searchParams.get('t');
+  if (code === null) return null;
+  url.searchParams.delete('t');
+  try {
+    hist.replaceState(hist.state, '', url.pathname + url.search + url.hash);
+  } catch {
+    // The code is used up below either way.
+  }
+  return code || null;
+}
+
+export const SIGN_IN_EXPIRED =
+  'the sign-in link was already used or has expired; run `agentbus open` for a new one';
+
+// Trades the code for the token, once (POST /api/v0/signin). Returns the
+// token, or a plain sentence saying what went wrong.
+export async function exchangeSignInCode(
+  address: string,
+  code: string
+): Promise<{ token: string } | { error: string }> {
+  let res: Response;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), CHECK_TIMEOUT_MS);
+  try {
+    res = await fetch(`${address}/api/v0/signin`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ code }),
+      signal: controller.signal,
+    });
+  } catch {
+    return { error: `cannot reach agentbus at ${address}; is \`agentbus up\` still running?` };
+  } finally {
+    clearTimeout(timer);
+  }
+  if (res.status === 401) return { error: SIGN_IN_EXPIRED };
+  if (!res.ok) return { error: `agentbus at ${address} answered ${res.status} to the sign-in link` };
+  const body: unknown = await res.json().catch(() => null);
+  const token = typeof body === 'object' && body !== null ? (body as Record<string, unknown>).token : undefined;
+  if (typeof token !== 'string' || token === '') return { error: `agentbus at ${address} did not answer like agentbus` };
+  return { token };
+}

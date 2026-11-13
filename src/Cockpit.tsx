@@ -6,26 +6,57 @@ import {
   clearSaved,
   Connection,
   DEFAULT_ADDRESS,
+  exchangeSignInCode,
   loadSaved,
   normalizeAddress,
   Saved,
   saveConnection,
   saveReplay,
+  servedByAgentbus,
+  takeSignInCode,
 } from './data/connection';
 import { LiveDataSource } from './data/LiveDataSource';
 import { probeQueue, TurnsClient } from './data/jobs';
 import { ReplayDataSource } from './data/ReplayDataSource';
 import rawSessionsJsonl from '../testdata/sessions-v0.jsonl?raw';
 
+// The sign-in link's code, taken from the address bar once per page load:
+// React may run an initializer twice, and the code works only once.
+// Its trade is kept too, so an effect React runs twice sends it once.
+let pendingCode: { code: string | null } | null = null;
+let trade: Promise<{ token: string } | { error: string }> | null = null;
+function signInCode(): string | null {
+  if (!servedByAgentbus()) return null;
+  if (pendingCode === null) pendingCode = { code: takeSignInCode() };
+  return pendingCode.code;
+}
+function tradeOnce(origin: string, code: string) {
+  if (trade === null) trade = exchangeSignInCode(origin, code);
+  return trade;
+}
+
+// For tests: forget the code taken and its trade.
+export function resetSignInCode(): void {
+  pendingCode = null;
+  trade = null;
+}
+
 // Chooses the data source: the live client API after a checked connect, or
 // the recorded sessions for demos. The app itself never knows which.
+//
+// Served by agentbus itself, the API is this page's own origin: the sign-in
+// link's code connects without the connect screen, and the screen, when it
+// shows, offers that address. From the dev server it works as before.
 export const Cockpit: React.FC = () => {
-  const [saved, setSaved] = useState<Saved>(() => loadSaved());
-  // A connection kept from earlier in this tab is checked again before use.
-  const [checking, setChecking] = useState(() => saved?.mode === 'live');
+  const served = useMemo(() => servedByAgentbus(), []);
+  const code = useMemo(() => signInCode(), []);
+  const [saved, setSaved] = useState<Saved>(() => (code ? null : loadSaved()));
+  // A connection kept from earlier in this tab is checked again before use;
+  // a sign-in code is traded and checked.
+  const [checking, setChecking] = useState(() => saved?.mode === 'live' || code !== null);
   const [error, setError] = useState<string | null>(null);
   const [address, setAddress] = useState(() =>
-    saved?.mode === 'live' ? saved.connection.address : DEFAULT_ADDRESS
+    saved?.mode === 'live' ? saved.connection.address : served ? window.location.origin : DEFAULT_ADDRESS
   );
 
   const live = saved?.mode === 'live' && !checking ? saved.connection : null;
@@ -47,6 +78,35 @@ export const Cockpit: React.FC = () => {
     checkId.current++;
     setChecking(false);
   };
+
+  useEffect(() => {
+    if (code === null) return;
+    const id = startCheck();
+    const origin = window.location.origin;
+    tradeOnce(origin, code).then(async (got) => {
+      if (id !== checkId.current) return;
+      if ('error' in got) {
+        setChecking(false);
+        setError(got.error);
+        return;
+      }
+      const c: Connection = { address: origin, token: got.token };
+      const { problem, queue } = await checkAll(c);
+      if (id !== checkId.current) return;
+      setHasQueue(queue);
+      setChecking(false);
+      if (problem) {
+        setError(problem);
+        return;
+      }
+      saveConnection(c);
+      setSaved({ mode: 'live', connection: c });
+    });
+    return () => {
+      if (id === checkId.current) checkId.current++;
+    };
+    // Once per page load: the code works once.
+  }, []);
 
   useEffect(() => {
     if (saved?.mode !== 'live' || !checking) return;
@@ -110,6 +170,7 @@ export const Cockpit: React.FC = () => {
         error={error}
         onConnect={connect}
         onUseRecorded={useRecorded}
+        served={served}
       />
     );
   }

@@ -392,6 +392,7 @@ tr.ev-open > td { background: #FBFBFA; border-bottom: 1px solid var(--line); pad
 .connect label span { font-size: var(--fs-xs); color: var(--ink3); }
 .connect input { font: inherit; font-size: var(--fs-m); line-height: 1.25rem; padding: 0.375rem 0.625rem; border: 1px solid var(--line2); border-radius: 0.375rem; background: var(--panel); color: var(--ink); }
 .connect input:focus { outline: none; border-color: var(--ink3); }
+.connect-hint { margin: 0; font-size: var(--fs-s); line-height: 1.125rem; color: var(--ink3); }
 .connect-error { font-size: var(--fs-s); line-height: 1rem; color: var(--amber); background: var(--amber-bg); border-radius: 0.375rem; padding: 0.375rem 0.625rem; }
 .connect-actions { display: flex; align-items: center; gap: 0.75rem; margin-top: 0.375rem; }
 .brand-foot .disconnect { font-size: var(--fs-xs); align-self: flex-start; }

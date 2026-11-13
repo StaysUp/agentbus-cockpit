@@ -7,6 +7,8 @@ interface ConnectScreenProps {
   error: string | null;
   onConnect: (address: string, token: string) => void;
   onUseRecorded: () => void;
+  // Served by agentbus itself: say how to get a sign-in link.
+  served?: boolean;
 }
 
 export const ConnectScreen: React.FC<ConnectScreenProps> = ({
@@ -16,6 +18,7 @@ export const ConnectScreen: React.FC<ConnectScreenProps> = ({
   error,
   onConnect,
   onUseRecorded,
+  served = false,
 }) => {
   // The token lives only in this field until a check passes.
   const [token, setToken] = useState('');
@@ -30,6 +33,11 @@ export const ConnectScreen: React.FC<ConnectScreenProps> = ({
         }}
       >
         <div className="brand">AgentBus</div>
+        {served && (
+          <p className="connect-hint">
+            Run <code>agentbus open</code> in a terminal for a sign-in link, or paste the token from the data folder.
+          </p>
+        )}
         <label>
           <span>Service</span>
           <input
