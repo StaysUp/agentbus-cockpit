@@ -104,8 +104,13 @@ tool's own sign-in on the machine is not used. A code the login rejects says so 
 For OpenRouter agents, paste your OpenRouter key once in the same place (**OpenRouter key**,
 **Save**). It is a password field: the key is sent once and never shown again. The row then says
 "set", with **Replace** and **Remove**. Control adds the key to each OpenRouter call; no runner or
-agent holds it. An agent saved before this may name an environment variable for its key (under
-**Advanced** in its form); a key set in Settings wins.
+agent holds it. The agent form has no field for a key: Settings is the one place. An agent saved
+before this may still name an environment variable for its key, and control still reads it; a key
+set in Settings wins.
+
+The agent form's **Model** offers the models the agent's access can use now, with their names where
+the source gives one. It says where the list came from and when, and **Refresh** reads it again. You
+can still type any name, and an empty one uses the tool's own default.
 
 ## Build a static copy
 

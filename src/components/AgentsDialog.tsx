@@ -79,8 +79,8 @@ function freshForm(harnesses: Harness[]): FormState {
     harness: h?.name ?? "",
     access: acc?.kind ?? "",
     model: startModel(acc),
-    // No variable unless the person names one: control adds the key set in
-    // Settings, or reads the default variable.
+    // No variable: the OpenRouter key is pasted in Settings only. Control
+    // still reads the variable an agent saved before names.
     keyEnv: "",
     name: "",
     named: false,
@@ -240,6 +240,8 @@ export const AgentsDialog: React.FC<AgentsDialogProps> = ({
       access: f.access,
     };
     if (f.model.trim()) out.model = f.model.trim();
+    // An agent saved before keys were pasted in Settings keeps the variable
+    // it names; the form has no field for one.
     if (f.access === "openrouter" && f.keyEnv.trim())
       out.key_env = f.keyEnv.trim();
     return out;
@@ -279,10 +281,6 @@ export const AgentsDialog: React.FC<AgentsDialogProps> = ({
     if (m.label) modelLabels[m.id] = m.label;
   }
   const openRouter = form?.access === "openrouter";
-  // The key variable is an advanced field: open at once only for an agent
-  // that names a variable other than the default.
-  const defaultKeyEnv = access?.key_env ?? "OPENROUTER_API_KEY";
-  const ownVariable = !!edit?.key_env && edit.key_env !== defaultKeyEnv;
 
   return (
     <div
@@ -417,29 +415,6 @@ export const AgentsDialog: React.FC<AgentsDialogProps> = ({
                   )}
                 </span>
               </label>
-              {openRouter && (
-                <details className="ad-advanced" open={ownVariable}>
-                  <summary>Advanced</summary>
-                  <label>
-                    <span>Key variable</span>
-                    <input
-                      name="key_env"
-                      type="text"
-                      value={form.keyEnv}
-                      placeholder={defaultKeyEnv}
-                      onChange={(e) => update({ keyEnv: e.target.value })}
-                      spellCheck={false}
-                      autoComplete="off"
-                    />
-                    <span className="nd-note">
-                      Only for a key kept in an environment variable where
-                      control runs, as agents saved before Settings kept it.
-                      A key set in Settings wins. The name of the variable,
-                      never the key; empty reads {defaultKeyEnv}.
-                    </span>
-                  </label>
-                </details>
-              )}
               <label>
                 <span>Name</span>
                 <input

@@ -1195,10 +1195,9 @@ describe('Agents', () => {
     expect(model.value).toBe('deepseek/deepseek-v4.1-flash');
     await setValue(model, 'qwen/qwen3-coder:free');
     expect((form().querySelector('input[name="name"]') as HTMLInputElement).value).toBe('Claude Code · qwen/qwen3-coder:free');
-    // The key variable is an advanced field, closed and empty: control adds
-    // the key set in Settings, or reads the default variable.
-    expect((form().querySelector('input[name="key_env"]') as HTMLInputElement).value).toBe('');
-    expect((form().querySelector('details.ad-advanced') as HTMLDetailsElement).open).toBe(false);
+    // No key variable field: the OpenRouter key is pasted in Settings only.
+    expect(form().querySelector('input[name="key_env"]')).toBeNull();
+    expect(form().querySelector('details.ad-advanced')).toBeNull();
     await submitForm(form());
     const post = svc.reqs.find((q) => q.path === '/api/v0/agents' && q.method === 'POST');
     expect(post?.body).toEqual({

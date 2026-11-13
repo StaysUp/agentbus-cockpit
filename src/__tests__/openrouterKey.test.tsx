@@ -168,7 +168,7 @@ describe('The OpenRouter agent form', () => {
     } as Harness,
   ];
 
-  it('shows the key row and keeps the key variable closed under Advanced', async () => {
+  it('shows the key row and no key variable field', async () => {
     const f = fakeApi();
     const createAgent = vi.fn(async () => ({}) as never);
     const { container } = await render(
@@ -179,9 +179,9 @@ describe('The OpenRouter agent form', () => {
     await flush();
     expect(row(container)).not.toBeNull();
     expect(container.textContent).toContain('set once in Settings');
-    const adv = container.querySelector('details.ad-advanced') as HTMLDetailsElement;
-    expect(adv.open).toBe(false);
-    expect((adv.querySelector('input[name="key_env"]') as HTMLInputElement).placeholder).toBe('OPENROUTER_API_KEY');
+    expect(container.querySelector('details.ad-advanced')).toBeNull();
+    expect(container.querySelector('input[name="key_env"]')).toBeNull();
+    expect(container.textContent).not.toContain('Advanced');
     // The key's Save is a plain button: it never submits the agent's form.
     await type(field(container)!, FAKE_KEY);
     await click(container.querySelector('.or-save'));
@@ -190,22 +190,26 @@ describe('The OpenRouter agent form', () => {
     expect(createAgent).not.toHaveBeenCalled();
   });
 
-  it('opens Advanced for an agent that names its own variable', async () => {
+  it('keeps the variable an agent saved before names, with no field for it', async () => {
     const f = fakeApi();
+    const updateAgent = vi.fn(async () => ({}) as never);
     const { container } = await render(
       <AgentsDialog
         loadHarnesses={async () => harnesses}
         createAgent={vi.fn()}
-        updateAgent={vi.fn()}
+        updateAgent={updateAgent}
         onClose={() => undefined}
         subscriptions={f.api}
         edit={{ id: 'a1', name: 'Old', harness: 'claude', access: 'openrouter', model: 'x/y', key_env: 'MY_OR_KEY', created: '', updated: '' } as never}
       />,
     );
     await flush();
-    const adv = container.querySelector('details.ad-advanced') as HTMLDetailsElement;
-    expect(adv.open).toBe(true);
-    expect((adv.querySelector('input[name="key_env"]') as HTMLInputElement).value).toBe('MY_OR_KEY');
+    expect(container.querySelector('input[name="key_env"]')).toBeNull();
+    await act(async () => {
+      (container.querySelector('form.agent-form') as HTMLFormElement).requestSubmit();
+    });
+    await flush();
+    expect(updateAgent).toHaveBeenCalledWith('a1', { name: 'Old', harness: 'claude', access: 'openrouter', model: 'x/y', key_env: 'MY_OR_KEY' });
   });
 });
 
