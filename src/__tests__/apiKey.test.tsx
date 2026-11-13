@@ -51,6 +51,9 @@ describe('APIKey', () => {
     const { container } = await render(<APIKey api={f.api} name="anthropic" />);
     await flush();
     expect(container.textContent).toContain('Anthropic API key');
+    expect(container.textContent).toContain('Used by claude agents on access API key');
+    expect(container.querySelector('input[name="anthropic_key"]')).toBeNull();
+    await click(container.querySelector('.key-set'));
     const input = container.querySelector('input[name="anthropic_key"]') as HTMLInputElement;
     expect(input.type).toBe('password');
     await type(input, ` ${FAKE_ANTH}\n`);
@@ -65,6 +68,8 @@ describe('APIKey', () => {
     await flush();
     expect(f.api.removeAPIKey).toHaveBeenCalledWith('anthropic');
     expect(container.querySelector('.cs-status')?.textContent).toBe('not set');
+    expect(container.querySelector('.key-set')?.textContent).toBe('Set key');
+    expect(container.querySelector('input[name="anthropic_key"]')).toBeNull();
   });
 
   it('shows no row for a control too old to list the vendor keys', async () => {
@@ -100,6 +105,8 @@ describe('The API key agent form', () => {
     await click(container.querySelector('[data-access="api"]'));
     await flush();
     expect(container.querySelector('.key-row[data-harness="anthropic"]')).not.toBeNull();
+    // The access choice reads only "API key"; the row and note say whose.
+    expect(container.querySelector('[data-access="api"]')?.textContent).toBe('API key');
     expect(container.textContent).toContain('Control adds your Anthropic API key');
     expect((container.querySelector('input[name="model"]') as HTMLInputElement).value).toBe('');
     await act(async () => {
@@ -136,6 +143,7 @@ describe('The models of an API key agent', () => {
     await click(container.querySelector('[data-access="api"]'));
     await flush();
     expect(loadModels).toHaveBeenCalledWith('claude', 'api', false);
+    await click(container.querySelector('.key-set'));
     await type(container.querySelector('input[name="anthropic_key"]') as HTMLInputElement, FAKE_ANTH);
     await click(container.querySelector('.key-save'));
     await flush();

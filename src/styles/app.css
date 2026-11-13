@@ -421,10 +421,9 @@ tr.ev-open > td { background: #FBFBFA; border-bottom: 1px solid var(--line); pad
 .cs-until { color: var(--ink3); }
 .connect-step > .nd-note { margin-top: 0; }
 .cs-head .cs-connect, .cs-head .cs-cancel { margin-left: auto; }
-/* The OpenRouter key: set or not, never its value. Replace sits at the
-   right, Remove beside it. */
-.cs-head .or-replace { margin-left: auto; }
-.or-key .cs-step > span { font-size: var(--fs-s); color: var(--ink2); }
+/* A key row (OpenRouter, a vendor's API key): set or not, never its value.
+   Its one action sits at the right as Connect does; Remove beside Replace. */
+.cs-head .key-set, .cs-head .key-replace, .cs-head .key-cancel { margin-left: auto; }
 .cs-login { display: flex; flex-direction: column; align-items: flex-start; gap: 0.5rem; font-size: var(--fs-s); color: var(--ink2); }
 .cs-step { display: flex; flex-direction: column; gap: 0.25rem; align-self: stretch; }
 .cs-step .nd-note { margin-top: 0; }

@@ -51,6 +51,12 @@ describe('OpenRouterKey', () => {
     await flush();
     expect(row(container)?.getAttribute('data-phase')).toBe('not-connected');
     expect(container.querySelector('.cs-status')?.textContent).toBe('not set');
+    // Laid out as a subscription's row: one action, no field until it is pressed.
+    expect(field(container)).toBeNull();
+    expect(container.querySelector('.or-set')?.textContent).toBe('Set key');
+    expect(container.querySelector('.connect-step > .nd-note')?.textContent).toContain('never shown');
+    await click(container.querySelector('.or-set'));
+    expect(container.querySelector('.or-set')).toBeNull();
     const input = field(container)!;
     expect(input.type).toBe('password');
     expect(input.autocomplete).toBe('off');
@@ -66,6 +72,8 @@ describe('OpenRouterKey', () => {
     expect(container.textContent).toContain('since 2026-11-13');
     // No field, and nothing of the key, is left on the page.
     expect(field(container)).toBeNull();
+    expect(container.querySelector('.or-replace')?.textContent).toBe('Replace');
+    expect(container.querySelector('.or-remove')?.textContent).toBe('Remove');
     expect(container.innerHTML).not.toContain(FAKE_KEY);
   });
 
@@ -98,7 +106,8 @@ describe('OpenRouterKey', () => {
     await flush();
     expect(f.api.removeKey).toHaveBeenCalledTimes(1);
     expect(container.querySelector('.cs-status')?.textContent).toBe('not set');
-    expect(field(container)).not.toBeNull();
+    expect(field(container)).toBeNull();
+    expect(container.querySelector('.or-set')).not.toBeNull();
   });
 
   it('shows the API words when a save is refused, and keeps the field to try again', async () => {
@@ -108,6 +117,7 @@ describe('OpenRouterKey', () => {
     });
     const { container } = await render(<OpenRouterKey api={f.api} />);
     await flush();
+    await click(container.querySelector('.or-set'));
     await type(field(container)!, 'a b');
     await click(container.querySelector('.or-save'));
     await flush();
@@ -129,12 +139,13 @@ describe('OpenRouterKey', () => {
       if (startSet) {
         await click(container.querySelector('.or-remove'));
       } else {
+        await click(container.querySelector('.or-set'));
         await type(field(container)!, FAKE_KEY);
         await click(container.querySelector('.or-save'));
       }
       await flush();
       expect(container.querySelector('.cs-status')?.textContent).toBe(startSet ? 'not set' : 'set');
-      expect(field(container) === null).toBe(!startSet);
+      expect(field(container)).toBeNull();
       expect(container.querySelector('.form-error')?.textContent).toContain('could not be read');
       expect(container.innerHTML).not.toContain(FAKE_KEY);
     });
@@ -182,7 +193,8 @@ describe('The OpenRouter agent form', () => {
     expect(container.querySelector('details.ad-advanced')).toBeNull();
     expect(container.querySelector('input[name="key_env"]')).toBeNull();
     expect(container.textContent).not.toContain('Advanced');
-    // The key's Save is a plain button: it never submits the agent's form.
+    // The key's buttons are plain buttons: they never submit the agent's form.
+    await click(container.querySelector('.or-set'));
     await type(field(container)!, FAKE_KEY);
     await click(container.querySelector('.or-save'));
     await flush();

@@ -342,7 +342,8 @@ export const AgentsDialog: React.FC<AgentsDialogProps> = ({
                   value={form.access}
                   options={accessesOf(harness).map((x) => ({
                     value: x.kind,
-                    label: x.label,
+                    // Settings says whose API key; here the choice is only "API key".
+                    label: x.kind === "api" ? "API key" : x.label,
                     disabled: !!x.disabled,
                     title: x.disabled ? "Not available yet" : undefined,
                   }))}

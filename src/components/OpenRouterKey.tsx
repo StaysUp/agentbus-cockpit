@@ -14,11 +14,12 @@ import { SubscriptionApi } from './ConnectStep';
 
 const day = (iso?: string) => (iso ? iso.slice(0, 10) : '');
 
-// A vendor's API key, by its name in Settings.
-export const vendorKeys: Record<string, { label: string; placeholder: string }> = {
-  anthropic: { label: 'Anthropic API key', placeholder: 'sk-ant-…' },
-  openai: { label: 'OpenAI API key', placeholder: 'sk-…' },
-  gemini: { label: 'Gemini API key', placeholder: 'AIza…' },
+// A vendor's API key, by its name in Settings, and the harness whose
+// agents use it.
+export const vendorKeys: Record<string, { label: string; placeholder: string; harness: string }> = {
+  anthropic: { label: 'Anthropic API key', placeholder: 'sk-ant-…', harness: 'claude' },
+  openai: { label: 'OpenAI API key', placeholder: 'sk-…', harness: 'codex' },
+  gemini: { label: 'Gemini API key', placeholder: 'AIza…', harness: 'agy' },
 };
 
 type KeyState = { set: boolean; set_at?: string };
@@ -29,6 +30,8 @@ interface KeyRowProps {
   name: string;
   label: string;
   placeholder: string;
+  // The one line under the row's head: what uses the key.
+  note: string;
   // What is kept of it in the list; absent: a control too old to keep it.
   stateOf: (l: SubscriptionList) => KeyState | undefined;
   set?: (key: string) => Promise<void>;
@@ -40,13 +43,14 @@ interface KeyRowProps {
   onChange?: () => void;
 }
 
-const KeyRow: React.FC<KeyRowProps> = ({ api, name, label, placeholder, stateOf, set, remove, cls, onChange }) => {
+const KeyRow: React.FC<KeyRowProps> = ({ api, name, label, placeholder, note, stateOf, set, remove, cls, onChange }) => {
   const [list, setList] = useState<SubscriptionList | null | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
   const [key, setKey] = useState('');
   const [busy, setBusy] = useState(false);
-  // Replace was clicked: the field shows over a key that is set.
-  const [replacing, setReplacing] = useState(false);
+  // Set key or Replace was clicked: the field shows until a save works or
+  // Cancel is clicked.
+  const [open, setOpen] = useState(false);
   // What the last write here did, shown until a list read after it
   // succeeds: a save or remove that worked shows so even when that read
   // fails.
@@ -87,7 +91,7 @@ const KeyRow: React.FC<KeyRowProps> = ({ api, name, label, placeholder, stateOf,
         () => {
           if (!alive.current) return;
           setKey('');
-          setReplacing(false);
+          setOpen(false);
           setWrote({ set: isSet });
           onChange?.();
           return reload();
@@ -112,66 +116,65 @@ const KeyRow: React.FC<KeyRowProps> = ({ api, name, label, placeholder, stateOf,
   const kept = list ? stateOf(list) : undefined;
   if (!set || !remove || !kept) return null;
   const st = wrote ?? kept;
-  const field = !st.set || replacing;
+  const cancel = () => {
+    setOpen(false);
+    setKey('');
+  };
 
+  // Laid out as a subscription's row (ConnectStep): the name, set or not,
+  // and one action at the right; the field opens under it on Set key or
+  // Replace; one line says what uses the key.
   return (
     <div className={`connect-step key-row ${cls}-key`} data-harness={name} data-phase={st.set ? 'connected' : 'not-connected'}>
       <div className="cs-head">
         <span>{label}</span>
         <span className={`cs-status ${st.set ? 'ok' : 'off'}`}>{st.set ? 'set' : 'not set'}</span>
         {st.set && st.set_at && <span className="cs-until">since {day(st.set_at)}</span>}
-        {st.set && !replacing && (
+        {open ? (
+          <button type="button" className={`btn btn-secondary btn-sm cs-btn key-cancel ${cls}-cancel`} onClick={cancel} disabled={busy}>
+            Cancel
+          </button>
+        ) : st.set ? (
           <>
-            <button type="button" className={`btn btn-secondary btn-sm cs-btn key-replace ${cls}-replace`} onClick={() => setReplacing(true)} disabled={busy}>
+            <button type="button" className={`btn btn-secondary btn-sm cs-btn key-replace ${cls}-replace`} onClick={() => setOpen(true)} disabled={busy}>
               Replace
             </button>
             <button type="button" className={`btn btn-secondary btn-sm cs-btn key-remove ${cls}-remove`} onClick={forget} disabled={busy}>
               Remove
             </button>
           </>
+        ) : (
+          <button type="button" className={`btn btn-secondary btn-sm cs-btn key-set ${cls}-set`} onClick={() => setOpen(true)} disabled={busy}>
+            Set key
+          </button>
         )}
       </div>
-      {field && (
-        <div className="cs-step">
-          <span>Paste your {label}. Control keeps it and never shows it again.</span>
-          <div className="cs-input">
-            <input
-              type="password"
-              name={`${name}_key`}
-              aria-label={label}
-              placeholder={placeholder}
-              value={key}
-              onChange={(e) => setKey(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault();
-                  save();
-                }
-              }}
-              autoComplete="off"
-              spellCheck={false}
-              disabled={busy}
-            />
-            <button type="button" className={`btn btn-primary btn-sm cs-btn key-save ${cls}-save`} onClick={save} disabled={busy || !key.trim()}>
-              {busy ? 'Saving' : 'Save'}
-            </button>
-            {replacing && (
-              <button
-                type="button"
-                className={`btn btn-secondary btn-sm cs-btn key-cancel ${cls}-cancel`}
-                onClick={() => {
-                  setReplacing(false);
-                  setKey('');
-                }}
-                disabled={busy}
-              >
-                Cancel
-              </button>
-            )}
-          </div>
+      {open && (
+        <div className="cs-input">
+          <input
+            type="password"
+            name={`${name}_key`}
+            aria-label={label}
+            placeholder={placeholder}
+            value={key}
+            onChange={(e) => setKey(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                save();
+              }
+            }}
+            autoComplete="off"
+            spellCheck={false}
+            disabled={busy}
+          />
+          <button type="button" className={`btn btn-primary btn-sm cs-btn key-save ${cls}-save`} onClick={save} disabled={busy || !key.trim()}>
+            {busy ? 'Saving' : 'Save'}
+          </button>
         </div>
       )}
       {error && <div className="form-error cs-why">{error}</div>}
+      <span className="nd-note">{note}</span>
     </div>
   );
 };
@@ -184,6 +187,7 @@ export const OpenRouterKey: React.FC<{ api: SubscriptionApi }> = ({ api }) => (
     name="openrouter"
     label="OpenRouter key"
     placeholder="sk-or-…"
+    note="Used by agents on OpenRouter. It stays on control and is never shown."
     stateOf={(l) => l.openrouter_key}
     set={api.setKey}
     remove={api.removeKey}
@@ -194,13 +198,14 @@ export const OpenRouterKey: React.FC<{ api: SubscriptionApi }> = ({ api }) => (
 // One vendor's API key, by its name (vendorKeys). A service whose api cannot
 // set it, or a control too old to list it, shows no row.
 export const APIKey: React.FC<{ api: SubscriptionApi; name: string; onChange?: () => void }> = ({ api, name, onChange }) => {
-  const v = vendorKeys[name] ?? { label: `${name} API key`, placeholder: '' };
+  const v = vendorKeys[name] ?? { label: `${name} API key`, placeholder: '', harness: name };
   return (
     <KeyRow
       api={api}
       name={name}
       label={v.label}
       placeholder={v.placeholder}
+      note={`Used by ${v.harness} agents on access API key. It stays on control and is never shown.`}
       stateOf={(l) => l.api_keys?.[name]}
       set={api.setAPIKey ? (k) => api.setAPIKey!(name, k) : undefined}
       remove={api.removeAPIKey ? () => api.removeAPIKey!(name) : undefined}
