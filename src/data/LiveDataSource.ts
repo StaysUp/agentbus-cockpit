@@ -329,6 +329,15 @@ export class LiveDataSource implements DataSource {
     if (k && typeof k === 'object' && typeof k.set === 'boolean') {
       out.openrouter_key = { set: k.set, ...(typeof k.set_at === 'string' ? { set_at: k.set_at } : {}) };
     }
+    const ak = data.api_keys;
+    if (ak && typeof ak === 'object') {
+      out.api_keys = {};
+      for (const [name, v] of Object.entries(ak as Record<string, { set?: unknown; set_at?: unknown }>)) {
+        if (v && typeof v === 'object' && typeof v.set === 'boolean') {
+          out.api_keys[name] = { set: v.set, ...(typeof v.set_at === 'string' ? { set_at: v.set_at } : {}) };
+        }
+      }
+    }
     return out;
   }
 
@@ -346,6 +355,26 @@ export class LiveDataSource implements DataSource {
   // DELETE /api/v0/subscriptions/openrouter/key: 204.
   async removeOpenRouterKey(): Promise<void> {
     const res = await fetch(`${this.baseUrl}/api/v0/subscriptions/openrouter/key`, {
+      method: 'DELETE',
+      headers: this.headers(),
+    });
+    if (!res.ok) throw new Error(await apiError(res));
+  }
+
+  // PUT /api/v0/subscriptions/<name>/key for a vendor's API key: 204. The
+  // key goes in the body only.
+  async setAPIKey(name: string, key: string): Promise<void> {
+    const res = await fetch(`${this.baseUrl}/api/v0/subscriptions/${encodeURIComponent(name)}/key`, {
+      method: 'PUT',
+      headers: { ...this.headers(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key }),
+    });
+    if (!res.ok) throw new Error(await apiError(res));
+  }
+
+  // DELETE /api/v0/subscriptions/<name>/key: 204.
+  async removeAPIKey(name: string): Promise<void> {
+    const res = await fetch(`${this.baseUrl}/api/v0/subscriptions/${encodeURIComponent(name)}/key`, {
       method: 'DELETE',
       headers: this.headers(),
     });

@@ -24,6 +24,10 @@ export interface SubscriptionApi {
   // without them, and no OpenRouter key row.
   setKey?: (key: string) => Promise<void>;
   removeKey?: () => Promise<void>;
+  // Set and remove a vendor's API key kept on control, by its name
+  // (anthropic, openai, gemini). Absent: no API key rows.
+  setAPIKey?: (name: string, key: string) => Promise<void>;
+  removeAPIKey?: (name: string) => Promise<void>;
 }
 
 // pollMs is how often a running login is read again.

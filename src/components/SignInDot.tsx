@@ -14,6 +14,9 @@ export interface SignIn {
 // signInOf is the dot for agent, or undefined when nothing says: a
 // subscription agent before the subscriptions are read, or on a service
 // that keeps none, and an agent of any other access.
+// The key an agent on access "api" uses, by its harness.
+const apiKeyLabel: Record<string, string> = { claude: 'Anthropic API key', codex: 'OpenAI API key', agy: 'Gemini API key' };
+
 export function signInOf(agent: SavedAgent, subs: SubscriptionList | null | undefined): SignIn | undefined {
   if (agent.access === 'subscription') {
     if (!subs) return undefined;
@@ -29,6 +32,12 @@ export function signInOf(agent: SavedAgent, subs: SubscriptionList | null | unde
     if (inSettings || agent.key_set) return { ok: true, title: 'OpenRouter key is set' };
     if (!subs && agent.key_set === undefined) return undefined;
     return { ok: false, title: 'OpenRouter key is not set — open Settings to add it' };
+  }
+  if (agent.access === 'api') {
+    // The vendor's API key set in Settings, as control says on the agent.
+    if (agent.key_set === undefined) return undefined;
+    const key = apiKeyLabel[agent.harness] ?? `${agent.harness}'s API key`;
+    return agent.key_set ? { ok: true, title: `${key} is set` } : { ok: false, title: `${key} is not set — open Settings to add it` };
   }
   return undefined;
 }

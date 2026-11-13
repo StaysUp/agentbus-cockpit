@@ -563,6 +563,8 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
             cancel: dataSource.cancelConnect ? (h) => dataSource.cancelConnect!(h) : undefined,
             setKey: dataSource.setOpenRouterKey ? (k) => dataSource.setOpenRouterKey!(k) : undefined,
             removeKey: dataSource.removeOpenRouterKey ? () => dataSource.removeOpenRouterKey!() : undefined,
+            setAPIKey: dataSource.setAPIKey ? (n, k) => dataSource.setAPIKey!(n, k) : undefined,
+            removeAPIKey: dataSource.removeAPIKey ? (n) => dataSource.removeAPIKey!(n) : undefined,
           }
         : undefined,
     [dataSource],

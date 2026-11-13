@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { Combo, Seg, Select } from "./Controls";
 import { AccessOption, AgentFields, Harness, ModelList, SavedAgent } from "../types";
 import { ConnectStep, SubscriptionApi } from "./ConnectStep";
-import { OpenRouterKey } from "./OpenRouterKey";
+import { APIKey, OpenRouterKey, vendorKeys } from "./OpenRouterKey";
 
 // The "+ Agent" form, and the same form to edit a saved agent: Harness,
 // then Access (only what that harness offers), then Model (what that harness
@@ -36,7 +36,9 @@ export const accessText = (a: { access: string; key_env?: string }): string =>
       ? a.key_env && a.key_env !== "OPENROUTER_API_KEY"
         ? `OpenRouter · ${a.key_env}`
         : "OpenRouter"
-      : a.access;
+      : a.access === "api"
+        ? "API key"
+        : a.access;
 
 export function agentLine(a: SavedAgent, harnesses?: Harness[]): string {
   const h = harnesses?.find((x) => x.name === a.harness);
@@ -68,7 +70,7 @@ function autoName(f: FormState, harnesses: Harness[]): string {
 // refuses, as gpt-5.5 on a ChatGPT sign-in); the first offered on
 // OpenRouter, which needs one.
 function startModel(acc: AccessOption | undefined): string {
-  if (!acc || acc.kind === "subscription") return "";
+  if (!acc || acc.kind !== "openrouter") return "";
   return acc.models[0] ?? "";
 }
 
@@ -100,11 +102,16 @@ function formOf(a: SavedAgent): FormState {
   };
 }
 
-// sourceText says where a list of models came from.
-function sourceText(source: string, label: string): string {
+// The vendor whose list-models call a key's list comes from, by the key's
+// name in Settings.
+const vendorOf: Record<string, string> = { anthropic: "Anthropic's", openai: "OpenAI's", gemini: "the Gemini API's" };
+
+// sourceText says where a list of models came from; keyName is the API key
+// of access "api" (anthropic, openai, gemini), absent for OpenRouter.
+function sourceText(source: string, label: string, keyName?: string): string {
   switch (source) {
     case "api":
-      return "OpenRouter's list";
+      return keyName ? `${vendorOf[keyName] ?? "the vendor's"} list, read with your API key` : "OpenRouter's list";
     case "command":
       return `${label} itself, where its sign-in is`;
     case "runner":
@@ -281,6 +288,7 @@ export const AgentsDialog: React.FC<AgentsDialogProps> = ({
     if (m.label) modelLabels[m.id] = m.label;
   }
   const openRouter = form?.access === "openrouter";
+  const apiKey = form?.access === "api";
 
   return (
     <div
@@ -343,13 +351,18 @@ export const AgentsDialog: React.FC<AgentsDialogProps> = ({
                 <span className="nd-note">
                   {openRouter
                     ? "Control adds your OpenRouter key, set once in Settings, Subscriptions. No runner or agent ever holds it."
-                    : `Uses the ${access?.label ?? "harness sign-in"}.`}
+                    : apiKey
+                      ? `Control adds your ${vendorKeys[access?.key_name ?? ""]?.label ?? access?.label ?? "API key"}, set once in Settings, Subscriptions. No runner or agent ever holds it.`
+                      : `Uses the ${access?.label ?? "harness sign-in"}.`}
                 </span>
               </label>
               {subscriptions && form.access === "subscription" && form.harness && (
                 <ConnectStep key={form.harness} harness={form.harness} api={subscriptions} />
               )}
               {subscriptions && openRouter && <OpenRouterKey api={subscriptions} />}
+              {subscriptions && apiKey && access?.key_name && (
+                <APIKey key={access.key_name} api={subscriptions} name={access.key_name} onChange={() => readModels(true)} />
+              )}
               <label>
                 <span>Model</span>
                 {access?.any_model ? (
@@ -359,9 +372,9 @@ export const AgentsDialog: React.FC<AgentsDialogProps> = ({
                     value={form.model}
                     onChange={(v) => update({ model: v })}
                     placeholder={
-                      access.kind === "subscription"
-                        ? `empty: ${harness?.label ?? form.harness}'s default`
-                        : "an OpenRouter model id"
+                      access.kind === "openrouter"
+                        ? "an OpenRouter model id"
+                        : `empty: ${harness?.label ?? form.harness}'s default`
                     }
                     suggestions={offered}
                     labels={modelLabels}
@@ -390,7 +403,7 @@ export const AgentsDialog: React.FC<AgentsDialogProps> = ({
                         : listed?.error
                           ? listed.error
                           : listed
-                            ? `${listed.models.length} models from ${sourceText(listed.source, harness?.label ?? form.harness)}${listed.fetched_at ? `, read ${when(listed.fetched_at)}` : ""}.`
+                            ? `${listed.models.length} models from ${sourceText(listed.source, harness?.label ?? form.harness, apiKey ? access?.key_name : undefined)}${listed.fetched_at ? `, read ${when(listed.fetched_at)}` : ""}.`
                             : ""}{" "}
                     {listed && listed.source !== "fixed" && (
                       <button type="button" className="btn btn-secondary btn-sm ad-models-refresh" onClick={() => readModels(true)} disabled={modelsBusy}>
@@ -400,7 +413,7 @@ export const AgentsDialog: React.FC<AgentsDialogProps> = ({
                   </span>
                 )}
                 <span className="nd-note">
-                  {access?.kind === "subscription" && access.any_model ? (
+                  {access?.kind !== "openrouter" && access?.any_model ? (
                     <>
                       Empty uses {harness?.label ?? form.harness}&apos;s own
                       default. A name your account does not offer fails the

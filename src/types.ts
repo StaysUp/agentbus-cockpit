@@ -228,8 +228,11 @@ export interface AccessOption {
   // subscription. A name the vendor refuses fails the turn in its words.
   any_model?: boolean;
   key_env?: string;
-  // Whether key_env is set where the service runs. Never its value.
+  // Whether key_env is set where the service runs, or for api whether the
+  // vendor's key is set in Settings. Never its value.
   key_set?: boolean;
+  // For api: the key it uses, as Settings names it (anthropic, openai, gemini).
+  key_name?: string;
 }
 
 // One harness the service can run an agent on, from GET /api/v0/harnesses.
@@ -474,6 +477,9 @@ export interface SubscriptionList {
   // Whether an OpenRouter key is set on control. Never the key. Absent: a
   // control too old to keep one.
   openrouter_key?: { set: boolean; set_at?: string };
+  // Whether each vendor's API key (anthropic, openai, gemini) is set on
+  // control, by name. Never a key. Absent: a control too old to keep them.
+  api_keys?: Record<string, { set: boolean; set_at?: string }>;
 }
 
 export interface DataSource {
@@ -532,6 +538,9 @@ export interface DataSource {
   // PUT and DELETE /api/v0/subscriptions/openrouter/key: set the OpenRouter
   // key on control, sent once and never read back, or remove it.
   setOpenRouterKey?(key: string): Promise<void>;
+  // PUT and DELETE /api/v0/subscriptions/<name>/key for a vendor's API key.
+  setAPIKey?(name: string, key: string): Promise<void>;
+  removeAPIKey?(name: string): Promise<void>;
   removeOpenRouterKey?(): Promise<void>;
   // The settings routes (/api/v0/settings), for the Settings page.
   getSettings?(): Promise<Versioned<SettingsInfo>>;

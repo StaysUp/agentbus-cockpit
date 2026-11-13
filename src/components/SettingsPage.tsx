@@ -15,7 +15,7 @@ import { ColHead, PageFrame } from "./PageFrame";
 import { Button, Seg, Switch } from "./Controls";
 import { setLeaveGuard } from "../page";
 import { ConnectStep, SubscriptionApi } from "./ConnectStep";
-import { OpenRouterKey } from "./OpenRouterKey";
+import { APIKey, OpenRouterKey } from "./OpenRouterKey";
 import { SubscriptionList } from "../types";
 
 // The Settings page (/settings): control's settings, one global set for every machine.
@@ -781,6 +781,11 @@ const SubscriptionsPart: React.FC<{ api: SubscriptionApi }> = ({ api }) => {
         <ConnectStep key={s.harness} harness={s.harness} api={api} />
       ))}
       <OpenRouterKey api={api} />
+      {Object.keys(list.api_keys ?? {})
+        .sort()
+        .map((name) => (
+          <APIKey key={name} api={api} name={name} />
+        ))}
     </>
   );
 };
