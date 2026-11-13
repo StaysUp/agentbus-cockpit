@@ -48,19 +48,30 @@ export const ConnectStep: React.FC<{ harness: string; api: SubscriptionApi }> = 
   // The last connect failed because the login did not take the code.
   const [rejected, setRejected] = useState(false);
   // Cancel was clicked for the login on screen: the button stays held
-  // until that login ends.
+  // until that login ends, or until the cancel request itself fails.
   const [cancelling, setCancelling] = useState(false);
   // Refs as well as state: a second click in the same moment, before a
   // render, is ignored.
   const sendingRef = useRef(false);
   const startingRef = useRef(false);
   const cancellingRef = useRef(false);
-  // A login ended, or a new one starts: Cancel is free again.
-  const cancelDone = () => {
+  // One rule for every answer: it belongs to its own login. Each login
+  // started here gets the next id; every request (connect, read, code,
+  // cancel) keeps the id it was sent for, and its answer is applied only
+  // while that login is still the current one. Any other answer is ignored.
+  const loginRef = useRef(0);
+  const alive = useRef(true);
+  const current = (id: number) => alive.current && id === loginRef.current;
+  // A login starts or ends: nothing of the last one is held.
+  const fresh = () => {
+    sendingRef.current = false;
     cancellingRef.current = false;
+    setSending(false);
+    setSent(false);
+    setSendError(null);
+    setCode('');
     setCancelling(false);
   };
-  const alive = useRef(true);
   // Set on every mount: StrictMode mounts twice.
   useEffect(() => {
     alive.current = true;
@@ -71,22 +82,22 @@ export const ConnectStep: React.FC<{ harness: string; api: SubscriptionApi }> = 
 
   // The list again; a login still running on control is followed, one that
   // ended before this was opened is not shown.
-  const reload = useCallback(
-    () =>
-      api.list().then(
-        (l) => {
-          if (!alive.current) return;
-          setList(l);
-          setListError(null);
-          const c = l?.subscriptions.find((s) => s.harness === harness)?.connect;
-          if (c?.state === 'running') setView((v) => v ?? c);
-        },
-        (e: Error) => {
-          if (alive.current) setListError(e.message);
-        },
-      ),
-    [api, harness],
-  );
+  const reload = useCallback(() => {
+    const id = loginRef.current;
+    return api.list().then(
+      (l) => {
+        if (!alive.current) return;
+        setList(l);
+        setListError(null);
+        // Only for the login it was asked for: not over one started since.
+        const c = l?.subscriptions.find((s) => s.harness === harness)?.connect;
+        if (c?.state === 'running' && id === loginRef.current) setView((v) => v ?? c);
+      },
+      (e: Error) => {
+        if (alive.current) setListError(e.message);
+      },
+    );
+  }, [api, harness]);
   useEffect(() => {
     reload();
   }, [reload]);
@@ -96,13 +107,15 @@ export const ConnectStep: React.FC<{ harness: string; api: SubscriptionApi }> = 
   const running = view?.state === 'running';
   useEffect(() => {
     if (!running) return;
+    // stopped ends this loop of reads when the effect is cleaned up.
     let stopped = false;
     let t: ReturnType<typeof setTimeout>;
+    const id = loginRef.current;
     const poll = () => {
       t = setTimeout(() => {
         api.get(harness).then(
           (v) => {
-            if (!alive.current || stopped) return;
+            if (stopped || !current(id)) return;
             if (v.state === 'running') {
               setView(v);
               poll();
@@ -112,7 +125,7 @@ export const ConnectStep: React.FC<{ harness: string; api: SubscriptionApi }> = 
             // read again says until when. A cancelled one shows as it was
             // before.
             setView(null);
-            cancelDone();
+            fresh();
             if (v.state === 'failed' && !v.cancelled) {
               setFailed(v.error || 'the login ended without connecting');
               setRejected(!!v.rejected);
@@ -122,9 +135,9 @@ export const ConnectStep: React.FC<{ harness: string; api: SubscriptionApi }> = 
           // The login can no longer be read (control restarted, say): it
           // ended, so Connect can start another.
           (e: Error) => {
-            if (!alive.current || stopped) return;
+            if (stopped || !current(id)) return;
             setView(null);
-            cancelDone();
+            fresh();
             setFailed(e.message);
           },
         );
@@ -171,20 +184,18 @@ export const ConnectStep: React.FC<{ harness: string; api: SubscriptionApi }> = 
 
   const connect = () => {
     if (startingRef.current || running) return;
+    const id = ++loginRef.current;
     startingRef.current = true;
     setStarting(true);
     setFailed(null);
     setRejected(false);
     setConnected(false);
     setView(null);
-    setCode('');
-    setSent(false);
-    setSendError(null);
-    cancelDone();
+    fresh();
     api.connect(harness).then(
       (v) => {
+        if (!current(id)) return;
         startingRef.current = false;
-        if (!alive.current) return;
         setStarting(false);
         if (v.state === 'running') setView(v);
         else if (v.state === 'failed') setFailed(v.error || 'the login ended without connecting');
@@ -194,8 +205,8 @@ export const ConnectStep: React.FC<{ harness: string; api: SubscriptionApi }> = 
         }
       },
       (e: Error) => {
+        if (!current(id)) return;
         startingRef.current = false;
-        if (!alive.current) return;
         setStarting(false);
         setFailed(e.message);
       },
@@ -208,36 +219,42 @@ export const ConnectStep: React.FC<{ harness: string; api: SubscriptionApi }> = 
     e.preventDefault();
     const line = code.trim();
     if (!line || sendingRef.current || sent) return;
+    const id = loginRef.current;
     sendingRef.current = true;
     setSendError(null);
     setSending(true);
     api.input(harness, line).then(
       () => {
+        if (!current(id)) return;
         sendingRef.current = false;
-        if (!alive.current) return;
         setSending(false);
         setSent(true);
         setCode('');
       },
       (err: Error) => {
+        if (!current(id)) return;
         sendingRef.current = false;
-        if (!alive.current) return;
         setSending(false);
         setSendError(err.message);
       },
     );
   };
 
-  // Cancel asks control to stop the login. One rule: its answer is never
-  // shown. A refused cancel only means the login ended already, and the
+  // Cancel asks control to stop the login. Its answer is never shown: the
   // read of the login alone shows how it ended (connected, failed or
   // cancelled). The button stays held from the click until that login
-  // ends; a second click is ignored; Connect starts the next login clean.
+  // ends, and a second click is ignored. If the cancel request fails, the
+  // button is free again for that login, so it can be clicked once more.
   const cancel = () => {
     if (!api.cancel || cancellingRef.current) return;
+    const id = loginRef.current;
     cancellingRef.current = true;
     setCancelling(true);
-    api.cancel(harness).catch(() => undefined);
+    api.cancel(harness).catch(() => {
+      if (!current(id)) return;
+      cancellingRef.current = false;
+      setCancelling(false);
+    });
   };
 
   // A sign-in that expired failed too, but no connect of this step did.

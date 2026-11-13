@@ -427,6 +427,66 @@ describe('ConnectStep', () => {
     expect(next.disabled).toBe(false);
   });
 
+  // Range review, finding 1: the cancel request itself fails (control not
+  // reached, 5xx) while the login still runs. Cancel is free again at once
+  // for that login, the failure is not shown, and the poll still decides.
+  it('a failed cancel frees Cancel while its login still runs', async () => {
+    const api = fakeApi();
+    let fail: (e: Error) => void = () => {};
+    api.cancel = vi.fn(() => new Promise<void>((_, rej) => (fail = rej)));
+    const { container } = await render(<ConnectStep harness="claude" api={api} />);
+    await flush();
+    await click(container.querySelector('.cs-connect'));
+    await flush();
+    await click(container.querySelector('.cs-cancel'));
+    expect((container.querySelector('.cs-cancel') as HTMLButtonElement).disabled).toBe(true);
+    await act(async () => fail(new Error('control could not be reached')));
+    await flush();
+    expect(phase(container)).toBe('connecting');
+    const btn = container.querySelector('.cs-cancel') as HTMLButtonElement;
+    expect(btn.textContent).toBe('Cancel');
+    expect(btn.disabled).toBe(false);
+    expect(container.textContent).not.toContain('could not be reached');
+    // A second try is sent.
+    await click(btn);
+    expect(api.cancel).toHaveBeenCalledTimes(2);
+  });
+
+  // Range review, finding 2: a code is sent, Cancel ends that login, and
+  // Connect starts the next. The first code's late success belongs to the
+  // first login and never closes the new login's field.
+  it('a late code answer never lands on the next login', async () => {
+    const api = fakeApi();
+    let took: () => void = () => {};
+    api.input = vi.fn(() => new Promise<void>((r) => (took = r)));
+    api.cancel = vi.fn(async () => {
+      (api as { get: SubscriptionApi['get'] }).get = vi.fn(async () => ({
+        harness: 'claude', state: 'failed' as const, output: [], paste: false, cancelled: true, error: 'the connect was cancelled',
+      }));
+    });
+    const { container } = await render(<ConnectStep harness="claude" api={api} />);
+    await flush();
+    await click(container.querySelector('.cs-connect'));
+    await flush();
+    await type(container.querySelector('.cs-input input') as HTMLInputElement, 'c0de');
+    await click(container.querySelector('.cs-input button'));
+    expect(api.input).toHaveBeenCalledTimes(1);
+    await click(container.querySelector('.cs-cancel'));
+    await waitFor(() => phase(container) === 'not-connected', 'ended');
+    (api as { get: SubscriptionApi['get'] }).get = vi.fn(async () => ({ harness: 'claude', state: 'running' as const, output: ['https://claude.example/b'], paste: true }));
+    await click(container.querySelector('.cs-connect'));
+    await flush();
+    expect(phase(container)).toBe('connecting');
+    await act(async () => took());
+    await flush();
+    const input = container.querySelector('.cs-input input') as HTMLInputElement;
+    expect(input.disabled).toBe(false);
+    expect(container.textContent).not.toContain('Code sent');
+    await type(input, 'c0de');
+    await click(container.querySelector('.cs-input button'));
+    expect(api.input).toHaveBeenCalledTimes(2);
+  });
+
   it('offers no Cancel where the service cannot cancel', async () => {
     const api = fakeApi();
     const { container } = await render(<ConnectStep harness="claude" api={api} />);
