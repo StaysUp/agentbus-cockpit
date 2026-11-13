@@ -35,7 +35,8 @@ export const ConnectScreen: React.FC<ConnectScreenProps> = ({
         <div className="brand">AgentBus</div>
         {served && (
           <p className="connect-hint">
-            Run <code>agentbus open</code> in a terminal for a sign-in link, or paste the token from the data folder.
+            For a new sign-in link, stop <code>agentbus up</code> and start it again. Or paste the token from the
+            data folder.
           </p>
         )}
         <label>

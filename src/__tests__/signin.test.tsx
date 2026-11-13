@@ -135,7 +135,7 @@ describe('Served by agentbus', () => {
     expect(r.container.querySelector('form.connect')).not.toBeNull();
     expect(r.container.querySelector('.connect-error')?.textContent).toBe(SIGN_IN_EXPIRED);
     expect((r.container.querySelector('input[name="address"]') as HTMLInputElement).value).toBe(window.location.origin);
-    expect(r.container.querySelector('.connect-hint')?.textContent).toContain('agentbus open');
+    expect(r.container.querySelector('.connect-hint')?.textContent).toContain('start it again');
     expect(sessionStorage.getItem('agentbus.token')).toBeNull();
     r.unmount();
   });

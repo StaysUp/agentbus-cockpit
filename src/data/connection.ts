@@ -150,7 +150,7 @@ export function takeSignInCode(loc: Location = window.location, hist: History = 
 }
 
 export const SIGN_IN_EXPIRED =
-  'the sign-in link was already used or has expired; run `agentbus open` for a new one';
+  'the sign-in link was already used or has expired; start `agentbus up` again for a new one';
 
 // Trades the code for the token, once (POST /api/v0/signin). Returns the
 // token, or a plain sentence saying what went wrong.
