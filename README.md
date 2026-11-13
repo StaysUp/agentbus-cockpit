@@ -89,7 +89,7 @@ running AgentBus (`agentbus up`) of the same version.
 **Runners** (at the foot of the Agents column) lists each machine, whether it is online, and whether
 it can build a session's sandbox. A machine that ran `agentbus login` waits there: type the code it
 shows and press Approve. An offline machine can be removed. The steps are in the
-[AgentBus README](https://github.com/staysup/agentbus#add-a-machine).
+[AgentBus README](https://github.com/staysup/agentbus#several-machines).
 
 ![The Runners page: a machine waiting for approval](docs/assets/cockpit-runners.png)
 
