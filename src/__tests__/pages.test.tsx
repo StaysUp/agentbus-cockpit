@@ -256,7 +256,8 @@ describe('the links at the foot of the Agents column', () => {
     const b = await render(<AgentsColumn agents={[]} selectedAgentId={null} onSelectAgent={() => {}} />);
     expect(link(b.container, 'Runners')).toBeUndefined();
     expect(link(b.container, 'Settings')).toBeUndefined();
-    expect(b.container.querySelector('.side-links')).toBeNull();
+    // Feedback is the one link every cockpit has.
+    expect([...b.container.querySelectorAll('.side-links .side-link')].map((x) => x.textContent)).toEqual(['Feedback']);
   });
 
   it('leaves a click with a modifier key to the browser', async () => {

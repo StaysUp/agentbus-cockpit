@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { follow, PAGE_PATHS } from '../page';
 import { SavedAgent, SubscriptionList } from '../types';
+import { FeedbackDialog } from './FeedbackDialog';
 import { PlusIcon } from './Icons';
 import { SignInDot, signInOf } from './SignInDot';
 
@@ -58,6 +59,7 @@ export const AgentsColumn: React.FC<AgentsColumnProps> = ({
   // can be made again, and its sessions stay.
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<{ id: string; msg: string } | null>(null);
+  const [feedback, setFeedback] = useState(false);
 
   const remove = async (id: string) => {
     if (!onRemoveAgent) return;
@@ -142,26 +144,29 @@ export const AgentsColumn: React.FC<AgentsColumnProps> = ({
           the cockpit's own pages, then the AgentBus this cockpit reads, as one
           card: its name, its build, a live dot and where the data comes from. */}
       <div className="brand-foot">
-        {/* Quiet links to the cockpit's own pages, each at its address. */}
-        {(onRunners || onSettings) && (
-          <nav className="side-links" aria-label="Pages">
-            {onRunners && (
-              <a className="side-link" href={PAGE_PATHS.runners} onClick={follow(onRunners)}>
-                <span>Runners</span>
-                {runnersOnline !== undefined && (
-                  <span className="sl-n" title="online">
-                    {runnersOnline}
-                  </span>
-                )}
-              </a>
-            )}
-            {onSettings && (
-              <a className="side-link" href={PAGE_PATHS.settings} onClick={follow(onSettings)}>
-                <span>Settings</span>
-              </a>
-            )}
-          </nav>
-        )}
+        {/* Quiet links to the cockpit's own pages, each at its address, and
+            Feedback, which opens a small box rather than a page. */}
+        <nav className="side-links" aria-label="Pages">
+          {onRunners && (
+            <a className="side-link" href={PAGE_PATHS.runners} onClick={follow(onRunners)}>
+              <span>Runners</span>
+              {runnersOnline !== undefined && (
+                <span className="sl-n" title="online">
+                  {runnersOnline}
+                </span>
+              )}
+            </a>
+          )}
+          {onSettings && (
+            <a className="side-link" href={PAGE_PATHS.settings} onClick={follow(onSettings)}>
+              <span>Settings</span>
+            </a>
+          )}
+          <button type="button" className="side-link feedback-link" onClick={() => setFeedback(true)}>
+            <span>Feedback</span>
+          </button>
+        </nav>
+        {feedback && <FeedbackDialog version={version} onClose={() => setFeedback(false)} />}
         <div className="bus-card">
           <span className="bc-t">
             <b className="brand">
