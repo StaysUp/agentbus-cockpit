@@ -3,38 +3,41 @@ import React, { act } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../App';
 import { ReplayDataSource } from '../data/ReplayDataSource';
-import { SettingsPage } from '../components/SettingsPage';
+import { SETTINGS_CONTROLS, SettingsPage } from '../components/SettingsPage';
 import { LiveDataSource } from '../data/LiveDataSource';
-import { grantsOf, homeFilesOf, lines, networkOf, Policy, sandboxOffer, SettingsApi, SettingsInfo, withGrants, withHomeFiles } from '../data/settings';
+import { changeOf, flatPolicy, homeFilesOf, isEmpty, lines, nestPolicy, Policy, sandboxOffer, SettingsApi, SettingsInfo } from '../data/settings';
 import { RunnerInfo } from '../types';
 import { click, ev, flush, jsonl, panelOpen, render, unmountAll } from './helpers';
 
-// The policy as GET /api/v0/settings/permissions sends it on the defaults.
+// The policy as GET /api/v0/settings/permissions sends it on 0.5.2's
+// defaults, every value filled, with forbid set.
 function policy(): Policy {
   return {
     read_folders: [],
     allow: [],
     forbid: ['git push'],
     edit: 'session',
-    subagents: true,
-    limits: { max_depth: 2 },
-    agent_api: { scope: 'tree', apply: true, read: true },
+    isolation: 'auto',
+    share_read_only: [],
+    subagents: false,
+    home_files: [],
+    limits: { max_depth: 2, max_jobs_per_turn: 10, max_jobs_per_tree: 30, max_cost_usd_per_tree: 0 },
+    agent_api: { apply: false, tools: true },
     network: { contain: 'off', allow: [] },
     sandbox: { mode: 'off' },
-    home_files: [],
   };
 }
 
 async function setValue(el: Element | null, value: string) {
   if (!el) throw new Error('no field');
+  const proto = el instanceof HTMLInputElement ? HTMLInputElement.prototype : HTMLTextAreaElement.prototype;
   await act(async () => {
-    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(el, value);
+    Object.getOwnPropertyDescriptor(proto, 'value')!.set!.call(el, value);
     el.dispatchEvent(new Event('input', { bubbles: true }));
   });
 }
 
-// pick opens a part of the page (grants, policy, instructions), or a grant's
-// editor in the right column.
+// pick opens a part of the page, or anything else by its selector.
 async function pick(c: HTMLElement, sel: string) {
   await click(c.querySelector(sel));
 }
@@ -43,8 +46,10 @@ function button(c: HTMLElement, text: string): HTMLButtonElement | undefined {
   return [...c.querySelectorAll('button')].find((b) => b.textContent?.trim() === text);
 }
 
+const sw = (c: HTMLElement, key: string) => c.querySelector(`button[name="${key}"]`) as HTMLButtonElement;
+
 // A settings API in memory, with versions as ETags, that refuses a stale one
-// with 412 as the service does.
+// with 412 as the service does. A PATCH writes only the keys it is sent.
 function fakeApi(info: Partial<SettingsInfo> = {}) {
   const state = {
     info: { version: 3, ...info } as SettingsInfo,
@@ -60,10 +65,10 @@ function fakeApi(info: Partial<SettingsInfo> = {}) {
   const api = {
     getSettings: vi.fn(async () => ({ value: { ...state.info }, etag: etag() })),
     getPolicy: vi.fn(async () => ({ value: structuredClone(state.policy), etag: etag() })),
-    putPolicy: vi.fn(async (p: Policy, e: string) => {
+    patchPolicy: vi.fn(async (change: Policy, e: string) => {
       stale(e);
-      state.policy = structuredClone(p);
-      return { value: p, etag: etag() };
+      state.policy = nestPolicy({ ...flatPolicy(state.policy), ...flatPolicy(structuredClone(change)) });
+      return { value: structuredClone(state.policy), etag: etag() };
     }),
     getInstructions: vi.fn(async () => ({ value: state.instructions, etag: etag() })),
     putInstructions: vi.fn(async (t: string, e: string) => {
@@ -81,52 +86,40 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('the grants as policy keys', () => {
-  it('reads the network in three words', () => {
-    expect(networkOf({ network: { contain: 'off', allow: ['github.com'] } })).toBe('on');
-    expect(networkOf({ network: { contain: 'on', allow: [] } })).toBe('off');
-    expect(networkOf({ network: { contain: 'on', allow: ['github.com'] } })).toBe('list');
-    expect(networkOf({})).toBe('on');
+describe('a change of the policy', () => {
+  it('holds only the keys whose value differs, nested as a policy', () => {
+    const read = policy();
+    const draft = { ...policy(), subagents: true, limits: { ...read.limits as object, max_depth: 3 }, forbid: ['git push'] };
+    expect(changeOf(read, draft)).toEqual({ subagents: true, limits: { max_depth: 3 } });
+    expect(isEmpty(changeOf(read, policy()))).toBe(true);
+    // A list counts as one value: any change sends the whole list.
+    expect(changeOf(read, { ...policy(), forbid: ['git push', 'rm'] })).toEqual({ forbid: ['git push', 'rm'] });
+    // A key left out of the draft is not a change.
+    expect(changeOf(read, { subagents: false })).toEqual({});
   });
 
-  it('writes the grants into their keys and keeps every other key', () => {
-    const p = policy();
-    const g = { ...grantsOf(p), network: 'list' as const, hosts: ['github.com'], sandbox: 'on' as const,
-      agentsApply: false };
-    const out = withGrants(p, g);
-    expect(out.network).toEqual({ contain: 'on', allow: ['github.com'] });
-    expect(out.sandbox).toEqual({ mode: 'on' });
-    expect(out.home_files).toEqual([]);
-    expect(out.agent_api).toEqual({ scope: 'tree', apply: false, read: true });
-    expect(out.forbid).toEqual(['git push']);
-    expect(grantsOf(out)).toEqual(g);
-    // Off empties the list; on keeps it.
-    expect(withGrants(out, { ...g, network: 'off' }).network).toEqual({ contain: 'on', allow: [] });
-    expect(withGrants(out, { ...g, network: 'on' }).network).toEqual({ contain: 'off', allow: ['github.com'] });
+  it('reads and writes dotted keys', () => {
+    expect(flatPolicy({ limits: { max_depth: 2 }, allow: [] })).toEqual({ 'limits.max_depth': 2, allow: [] });
+    expect(nestPolicy({ 'limits.max_depth': 2, 'limits.max_jobs_per_turn': 1, allow: ['x'] })).toEqual({
+      limits: { max_depth: 2, max_jobs_per_turn: 1 }, allow: ['x'],
+    });
   });
 
-  it('writes home files into home_files, outside the sandbox, and keeps every other key', () => {
-    const out = withHomeFiles(policy(), ['~/.aws/config']);
-    expect(out.home_files).toEqual(['~/.aws/config']);
-    expect(out.sandbox).toEqual({ mode: 'off' });
-    expect(out.forbid).toEqual(['git push']);
-    expect(homeFilesOf(out)).toEqual(['~/.aws/config']);
-    expect(homeFilesOf({})).toEqual([]);
-  });
-
-  it('reads one entry per line', () => {
+  it('reads one entry per line, and the home files as a list', () => {
     expect(lines(' ~/.aws/config \n\n~/.config/gcloud\n')).toEqual(['~/.aws/config', '~/.config/gcloud']);
+    expect(homeFilesOf({ home_files: ['~/.aws/config'] })).toEqual(['~/.aws/config']);
+    expect(homeFilesOf({})).toEqual([]);
   });
 });
 
 describe('the settings routes', () => {
-  it('reads the ETag and sends it back in If-Match', async () => {
+  it('reads the ETag, sends it back in If-Match, and changes keys with PATCH', async () => {
     const seen: { method: string; ifMatch: string | null; body: unknown }[] = [];
     vi.stubGlobal('fetch', vi.fn(async (input: string, init?: RequestInit) => {
       const h = new Headers(init?.headers);
       expect(h.get('Authorization')).toBe('Bearer tok');
       seen.push({ method: init?.method ?? 'GET', ifMatch: h.get('If-Match'), body: init?.body ? JSON.parse(init.body as string) : undefined });
-      if (input.endsWith('/api/v0/settings/permissions') && init?.method === 'PUT' && h.get('If-Match') !== '"v1"') {
+      if (input.endsWith('/api/v0/settings/permissions') && init?.method === 'PATCH' && h.get('If-Match') !== '"v1"') {
         return new Response(JSON.stringify({ error: 'the setting changed' }), { status: 412 });
       }
       return new Response(JSON.stringify(input.endsWith('instructions') ? { text: 'hi' } : policy()), {
@@ -136,9 +129,9 @@ describe('the settings routes', () => {
     const src = new LiveDataSource({ baseUrl: 'http://127.0.0.1:8787', token: 'tok' });
     const got = await src.getPolicy();
     expect(got.etag).toBe('"v1"');
-    await src.putPolicy(got.value, got.etag);
-    expect(seen[1]).toMatchObject({ method: 'PUT', ifMatch: '"v1"', body: { subagents: true } });
-    await expect(src.putPolicy(got.value, '"v0"')).rejects.toMatchObject({ status: 412 });
+    await src.patchPolicy({ subagents: true }, got.etag);
+    expect(seen[1]).toEqual({ method: 'PATCH', ifMatch: '"v1"', body: { subagents: true } });
+    await expect(src.patchPolicy({ subagents: true }, '"v0"')).rejects.toMatchObject({ status: 412 });
     expect((await src.getInstructions()).value).toBe('hi');
     // No ETag is an error, never a write that overwrites whatever is there.
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(policy()), { status: 200 })));
@@ -172,6 +165,9 @@ describe('the Settings page', () => {
     expect(steps.map((s) => s.getAttribute('data-harness'))).toEqual(['claude', 'codex']);
     expect(steps.map((s) => s.getAttribute('data-phase'))).toEqual(['connected', 'not-connected']);
     expect(container.textContent).toContain('Every turn uses the subscription connected here');
+    // Advanced stays last.
+    const parts = [...container.querySelectorAll('.pg-list [data-part]')].map((x) => x.getAttribute('data-part'));
+    expect(parts.slice(-2)).toEqual(['subscriptions', 'advanced']);
 
     const { container: none } = await render(<SettingsPage api={api} onBack={() => {}} />);
     await flush();
@@ -186,7 +182,6 @@ describe('the Settings page', () => {
     expect(text).toContain(`Last changed ${new Date('2026-11-12T09:00:00Z').toLocaleString()}.`);
     expect(text).not.toMatch(/[Vv]ersion/);
     expect(text).not.toContain('Defaults');
-    expect(container.querySelector('[aria-label="Defaults"]')).toBeNull();
   });
 
   it('says nothing of changes when the settings never changed', async () => {
@@ -194,46 +189,113 @@ describe('the Settings page', () => {
     const { container } = await render(<SettingsPage api={api} onBack={() => {}} />);
     await flush();
     expect(container.textContent).not.toContain('Last changed');
-    expect(container.textContent).toContain('Grants');
+    expect(container.textContent).toContain('Agents');
   });
 
-  it('saves the grants into the policy with the version it read', async () => {
+  it('has a plain control for every setting, in groups, and no Grants', async () => {
+    const { api } = fakeApi();
+    const { container } = await render(<SettingsPage api={api} onBack={() => {}} />);
+    await flush();
+    const parts = [...container.querySelectorAll('.pg-list [data-part]')].map((x) => x.getAttribute('data-part'));
+    expect(parts).toEqual(['agents', 'files', 'home', 'commands', 'network', 'sandbox', 'limits', 'instructions', 'advanced']);
+    expect(container.querySelector('[data-part="grants"]')).toBeNull();
+    expect(container.textContent).not.toContain('Grants');
+    // Every key of the policy has a control, and each control a key.
+    expect([...SETTINGS_CONTROLS].sort()).toEqual(Object.keys(flatPolicy(policy())).sort());
+    const groups: Record<string, string[]> = {
+      agents: ['agent_api.tools', 'subagents', 'agent_api.apply'],
+      files: ['edit', 'read_folders', 'isolation', 'share_read_only'],
+      home: ['home_files'],
+      commands: ['allow', 'forbid'],
+      network: ['network.contain', 'network.allow'],
+      sandbox: ['sandbox.mode'],
+      limits: ['limits.max_depth', 'limits.max_jobs_per_turn', 'limits.max_jobs_per_tree', 'limits.max_cost_usd_per_tree'],
+    };
+    for (const [g, keys] of Object.entries(groups)) {
+      await pick(container, `[data-part="${g}"]`);
+      const shown = [...container.querySelectorAll('.pg-main .pg-ctl')];
+      expect(shown.map((x) => x.getAttribute('data-key'))).toEqual(keys);
+      // Each has a name and one plain line.
+      for (const x of shown) {
+        expect(x.querySelector('.pg-ctl-n')!.textContent).not.toBe('');
+        expect(x.querySelector('.pg-note')!.textContent).toMatch(/\.$/);
+      }
+    }
+    // The values read are the controls' values.
+    await pick(container, '[data-part="agents"]');
+    expect(sw(container, 'agent_api.tools').getAttribute('aria-checked')).toBe('true');
+    expect(sw(container, 'subagents').getAttribute('aria-checked')).toBe('false');
+    expect(container.textContent).toContain('agy cannot turn its own subagents off, so this does not apply to agy.');
+    await pick(container, '[data-part="files"]');
+    expect(container.textContent).toContain('Not copied, read-only, such as node_modules.');
+    expect(container.querySelector('[aria-label="Isolation"] [aria-checked="true"]')!.textContent).toBe('Auto');
+    await pick(container, '[data-part="commands"]');
+    expect((container.querySelector('textarea[name="forbid"]') as HTMLTextAreaElement).value).toBe('git push');
+    await pick(container, '[data-part="limits"]');
+    expect((container.querySelector('input[name="limits.max_depth"]') as HTMLInputElement).value).toBe('2');
+  });
+
+  // The rule for every control: a save writes only the keys the person
+  // changed, never a full copy with the defaults filled in, which would keep
+  // every default at today's value after a later build changes it.
+  it('saves only the keys the person changed, never a full copy', async () => {
     const { api, state } = fakeApi();
     const { container } = await render(<SettingsPage api={api} onBack={() => {}} />);
     await flush();
-    // The first grant's editor is open; each other grant opens on a click.
-    // Home files are not a grant: they are a part of their own.
-    expect(container.querySelector('[data-grant="read"]')).toBeNull();
-    expect(container.querySelector('textarea[name="home_files"]')).toBeNull();
-    await click(container.querySelector('button[name="sandbox"]'));
-    await pick(container, '[data-grant="network"]');
-    await click(container.querySelector('[aria-label="Network"] [role="radio"]:nth-child(2)'));
-    await setValue(container.querySelector('textarea[name="hosts"]'), 'github.com\nregistry.npmjs.org');
-    await pick(container, '[data-grant="apply"]');
-    await click(container.querySelector('button[name="agents_apply"]'));
-    // There is no "!" commands grant: a "!" message goes to the agent.
-    expect(container.querySelector('[data-grant="commands"]')).toBeNull();
-    // The table shows the drafts before they are saved.
-    const row = (k: string) => container.querySelector(`[data-grant="${k}"]`)!.textContent;
-    expect(row('sandbox')).toContain('On');
-    expect(row('network')).toContain('A list · 2 hosts');
-    expect(row('apply')).toContain('Off');
-    await click(button(container, 'Save grants'));
+    await click(sw(container, 'subagents'));
+    await click(button(container, 'Save agents'));
     await flush();
-    expect(api.putPolicy).toHaveBeenCalledTimes(1);
-    expect(api.putPolicy.mock.calls[0][1]).toBe('"3"');
-    expect(state.policy).toMatchObject({
-      forbid: ['git push'],
-      agent_api: { apply: false, scope: 'tree' },
-      network: { contain: 'on', allow: ['github.com', 'registry.npmjs.org'] },
-      sandbox: { mode: 'on' },
-      home_files: [],
-    });
+    expect(api.patchPolicy).toHaveBeenCalledTimes(1);
+    expect(api.patchPolicy.mock.calls[0]).toEqual([{ subagents: true }, '"3"']);
+    expect(state.policy.subagents).toBe(true);
     expect(container.textContent).toContain('Saved.');
-    // The page read the policy again: the JSON shows what is stored now.
-    await pick(container, '[data-part="policy"]');
-    const json = (container.querySelector('textarea[name="policy"]') as HTMLTextAreaElement).value;
-    expect(JSON.parse(json).agent_api.apply).toBe(false);
+
+    await pick(container, '[data-part="limits"]');
+    await setValue(container.querySelector('input[name="limits.max_cost_usd_per_tree"]'), '2.5');
+    await click(button(container, 'Save limits'));
+    await flush();
+    expect(api.patchPolicy.mock.calls[1]).toEqual([{ limits: { max_cost_usd_per_tree: 2.5 } }, '"4"']);
+
+    await pick(container, '[data-part="network"]');
+    await click(sw(container, 'network.contain'));
+    await setValue(container.querySelector('textarea[name="network.allow"]'), 'github.com\n\nregistry.npmjs.org');
+    await click(button(container, 'Save network'));
+    await flush();
+    expect(api.patchPolicy.mock.calls[2][0]).toEqual({ network: { contain: 'on', allow: ['github.com', 'registry.npmjs.org'] } });
+
+    // Advanced too: the JSON is whole, the save is only what changed in it.
+    await pick(container, '[data-part="advanced"]');
+    const area = container.querySelector('textarea[name="policy"]') as HTMLTextAreaElement;
+    const edited = JSON.parse(area.value);
+    edited.forbid = ['rm'];
+    edited.isolation = 'git';
+    await setValue(area, JSON.stringify(edited));
+    await click(button(container, 'Save policy'));
+    await flush();
+    expect(api.patchPolicy.mock.calls[3][0]).toEqual({ forbid: ['rm'], isolation: 'git' });
+    // Never once a full copy: no call held a key the person did not change.
+    for (const [change] of api.patchPolicy.mock.calls) {
+      expect(Object.keys(flatPolicy(change)).length).toBeLessThanOrEqual(2);
+      expect(change).not.toHaveProperty('agent_api');
+      expect(change).not.toHaveProperty('home_files');
+    }
+  });
+
+  it('refuses a number that is not one, and names why', async () => {
+    const { api } = fakeApi();
+    const { container } = await render(<SettingsPage api={api} onBack={() => {}} />);
+    await flush();
+    await pick(container, '[data-part="limits"]');
+    await setValue(container.querySelector('input[name="limits.max_depth"]'), '1.5');
+    expect(container.querySelector('[data-key="limits.max_depth"] .form-error')!.textContent).toBe('A whole number, 0 or more.');
+    expect(button(container, 'Save limits')!.disabled).toBe(true);
+    await setValue(container.querySelector('input[name="limits.max_depth"]'), '-1');
+    expect(button(container, 'Save limits')!.disabled).toBe(true);
+    await setValue(container.querySelector('input[name="limits.max_depth"]'), '4');
+    expect(container.querySelector('[data-key="limits.max_depth"] .form-error')).toBeNull();
+    await click(button(container, 'Save limits'));
+    await flush();
+    expect(api.patchPolicy.mock.calls[0][0]).toEqual({ limits: { max_depth: 4 } });
   });
 
   it('shows Home files as a part of its own, with its one line, and saves them into home_files', async () => {
@@ -246,10 +308,8 @@ describe('the Settings page', () => {
     expect(container.querySelector('[data-part="home"]')!.textContent).toContain('Unsaved');
     await click(button(container, 'Save home files'));
     await flush();
-    expect(api.putPolicy).toHaveBeenCalledTimes(1);
-    expect(api.putPolicy.mock.calls[0][1]).toBe('"3"');
+    expect(api.patchPolicy.mock.calls[0]).toEqual([{ home_files: ['~/.aws/config', '~/.gitconfig'] }, '"3"']);
     expect(state.policy).toMatchObject({ forbid: ['git push'], sandbox: { mode: 'off' }, home_files: ['~/.aws/config', '~/.gitconfig'] });
-    expect(state.policy.sandbox).not.toHaveProperty('read');
     expect(container.textContent).toContain('Saved.');
     expect(container.querySelector('[data-part="home"]')!.textContent).not.toContain('Unsaved');
   });
@@ -259,32 +319,33 @@ describe('the Settings page', () => {
     const { container } = await render(<SettingsPage api={api} onBack={() => {}} />);
     await flush();
     state.info.version = 9; // changed elsewhere
-    await pick(container, '[data-grant="apply"]');
-    await click(container.querySelector('button[name="agents_apply"]'));
-    await click(button(container, 'Save grants'));
+    await click(sw(container, 'agent_api.apply'));
+    await click(button(container, 'Save agents'));
     await flush();
     expect(container.textContent).toContain('Changed elsewhere since this page read it.');
-    expect(state.policy.agent_api?.apply).toBe(true);
+    expect(state.policy.agent_api?.apply).toBe(false);
     await click(button(container, 'Read again'));
     await flush();
-    expect(container.querySelector('button[name="agents_apply"]')!.getAttribute('aria-checked')).toBe('true');
+    expect(sw(container, 'agent_api.apply').getAttribute('aria-checked')).toBe('false');
   });
 
-  it('saves the policy as JSON, and refuses JSON that does not parse', async () => {
-    const { api, state } = fakeApi();
+  it('refuses JSON that does not parse, and saves nothing when nothing changed', async () => {
+    const { api } = fakeApi();
     const { container } = await render(<SettingsPage api={api} onBack={() => {}} />);
     await flush();
-    await pick(container, '[data-part="policy"]');
+    await pick(container, '[data-part="advanced"]');
     const area = container.querySelector('textarea[name="policy"]');
     await setValue(area, '{ not json');
     await click(button(container, 'Save policy'));
     await flush();
     expect(container.textContent).toContain('The policy is not valid JSON.');
-    expect(api.putPolicy).not.toHaveBeenCalled();
-    await setValue(area, JSON.stringify({ ...policy(), forbid: ['rm'] }));
+    // The same policy with a key left out: nothing to send.
+    const { forbid: _, ...rest } = policy();
+    await setValue(area, JSON.stringify(rest));
     await click(button(container, 'Save policy'));
     await flush();
-    expect(state.policy.forbid).toEqual(['rm']);
+    expect(container.textContent).toContain('Nothing changed. A key left out keeps its value.');
+    expect(api.patchPolicy).not.toHaveBeenCalled();
   });
 
   it('keeps an unsaved draft of another part when one part saves', async () => {
@@ -293,15 +354,19 @@ describe('the Settings page', () => {
     await flush();
     await pick(container, '[data-part="instructions"]');
     await setValue(container.querySelector('textarea[name="instructions"]'), 'Draft, not saved.');
-    await pick(container, '[data-part="grants"]');
-    await pick(container, '[data-grant="apply"]');
-    await click(container.querySelector('button[name="agents_apply"]'));
-    await click(button(container, 'Save grants'));
+    await pick(container, '[data-part="commands"]');
+    await setValue(container.querySelector('textarea[name="allow"]'), 'go test');
+    await pick(container, '[data-part="agents"]');
+    await click(sw(container, 'agent_api.apply'));
+    await click(button(container, 'Save agents'));
     await flush();
-    expect(state.policy.agent_api?.apply).toBe(false);
+    expect(state.policy.agent_api?.apply).toBe(true);
     await pick(container, '[data-part="instructions"]');
     expect((container.querySelector('textarea[name="instructions"]') as HTMLTextAreaElement).value).toBe('Draft, not saved.');
     expect(api.getInstructions).toHaveBeenCalledTimes(1);
+    await pick(container, '[data-part="commands"]');
+    expect((container.querySelector('textarea[name="allow"]') as HTMLTextAreaElement).value).toBe('go test');
+    expect(state.policy.allow).toEqual([]);
     // The page read the state again: it shows when the settings changed.
     expect(container.textContent).toContain('Last changed');
   });
@@ -312,17 +377,16 @@ describe('the Settings page', () => {
     await flush();
     const dirty = () => [...container.querySelectorAll('.pg-list [data-part]')].filter((x) => x.querySelector('.pr-dirty')).map((x) => x.getAttribute('data-part'));
     expect(dirty()).toEqual([]);
-    expect(button(container, 'Save grants')!.disabled).toBe(true);
+    expect(button(container, 'Save agents')!.disabled).toBe(true);
     expect(container.querySelector('.pg-dirty')).toBeNull();
-    await pick(container, '[data-grant="apply"]');
-    await click(container.querySelector('button[name="agents_apply"]'));
-    expect(dirty()).toEqual(['grants']);
+    await click(sw(container, 'agent_api.apply'));
+    expect(dirty()).toEqual(['agents']);
     expect(container.querySelector('.pg-main .pg-dirty')!.textContent).toBe('Unsaved changes');
-    expect(button(container, 'Save grants')!.disabled).toBe(false);
+    expect(button(container, 'Save agents')!.disabled).toBe(false);
     // Put back as it was: nothing to save again.
-    await click(container.querySelector('button[name="agents_apply"]'));
+    await click(sw(container, 'agent_api.apply'));
     expect(dirty()).toEqual([]);
-    expect(button(container, 'Save grants')!.disabled).toBe(true);
+    expect(button(container, 'Save agents')!.disabled).toBe(true);
     await pick(container, '[data-part="instructions"]');
     expect(button(container, 'Save instructions')!.disabled).toBe(true);
     await setValue(container.querySelector('textarea[name="instructions"]'), 'New words.');
@@ -349,14 +413,13 @@ describe('the Settings page', () => {
       act(async () => {
         container.querySelector('.page-back')!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 }));
       });
-    await pick(container, '[data-grant="apply"]');
-    await click(container.querySelector('button[name="agents_apply"]'));
+    await click(sw(container, 'agent_api.apply'));
     // A reload or a closed tab asks through the browser.
     const unload = new Event('beforeunload', { cancelable: true });
     window.dispatchEvent(unload);
     expect(unload.defaultPrevented).toBe(true);
     await back();
-    expect(ask()!.textContent).toContain('Your changes to Grants are not saved.');
+    expect(ask()!.textContent).toContain('Your changes to Agents are not saved.');
     await click([...ask()!.querySelectorAll('button')].find((x) => x.textContent === 'Stay')!);
     expect(ask()).toBeNull();
     // Escape is Stay too.
@@ -393,8 +456,7 @@ describe('the Settings page', () => {
     };
     const { container } = await render(<Pages />);
     await flush();
-    await pick(container, '[data-grant="apply"]');
-    await click(container.querySelector('button[name="agents_apply"]'));
+    await click(sw(container, 'agent_api.apply'));
     // The read after the write waits until released.
     let release!: () => void;
     const held = new Promise<void>((r) => (release = r));
@@ -402,7 +464,7 @@ describe('the Settings page', () => {
       await held;
       return { value: structuredClone(state.policy), etag: `"${state.info.version}"` };
     });
-    await click(button(container, 'Save grants'));
+    await click(button(container, 'Save agents'));
     await act(async () => {
       container.querySelector('.page-back')!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 }));
     });
@@ -434,17 +496,11 @@ describe('the Settings page', () => {
     const { api } = fakeApi();
     const { container } = await render(<SettingsPage api={api} onBack={() => {}} />);
     await flush();
-    const parts = [...container.querySelectorAll('.pg-list [data-part]')].map((x) => x.getAttribute('data-part'));
-    expect(parts).toEqual(['grants', 'home', 'policy', 'instructions']);
-    expect(container.querySelector('.pg-list .on')!.getAttribute('data-part')).toBe('grants');
-    expect(container.querySelector('.pg-main .colhead')!.textContent).toContain('Grants');
-    expect(container.querySelectorAll('.pg-main tr[data-grant]')).toHaveLength(3);
-    expect(container.querySelector('.pg-side .colhead')!.textContent).toBe('Sandbox');
-    await pick(container, '[data-grant="network"]');
-    expect(container.querySelector('.pg-side .colhead')!.textContent).toBe('Network');
-    expect(container.querySelector('tr[data-grant="network"]')!.getAttribute('aria-selected')).toBe('true');
+    expect(container.querySelector('.pg-list .on')!.getAttribute('data-part')).toBe('agents');
+    expect(container.querySelector('.pg-main .colhead')!.textContent).toContain('Agents');
+    expect(container.querySelector('.pg-side .colhead')!.textContent).toBe('How it applies');
     // The policy as saved, nested keys by their dotted path.
-    await pick(container, '[data-part="policy"]');
+    await pick(container, '[data-part="advanced"]');
     const saved = container.querySelector('[aria-label="Saved policy"]')!.textContent!;
     expect(saved).toContain('limits.max_depth2');
     expect(saved).toContain('forbidgit push');
@@ -524,7 +580,7 @@ describe('the Settings page in the app', () => {
     await flush();
     await flush();
     expect(r.container.querySelector('#page[aria-label="Settings"]')).not.toBeNull();
-    expect(r.container.textContent).toContain('Grants');
+    expect(r.container.textContent).toContain('Agents');
   });
 
   it('shows the cockpit at /settings when the source keeps no settings', async () => {
@@ -585,12 +641,12 @@ describe('the sandbox switch offers only what the machines can build', () => {
 
   const openSandbox = async (sandbox: ReturnType<typeof sandboxOffer>, mode = 'off') => {
     const f = fakeApi();
-    f.state.policy.sandbox = { mode, read: [] };
+    f.state.policy.sandbox = { mode };
     const r = await render(<SettingsPage api={f.api} onBack={() => {}} sandbox={sandbox} />);
     await flush();
     await flush();
-    await pick(r.container, 'tr[data-grant="sandbox"]');
-    return { r, f, sw: () => r.container.querySelector('button[name="sandbox"]') as HTMLButtonElement };
+    await pick(r.container, '[data-part="sandbox"]');
+    return { r, f, sw: () => r.container.querySelector('button[name="sandbox.mode"]') as HTMLButtonElement };
   };
 
   it('is disabled, with the reason, when no online machine can build it', async () => {
@@ -634,8 +690,8 @@ describe('the sandbox switch offers only what the machines can build', () => {
       const r = await render(<App dataSource={src} />);
       await flush();
       await flush();
-      await pick(r.container, 'tr[data-grant="sandbox"]');
-      expect((r.container.querySelector('button[name="sandbox"]') as HTMLButtonElement).disabled).toBe(true);
+      await pick(r.container, '[data-part="sandbox"]');
+      expect((r.container.querySelector('button[name="sandbox.mode"]') as HTMLButtonElement).disabled).toBe(true);
       expect(r.container.querySelector('[data-sandbox-why]')?.textContent).toContain('up: the session has no home of its own on this runner');
     } finally {
       window.history.replaceState(null, '', '/');

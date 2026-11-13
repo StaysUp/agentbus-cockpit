@@ -1,16 +1,15 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
-  Grants,
-  grantsOf,
-  homeFilesOf,
+  changeOf,
+  flatPolicy,
+  isEmpty,
   lines,
+  nestPolicy,
   Policy,
   SandboxOffer,
   SettingsApi,
   SettingsInfo,
   Versioned,
-  withGrants,
-  withHomeFiles,
 } from "../data/settings";
 import { ColHead, PageFrame } from "./PageFrame";
 import { Button, Seg, Switch } from "./Controls";
@@ -20,11 +19,13 @@ import { OpenRouterKey } from "./OpenRouterKey";
 import { SubscriptionList } from "../types";
 
 // The Settings page (/settings): control's settings, one global set for every machine.
-// The grants (the sandbox, the network, and one action), the files from
-// the person's home each conversation gets, the whole policy as JSON, and the instructions every turn gets,
-// with when the settings last changed. Each part saves on its
-// own, with the version it read; a change made elsewhere in between is
-// refused, and the page reads everything again.
+// Every setting of the policy is a plain control, in groups (Agents, Files, Home files, Commands, Network, Sandbox,
+// Limits); then the instructions every turn gets, the subscriptions, and the whole policy as JSON (Advanced). Each
+// part saves on its own, with the version it read; a change made elsewhere in between is refused, and the page
+// reads everything again.
+//
+// A save sends only the keys the person changed (PATCH), never a full copy with the defaults filled in: a copy
+// would keep every default at today's value after a later build changes it.
 
 interface SettingsPageProps {
   api: SettingsApi;
@@ -35,7 +36,7 @@ interface SettingsPageProps {
   // The subscriptions control keeps, which every turn uses. Absent: a
   // service that keeps none, and no Subscriptions part.
   subscriptions?: SubscriptionApi;
-  // Open on Subscriptions rather than Grants: an agent's sign-in dot
+  // Open on Subscriptions rather than the first part: an agent's sign-in dot
   // brings the person here to connect.
   atSubscriptions?: boolean;
 }
@@ -46,32 +47,200 @@ interface Loaded {
   instructions: Versioned<string>;
 }
 
+// How a control edits its key. A list is one entry per line; a number is
+// typed as text and checked.
+type Kind =
+  | { t: "switch" }
+  | { t: "onoff" } // a string key that is "on" or "off", as a switch
+  | { t: "seg"; options: [string, string][] }
+  | { t: "list"; placeholder: string; mono?: boolean }
+  | { t: "number"; whole: boolean };
+
+interface Control {
+  key: string; // the policy key, dotted
+  name: string;
+  line: string; // one short plain line: what it does
+  kind: Kind;
+  more?: string; // a second line, only where it must be said
+}
+
+type GroupId = "agents" | "files" | "home" | "commands" | "network" | "sandbox" | "limits";
+type Part = GroupId | "instructions" | "subscriptions" | "advanced";
+
+interface Group {
+  id: GroupId;
+  name: string;
+  sub: string;
+  controls: Control[];
+  side: string[];
+}
+
+const GROUPS: Group[] = [
+  {
+    id: "agents",
+    name: "Agents",
+    sub: "What agents may do through AgentBus",
+    controls: [
+      { key: "agent_api.tools", name: "AgentBus tools", kind: { t: "switch" },
+        line: "Agents get AgentBus's own tools to ask other agents, review and read turns." },
+      { key: "subagents", name: "Subagents", kind: { t: "switch" },
+        line: "Agents may start their own hidden subagents. Off, they ask through AgentBus, where the work is recorded.",
+        more: "agy cannot turn its own subagents off, so this does not apply to agy." },
+      { key: "agent_api.apply", name: "Agents may apply", kind: { t: "switch" },
+        line: "An agent may apply a turn's changes to your folder. You always may." },
+    ],
+    side: [
+      "Agents may always read, list agents, start, review, stop and rename work within the request they belong to.",
+      "The limits cap how much they ask for.",
+    ],
+  },
+  {
+    id: "files",
+    name: "Files",
+    sub: "Where turns read, edit and run",
+    controls: [
+      { key: "edit", name: "Edit", kind: { t: "seg", options: [["session", "Its own folder"], ["none", "Nowhere"]] },
+        line: "Where a turn may change files without asking." },
+      { key: "read_folders", name: "Read folders", kind: { t: "list", placeholder: "~/notes", mono: true },
+        line: "Folders claude may read beyond its own, one per line." },
+      { key: "isolation", name: "Isolation",
+        kind: { t: "seg", options: [["auto", "Auto"], ["overlay", "Overlay"], ["copy", "Copy"], ["git", "Git worktree"], ["none", "Your folder"]] },
+        line: "Where a new session's turns run. Auto makes the fastest copy this machine can." },
+      { key: "share_read_only", name: "Shared folders", kind: { t: "list", placeholder: "node_modules", mono: true },
+        line: "Not copied, read-only, such as node_modules. A turn cannot write there." },
+    ],
+    side: [
+      "Your folder is not changed until a turn is applied, unless isolation is Your folder.",
+      "Shared folders are one name each, at the top of the session's folder.",
+    ],
+  },
+  {
+    id: "home",
+    name: "Home files",
+    sub: "Files each conversation gets",
+    controls: [
+      { key: "home_files", name: "Home files", kind: { t: "list", placeholder: "~/.aws/config", mono: true },
+        line: "Files from your home copied into each conversation's own home, such as ~/.aws/config." },
+    ],
+    side: ["Copied at the start of each turn, with the sandbox on or off.", "A file the conversation already has is never replaced."],
+  },
+  {
+    id: "commands",
+    name: "Commands",
+    sub: "What agents may run",
+    controls: [
+      { key: "allow", name: "Allow", kind: { t: "list", placeholder: "go test", mono: true },
+        line: "Commands claude may run without asking, one per line." },
+      { key: "forbid", name: "Forbid", kind: { t: "list", placeholder: "git push", mono: true },
+        line: "Commands claude and codex may never run, one per line." },
+    ],
+    side: ["Forbid reads the command text. It is not a sandbox: a command built at run time is not seen."],
+  },
+  {
+    id: "network",
+    name: "Network",
+    sub: "What agents may reach",
+    controls: [
+      { key: "network.contain", name: "Contain", kind: { t: "onoff" },
+        line: "Agents reach only their runner, control and the hosts below." },
+      { key: "network.allow", name: "Allow hosts", kind: { t: "list", placeholder: "github.com", mono: true },
+        line: "Hosts a contained agent may reach, one per line. *.example.com takes every name under it." },
+    ],
+    side: ["Linux only. On a Mac, contain refuses every turn unless the sandbox is on."],
+  },
+  {
+    id: "sandbox",
+    name: "Sandbox",
+    sub: "A wall around each session",
+    controls: [
+      { key: "sandbox.mode", name: "Run each session in a sandbox", kind: { t: "onoff" },
+        line: "Each session reads and writes only its own folder and its own home." },
+    ],
+    side: ["A machine that cannot build it refuses the turn."],
+  },
+  {
+    id: "limits",
+    name: "Limits",
+    sub: "How much agents may ask for",
+    controls: [
+      { key: "limits.max_depth", name: "Max depth", kind: { t: "number", whole: true },
+        line: "Levels of asking below your own turn." },
+      { key: "limits.max_jobs_per_turn", name: "Jobs per turn", kind: { t: "number", whole: true },
+        line: "Turns and reviews one turn may ask for." },
+      { key: "limits.max_jobs_per_tree", name: "Jobs per tree", kind: { t: "number", whole: true },
+        line: "Turns and reviews all the work from one of your turns may ask for." },
+      { key: "limits.max_cost_usd_per_tree", name: "Cost per tree (USD)", kind: { t: "number", whole: false },
+        line: "What all the work from one of your turns may cost before asking stops. 0 is off." },
+    ],
+    side: ["A request tree is your turn and all the work asked for from it, at any depth.", "A limit reached refuses the request and says which."],
+  },
+];
+
+const CONTROLS = GROUPS.flatMap((g) => g.controls);
+
+// A control's draft: text for a list or a number, a boolean for a switch,
+// the value for a choice.
+type Draft = Record<string, string | boolean>;
+
+function draftOf(c: Control, v: unknown): string | boolean {
+  switch (c.kind.t) {
+    case "switch":
+      return v === true;
+    case "onoff":
+      return v === "on";
+    case "list":
+      return Array.isArray(v) ? v.join("\n") : "";
+    case "number":
+      return typeof v === "number" ? String(v) : "";
+    case "seg":
+      return typeof v === "string" ? v : "";
+  }
+}
+
+// valueOf is a draft as the policy value it writes, or an error in words.
+function valueOf(c: Control, d: string | boolean): { v: unknown } | { error: string } {
+  switch (c.kind.t) {
+    case "switch":
+      return { v: d === true };
+    case "onoff":
+      return { v: d === true ? "on" : "off" };
+    case "list":
+      return { v: lines(String(d)) };
+    case "seg":
+      return { v: d };
+    case "number": {
+      const t = String(d).trim();
+      const n = Number(t);
+      if (t === "" || !Number.isFinite(n) || n < 0 || (c.kind.whole && !Number.isInteger(n))) {
+        return { error: c.kind.whole ? "A whole number, 0 or more." : "A number, 0 or more." };
+      }
+      return { v: n };
+    }
+  }
+}
+
 const json = (p: Policy) => JSON.stringify(p, null, 2);
+const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
 export const SettingsPage: React.FC<SettingsPageProps> = ({ api, onBack, sandbox, subscriptions, atSubscriptions }) => {
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   // The drafts, reset from what was read.
-  const [grants, setGrants] = useState<Grants | null>(null);
-  const [homeText, setHomeText] = useState("");
-  const [hostsText, setHostsText] = useState("");
+  const [draft, setDraft] = useState<Draft>({});
   const [policyText, setPolicyText] = useState("");
   const [instructions, setInstructions] = useState("");
   // Which part is saving, and what the last save said.
   const [busy, setBusy] = useState<string | null>(null);
   const [message, setMessage] = useState<{ part: string; text: string; ok: boolean } | null>(null);
-  // The part on screen, and the grant picked in it.
-  const [part, setPart] = useState<Part>(atSubscriptions && subscriptions ? "subscriptions" : "grants");
-  const [grant, setGrant] = useState<GrantKey>("sandbox");
+  // The part on screen.
+  const [part, setPart] = useState<Part>(atSubscriptions && subscriptions ? "subscriptions" : "agents");
 
-  // read reads the settings' state, and the parts named: each part read
-  // resets its own drafts, and leaves the other part's as they are.
   // Which parts hold changes not saved, as of the last render: a read
   // after one part's save leaves another part's unsaved draft as it is.
-  const dirtyRef = useRef<Record<Part, boolean>>({ grants: false, home: false, policy: false, instructions: false, subscriptions: false });
+  const dirtyRef = useRef<Partial<Record<Part, boolean>>>({});
   const read = useCallback(
     async (parts: { policy: boolean; instructions: boolean }, saved?: Part | "all") => {
-      const keep = (p: Part) => saved !== "all" && p !== saved && dirtyRef.current[p];
+      const keep = (p: Part) => saved !== "all" && p !== saved && !!dirtyRef.current[p];
       const [info, policy, ins] = await Promise.all([
         api.getSettings(),
         parts.policy ? api.getPolicy() : undefined,
@@ -83,13 +252,16 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ api, onBack, sandbox
         instructions: ins ?? cur!.instructions,
       }));
       if (policy) {
-        if (!keep("grants")) {
-          const g = grantsOf(policy.value);
-          setGrants(g);
-          setHostsText(g.hosts.join("\n"));
-        }
-        if (!keep("home")) setHomeText(homeFilesOf(policy.value).join("\n"));
-        if (!keep("policy")) setPolicyText(json(policy.value));
+        const flat = flatPolicy(policy.value);
+        setDraft((cur) => {
+          const next: Draft = { ...cur };
+          for (const g of GROUPS) {
+            if (keep(g.id)) continue;
+            for (const c of g.controls) next[c.key] = draftOf(c, flat[c.key]);
+          }
+          return next;
+        });
+        if (!keep("advanced")) setPolicyText(json(policy.value));
       }
       if (ins && !keep("instructions")) setInstructions(ins.value);
     },
@@ -112,11 +284,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ api, onBack, sandbox
 
   // save runs one part's write, then reads the settings' state and what the
   // write changed. A draft of a part it did not change stays.
-  const save = async (
-    part: Part,
-    write: () => Promise<unknown>,
-    changes: { policy: boolean; instructions: boolean },
-  ) => {
+  const save = async (part: Part, write: () => Promise<unknown>, changes: { policy: boolean; instructions: boolean }) => {
     if (busy) return;
     setBusy(part);
     setMessage(null);
@@ -127,9 +295,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ api, onBack, sandbox
     } catch (err) {
       const e = err as Error & { status?: number };
       const text =
-        e.status === 412
-          ? "Changed elsewhere since this page read it. Read again, then make your change."
-          : e.message;
+        e.status === 412 ? "Changed elsewhere since this page read it. Read again, then make your change." : e.message;
       setMessage({ part, text, ok: false });
     } finally {
       setBusy(null);
@@ -151,58 +317,76 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ api, onBack, sandbox
       </div>
     );
 
-  const saveGrants = () =>
-    loaded &&
-    grants &&
-    save("grants", () =>
-      api.putPolicy(
-        withGrants(loaded.policy.value, {
-          ...grants,
-          hosts: lines(hostsText),
-        }),
-        loaded.policy.etag,
-      ),
-      { policy: true, instructions: false },
-    );
+  const flatRead = loaded ? flatPolicy(loaded.policy.value) : {};
+  // groupChange is what a group's drafts change from what was read: only
+  // those keys. An entry that is not a value yet holds an error instead.
+  const groupChange = (g: Group): { change: Record<string, unknown>; errors: Record<string, string> } => {
+    const change: Record<string, unknown> = {};
+    const errors: Record<string, string> = {};
+    for (const c of g.controls) {
+      // Untouched is no change, whatever was read (a key an older control
+      // does not have reads as empty).
+      if (!(c.key in draft) || draft[c.key] === draftOf(c, flatRead[c.key])) continue;
+      const r = valueOf(c, draft[c.key]);
+      if ("error" in r) {
+        errors[c.key] = r.error;
+        continue;
+      }
+      if (!same(r.v, flatRead[c.key])) change[c.key] = r.v;
+    }
+    return { change, errors };
+  };
 
-  const saveHomeFiles = () =>
-    loaded &&
-    save("home", () => api.putPolicy(withHomeFiles(loaded.policy.value, lines(homeText)), loaded.policy.etag), {
-      policy: true,
-      instructions: false,
-    });
+  const saveGroup = (g: Group) => {
+    if (!loaded) return;
+    const { change, errors } = groupChange(g);
+    if (Object.keys(errors).length > 0 || Object.keys(change).length === 0) return;
+    save(g.id, () => api.patchPolicy(nestPolicy(change), loaded.policy.etag), { policy: true, instructions: false });
+  };
 
-  const savePolicy = () => {
+  const saveAdvanced = () => {
     if (!loaded) return;
     let p: Policy;
     try {
       p = JSON.parse(policyText);
     } catch {
-      setMessage({ part: "policy", text: "The policy is not valid JSON.", ok: false });
+      setMessage({ part: "advanced", text: "The policy is not valid JSON.", ok: false });
       return;
     }
-    save("policy", () => api.putPolicy(p, loaded.policy.etag), { policy: true, instructions: false });
+    if (!p || typeof p !== "object" || Array.isArray(p)) {
+      setMessage({ part: "advanced", text: "The policy must be one JSON object.", ok: false });
+      return;
+    }
+    const change = changeOf(loaded.policy.value, p);
+    if (isEmpty(change)) {
+      setMessage({ part: "advanced", text: "Nothing changed. A key left out keeps its value.", ok: true });
+      setPolicyText(json(loaded.policy.value));
+      return;
+    }
+    save("advanced", () => api.patchPolicy(change, loaded.policy.etag), { policy: true, instructions: false });
   };
 
   const info = loaded?.info.value;
-  const ready = !!(loaded && grants && info);
+  const ready = !!(loaded && info);
 
   // What each part holds that is not saved: its draft against what was read.
-  const grantsDraft = grants && { ...grants, hosts: lines(hostsText) };
-  const dirty: Record<Part, boolean> = {
-    grants:
-      !!loaded &&
-      !!grantsDraft &&
-      JSON.stringify(withGrants(loaded.policy.value, grantsDraft)) !==
-        JSON.stringify(withGrants(loaded.policy.value, grantsOf(loaded.policy.value))),
-    home: !!loaded && JSON.stringify(lines(homeText)) !== JSON.stringify(homeFilesOf(loaded.policy.value)),
-    policy: !!loaded && policyText !== json(loaded.policy.value),
-    instructions: !!loaded && instructions !== loaded.instructions.value,
-    // Each connect is done at once, so nothing waits to be saved.
-    subscriptions: false,
-  };
+  const dirty: Partial<Record<Part, boolean>> = {};
+  for (const g of GROUPS) {
+    const { change, errors } = groupChange(g);
+    dirty[g.id] = !!loaded && (Object.keys(change).length > 0 || Object.keys(errors).length > 0);
+  }
+  dirty.advanced = !!loaded && policyText !== json(loaded.policy.value);
+  dirty.instructions = !!loaded && instructions !== loaded.instructions.value;
+  // Each connect is done at once, so nothing waits to be saved.
+  dirty.subscriptions = false;
   dirtyRef.current = dirty;
-  const unsaved = PART_NAMES.filter(([k]) => dirty[k]).map(([, n]) => n);
+
+  // The left column: the parts, each saved on its own. Advanced is last.
+  const parts: [Part, string, string][] = GROUPS.map((g) => [g.id, g.name, g.sub]);
+  parts.push(["instructions", "Instructions", "What every turn is told"]);
+  if (subscriptions) parts.push(["subscriptions", "Subscriptions", "The sign-in every turn uses"]);
+  parts.push(["advanced", "Advanced", "The whole policy, as JSON"]);
+  const unsaved = parts.filter(([k]) => dirty[k]).map(([, n]) => n);
 
   // Leaving with changes not saved asks first: a move within the cockpit
   // through the page guard, a reload or a closed tab through the browser.
@@ -229,14 +413,6 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ api, onBack, sandbox
     };
   }, [anyDirty]);
 
-  // The left column: the three parts, each saved on its own.
-  const parts: [Part, string, string][] = [
-    ["grants", "Grants", "Sandbox, network and one action"],
-    ["home", "Home files", "Files each conversation gets"],
-    ["policy", "Policy", "All of it, as JSON"],
-    ["instructions", "Instructions", "What every turn is told"],
-  ];
-  if (subscriptions) parts.push(["subscriptions", "Subscriptions", "The sign-in every turn uses"]);
   const list = parts.map(([k, name, sub]) => (
     <button
       type="button"
@@ -248,18 +424,17 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ api, onBack, sandbox
     >
       <span className="pr-n">
         {name}
-        {k === "grants" && <span className="pl-n">{GRANTS.length}</span>}
         {dirty[k] && <span className="pr-dirty">Unsaved</span>}
       </span>
       <span className="pr-m2">{sub}</span>
     </button>
   ));
 
-  // Save is open only while the part on screen holds a change.
-  const saveBtn = (label: string, onClick: () => void) => (
+  // Save is open only while the part on screen holds a change it can save.
+  const saveBtn = (label: string, onClick: () => void, can = true) => (
     <span className="pg-save-at">
       {dirty[part] && <span className="pg-dirty">Unsaved changes</span>}
-      <Button kind="quiet" className="pg-save" disabled={!ready || !!busy || !dirty[part]} onClick={onClick}>
+      <Button kind="quiet" className="pg-save" disabled={!ready || !!busy || !dirty[part] || !can} onClick={onClick}>
         {busy === part ? "Saving…" : label}
       </Button>
     </span>
@@ -280,9 +455,116 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ api, onBack, sandbox
     </>
   );
 
+  const set = (key: string, v: string | boolean) => setDraft((cur) => ({ ...cur, [key]: v }));
+
+  // control is one setting: its name, the control, and its one plain line.
+  const control = (c: Control, error?: string) => {
+    const d = draft[c.key];
+    let input: React.ReactNode;
+    switch (c.kind.t) {
+      case "switch":
+      case "onoff": {
+        const isSandbox = c.key === "sandbox.mode";
+        // The sandbox is offered only when an online machine can build it.
+        // One that is on can always be turned off.
+        const off = isSandbox && !!sandbox && !sandbox.can && d !== true;
+        input = <Switch name={c.key} label={d === true ? "On" : "Off"} on={d === true} disabled={off} onChange={(v) => set(c.key, v)} />;
+        break;
+      }
+      case "seg":
+        input = (
+          <Seg
+            label={c.name}
+            value={String(d ?? "")}
+            options={c.kind.options.map(([value, label]) => ({ value, label }))}
+            onChange={(v) => set(c.key, v)}
+          />
+        );
+        break;
+      case "list":
+        input = (
+          <textarea
+            name={c.key}
+            rows={4}
+            className={c.kind.mono ? "pg-mono" : undefined}
+            value={String(d ?? "")}
+            onChange={(e) => set(c.key, e.target.value)}
+            placeholder={c.kind.placeholder}
+            spellCheck={false}
+            aria-label={c.name}
+          />
+        );
+        break;
+      case "number":
+        input = (
+          <input
+            type="text"
+            inputMode={c.kind.whole ? "numeric" : "decimal"}
+            name={c.key}
+            className="pg-num"
+            value={String(d ?? "")}
+            onChange={(e) => set(c.key, e.target.value)}
+            aria-label={c.name}
+          />
+        );
+        break;
+    }
+    return (
+      <div className="pg-ctl" key={c.key} data-key={c.key}>
+        <span className="pg-ctl-n">{c.name}</span>
+        <span className="pg-note">{c.line}</span>
+        {c.more && <span className="nd-note">{c.more}</span>}
+        {input}
+        {error && <span className="form-error">{error}</span>}
+        {c.key === "sandbox.mode" && sandbox && !sandbox.can && (
+          <p className="pg-why" data-sandbox-why>
+            {d === true ? "On, but no machine can build it now, so its turns are refused. " : "Not offered. "}
+            {sandbox.why}
+          </p>
+        )}
+        {c.key === "sandbox.mode" && sandbox?.can && sandbox.machines && (
+          <p className="nd-note">Online and able to build it: {sandbox.machines.join(", ")}.</p>
+        )}
+      </div>
+    );
+  };
+
   let main: React.ReactNode;
   let side: React.ReactNode;
-  if (part === "subscriptions" && subscriptions) {
+  const group = GROUPS.find((g) => g.id === part);
+  if (group) {
+    const { errors } = groupChange(group);
+    const can = Object.keys(errors).length === 0;
+    main = (
+      <>
+        {head(group.name, saveBtn(`Save ${group.name.toLowerCase()}`, () => saveGroup(group), can))}
+        <div className="colbody pg-body">
+          {status}
+          {ready && (
+            <>
+              {note(group.id)}
+              <fieldset className="pg-edit pg-ctls" disabled={!!busy}>
+                {group.controls.map((c) => control(c, errors[c.key]))}
+              </fieldset>
+            </>
+          )}
+        </div>
+      </>
+    );
+    side = (
+      <>
+        {head("How it applies")}
+        <div className="colbody pg-body">
+          {group.side.map((t, i) => (
+            <p className="pg-note" key={i}>
+              {t}
+            </p>
+          ))}
+          <p className="f-note first">The same on every machine. The next turn runs under what you save. Only what you change is saved.</p>
+        </div>
+      </>
+    );
+  } else if (part === "subscriptions" && subscriptions) {
     main = (
       <>
         {head("Subscriptions")}
@@ -307,196 +589,21 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ api, onBack, sandbox
         </div>
       </>
     );
-  } else if (part === "grants") {
-    const g = grants;
-    const sel = GRANTS.find((x) => x[0] === grant) ?? GRANTS[0];
-    main = (
-      <>
-        {head("Grants", saveBtn("Save grants", saveGrants))}
-        <div className="colbody pg-body">
-          {status}
-          {ready && g && (
-            <>
-              <div className="tab-sum">
-                <b>{GRANTS.length} grants</b>
-                <span className="sep">·</span>the same on every machine
-                <span className="sep">·</span>pick one to change it
-              </div>
-              {note("grants")}
-              <table className="grid pg-t" aria-label="Grants">
-                <thead>
-                  <tr>
-                    <th />
-                    <th>Grant</th>
-                    <th>Now</th>
-                    <th>Policy key</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {GRANTS.map(([k, name, key]) => (
-                    <tr
-                      key={k}
-                      data-grant={k}
-                      className={k === sel[0] ? "sel" : ""}
-                      aria-selected={k === sel[0]}
-                      onClick={() => setGrant(k)}
-                    >
-                      <td className="c">›</td>
-                      <td>{name}</td>
-                      <td className="nw">{grantValue(k, g, hostsText)}</td>
-                      <td className="nw">
-                        <code>{key}</code>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </>
-          )}
-        </div>
-      </>
-    );
-    side = (
-      <>
-        {head(sel[1])}
-        <div className="colbody pg-body">
-          {ready && g && (
-            <fieldset className="pg-edit" disabled={!!busy}>
-              {sel[0] === "sandbox" && (
-                <>
-                  <p className="pg-note">On, each session runs in a sandbox with its own home.</p>
-                  {/* Offered only when an online machine can build it. One
-                      that is on can always be turned off. */}
-                  <Switch
-                    name="sandbox"
-                    label="Run each session in a sandbox"
-                    on={g.sandbox === "on"}
-                    disabled={!!sandbox && !sandbox.can && g.sandbox !== "on"}
-                    onChange={(v) => setGrants({ ...g, sandbox: v ? "on" : "off" })}
-                  />
-                  {sandbox && !sandbox.can && (
-                    <p className="pg-why" data-sandbox-why>
-                      {g.sandbox === "on" ? "On, but no machine can build it now, so its turns are refused. " : "Not offered. "}
-                      {sandbox.why}
-                    </p>
-                  )}
-                  {sandbox?.can && sandbox.machines && (
-                    <p className="nd-note">Online and able to build it: {sandbox.machines.join(", ")}.</p>
-                  )}
-                </>
-              )}
-              {sel[0] === "network" && (
-                <>
-                  <div className="pg-field">
-                    <span className="pg-note">
-                      {g.network === "off" && "Agents reach only their runner and control."}
-                      {g.network === "list" && "Agents reach their runner, control and these hosts. An empty list is off."}
-                      {g.network === "on" && "Agents reach any host."}
-                    </span>
-                    <Seg
-                      label="Network"
-                      value={g.network}
-                      options={[
-                        { value: "off", label: "Off" },
-                        { value: "list", label: "A list" },
-                        { value: "on", label: "On" },
-                      ]}
-                      onChange={(v) => setGrants({ ...g, network: v as Grants["network"] })}
-                    />
-                  </div>
-                  {g.network === "list" && (
-                    <label>
-                      <span className="sub-h">Hosts</span>
-                      <textarea
-                        name="hosts"
-                        rows={5}
-                        value={hostsText}
-                        onChange={(e) => setHostsText(e.target.value)}
-                        placeholder="github.com"
-                        spellCheck={false}
-                      />
-                      <span className="nd-note">One per line. *.example.com takes every name under it.</span>
-                    </label>
-                  )}
-                </>
-              )}
-              {sel[0] === "apply" && (
-                <>
-                  <p className="pg-note">May a turn's own token apply its changes to your folder. Your own token always may.</p>
-                  <Switch
-                    name="agents_apply"
-                    label="Agents may apply changes to your folder"
-                    on={g.agentsApply}
-                    onChange={(v) => setGrants({ ...g, agentsApply: v })}
-                  />
-                </>
-              )}
-              <p className="f-note">A change here is kept on this page until you save the grants.</p>
-            </fieldset>
-          )}
-        </div>
-      </>
-    );
-  } else if (part === "home") {
-    const n = lines(homeText).length;
-    main = (
-      <>
-        {head("Home files", saveBtn("Save home files", saveHomeFiles))}
-        <div className="colbody pg-body">
-          {status}
-          {ready && (
-            <>
-              <div className="tab-sum">
-                <b>{plural(n, "file")}</b>
-                <span className="sep">·</span>the same on every machine
-              </div>
-              {note("home")}
-              <fieldset className="pg-edit" disabled={!!busy}>
-                <label>
-                  <span className="pg-note">{HOME_FILES_LINE}</span>
-                  <textarea
-                    name="home_files"
-                    rows={5}
-                    value={homeText}
-                    onChange={(e) => setHomeText(e.target.value)}
-                    placeholder="~/.aws/config"
-                    spellCheck={false}
-                  />
-                  <span className="nd-note">One per line, each starting with ~/.</span>
-                </label>
-              </fieldset>
-            </>
-          )}
-        </div>
-      </>
-    );
-    side = (
-      <>
-        {head("How it applies")}
-        <div className="colbody pg-body">
-          <p className="pg-note">Copied at the start of each turn, with the sandbox on or off.</p>
-          <p className="f-note first">
-            A file the conversation already has is never replaced. Policy key <code>home_files</code>.
-          </p>
-        </div>
-      </>
-    );
-  } else if (part === "policy") {
+  } else if (part === "advanced") {
     let keys: [string, string][] = [];
     if (loaded) keys = flatKeys(loaded.policy.value);
     main = (
       <>
-        {head("Policy", saveBtn("Save policy", savePolicy))}
+        {head("Advanced", saveBtn("Save policy", saveAdvanced))}
         <div className="colbody pg-body">
           {status}
           {ready && (
             <>
               <div className="tab-sum">
-                <b>{plural(loaded ? Object.keys(loaded.policy.value).length : 0, "key")}</b>
-                <span className="sep">·</span>all of it, as JSON
-                <span className="sep">·</span>a key left out takes its default
+                <b>The whole policy, as JSON</b>
+                <span className="sep">·</span>only the keys you change are saved
               </div>
-              {note("policy")}
+              {note("advanced")}
               <textarea
                 name="policy"
                 className="st-code pg-code"
@@ -635,24 +742,9 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ api, onBack, sandbox
   );
 };
 
-type Part = "grants" | "home" | "policy" | "instructions" | "subscriptions";
-const PART_NAMES: [Part, string][] = [
-  ["grants", "Grants"],
-  ["home", "Home files"],
-  ["policy", "Policy"],
-  ["instructions", "Instructions"],
-];
-type GrantKey = "sandbox" | "network" | "apply";
-
-// The one plain line that says what Home files are.
-const HOME_FILES_LINE = "Files from your home copied into each conversation's own home, such as ~/.aws/config.";
-
-// The grants as rows: the key, its name, and the policy key it writes.
-const GRANTS: [GrantKey, string, string][] = [
-  ["sandbox", "Sandbox", "sandbox.mode"],
-  ["network", "Network", "network"],
-  ["apply", "Agents may apply changes", "agent_api.apply"],
-];
+// SETTINGS_CONTROLS are every control, for tests: each key of the policy a
+// person may set has one.
+export const SETTINGS_CONTROLS = CONTROLS.map((c) => c.key);
 
 // flatKeys is the policy as rows: a nested key as its dotted path
 // (limits.max_depth), each value as JSON, an empty list as "none".
@@ -665,18 +757,6 @@ function flatKeys(v: unknown, at = ""): [string, string][] {
 }
 
 const plural = (n: number, one: string) => `${n} ${n === 1 ? one : `${one}s`}`;
-
-// grantValue is a grant as the draft holds it now, in a few words.
-function grantValue(k: GrantKey, g: Grants, hostsText: string): React.ReactNode {
-  switch (k) {
-    case "sandbox":
-      return g.sandbox === "on" ? "On" : "Off";
-    case "network":
-      return g.network === "list" ? `A list · ${plural(lines(hostsText).length, "host")}` : g.network === "on" ? "On" : "Off";
-    case "apply":
-      return g.agentsApply ? "On" : "Off";
-  }
-}
 
 // SubscriptionsPart is one Connect step per subscription control can keep.
 const SubscriptionsPart: React.FC<{ api: SubscriptionApi }> = ({ api }) => {

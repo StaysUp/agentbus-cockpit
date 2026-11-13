@@ -48,7 +48,7 @@ import {
 // without them shows the cockpit at that address instead.
 function ownPageShown(page: string, d: DataSource): boolean {
   if (page === 'runners') return !!(d.readRunners || d.listRunners);
-  if (page === 'settings') return !!(d.getSettings && d.getPolicy && d.putPolicy && d.getInstructions && d.putInstructions);
+  if (page === 'settings') return !!(d.getSettings && d.getPolicy && d.patchPolicy && d.getInstructions && d.putInstructions);
   return false;
 }
 
@@ -600,11 +600,11 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
   // The Settings page, when the source has every settings route.
   const settingsApi = useMemo<SettingsApi | undefined>(() => {
     const d = dataSource;
-    if (!d.getSettings || !d.getPolicy || !d.putPolicy || !d.getInstructions || !d.putInstructions) return undefined;
+    if (!d.getSettings || !d.getPolicy || !d.patchPolicy || !d.getInstructions || !d.putInstructions) return undefined;
     return {
       getSettings: () => d.getSettings!(),
       getPolicy: () => d.getPolicy!(),
-      putPolicy: (p, etag) => d.putPolicy!(p, etag),
+      patchPolicy: (change, etag) => d.patchPolicy!(change, etag),
       getInstructions: () => d.getInstructions!(),
       putInstructions: (t, etag) => d.putInstructions!(t, etag),
     };

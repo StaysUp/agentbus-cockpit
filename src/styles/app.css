@@ -940,3 +940,17 @@ tr.ev-open > td { background: #FBFBFA; border-bottom: 1px solid var(--line); pad
 .page-back { padding-left: 0.4rem; }
 .rn-approve label, .rn-remove .dim { font-size: var(--fs-m); color: var(--ink2); }
 
+
+/* Settings: one plain control per setting, with its name and one line. */
+.pg-ctls { gap: 0; }
+.pg-ctl { display: flex; flex-direction: column; gap: 0.35rem; padding: 0.9rem 0; border-bottom: 1px solid var(--line); }
+.pg-ctl:first-child { padding-top: 0.2rem; }
+.pg-ctl:last-child { border-bottom: 0; }
+.pg-ctl .pg-ctl-n { font-size: var(--fs-m); font-weight: 650; color: var(--ink); }
+.pg-ctl > .pg-note { margin: 0; }
+.pg-ctl > .nd-note { margin: 0; }
+.pg-ctl .nd-seg, .pg-ctl .ctl-switch { align-self: flex-start; }
+.pg-ctl .pg-why { margin: 0; }
+.page textarea.pg-mono { font-family: var(--mono); font-size: var(--fs-xs); }
+.pg-num { font: inherit; font-size: var(--fs-m); width: 8rem; padding: 0.35rem 0.6rem; border: 1.5px solid var(--line); border-radius: var(--sel-r); background: #fff; color: var(--ink); }
+.pg-num:focus { outline: none; border-color: var(--line2); }

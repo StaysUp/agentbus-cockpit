@@ -398,6 +398,10 @@ export class LiveDataSource implements DataSource {
     return this.versioned('PUT', '/api/v0/settings/permissions', etag, p);
   }
 
+  async patchPolicy(change: Policy, etag: string): Promise<Versioned<Policy>> {
+    return this.versioned('PATCH', '/api/v0/settings/permissions', etag, change);
+  }
+
   async getInstructions(): Promise<Versioned<string>> {
     const r = await this.versioned<{ text: string }>('GET', '/api/v0/settings/instructions');
     return { value: r.value.text ?? '', etag: r.etag };

@@ -48,7 +48,7 @@ function source(subs: SubscriptionList = SUBS, agents: () => SavedAgent[] = () =
     connectInput: vi.fn(),
     getSettings: async () => ({ value: { version: 1 } as never, etag: '"1"' }),
     getPolicy: async () => ({ value: {}, etag: '"1"' }),
-    putPolicy: async (p) => ({ value: p, etag: '"1"' }),
+    patchPolicy: async (p) => ({ value: p, etag: '"1"' }),
     getInstructions: async () => ({ value: '', etag: '"1"' }),
     putInstructions: async (t) => ({ value: t, etag: '"1"' }),
   };
@@ -193,7 +193,7 @@ describe('the sign-in dot in the cockpit', () => {
       link.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 }));
     });
     await flush();
-    expect(r.container.querySelector('[data-part="grants"]')!.getAttribute('aria-current')).toBe('true');
+    expect(r.container.querySelector('[data-part="agents"]')!.getAttribute('aria-current')).toBe('true');
   });
 
   it('shows the picked agent’s dot beside the picker near Send, and follows the pick', async () => {

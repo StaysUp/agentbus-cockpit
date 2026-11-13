@@ -20,65 +20,67 @@ export interface SettingsInfo {
 }
 
 // The policy as GET /api/v0/settings/permissions sends it, every value
-// filled. Only the keys the page shows as grants and home files are named;
-// the rest pass through untouched.
+// filled. A nested key is a table, such as limits.max_depth.
 export interface Policy {
-  agent_api?: { apply?: boolean; [k: string]: unknown };
+  agent_api?: { apply?: boolean; tools?: boolean; [k: string]: unknown };
   network?: { contain?: string; allow?: string[] };
   sandbox?: { mode?: string; [k: string]: unknown };
   home_files?: string[];
   [k: string]: unknown;
 }
 
-// What the network grant is, in three words. off: an agent reaches only its
-// runner's gateway and the server ([network] contain on, allow empty). list:
-// those and the hosts in allow. on: any host (contain off).
-export type NetworkGrant = 'off' | 'list' | 'on';
+const isTable = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 
-// The grants: one global set, the same for every machine.
-export interface Grants {
-  sandbox: 'off' | 'on';
-  network: NetworkGrant;
-  hosts: string[];
-  agentsApply: boolean;
+// flatPolicy is p by dotted key (limits.max_depth), each value as it is.
+export function flatPolicy(p: Policy): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(p)) {
+    if (isTable(v)) for (const [sk, sv] of Object.entries(v)) out[`${k}.${sk}`] = sv;
+    else out[k] = v;
+  }
+  return out;
 }
 
-export function networkOf(p: Policy): NetworkGrant {
-  if (p.network?.contain !== 'on') return 'on';
-  return (p.network.allow ?? []).length > 0 ? 'list' : 'off';
+// nestPolicy is the dotted keys of flat as a policy: limits.max_depth goes
+// under limits.
+export function nestPolicy(flat: Record<string, unknown>): Policy {
+  const out: Policy = {};
+  for (const [k, v] of Object.entries(flat)) {
+    const dot = k.indexOf('.');
+    if (dot < 0) {
+      out[k] = v;
+      continue;
+    }
+    const t = k.slice(0, dot);
+    const table = (isTable(out[t]) ? out[t] : {}) as Record<string, unknown>;
+    table[k.slice(dot + 1)] = v;
+    out[t] = table;
+  }
+  return out;
 }
 
-export function grantsOf(p: Policy): Grants {
-  return {
-    sandbox: p.sandbox?.mode === 'on' ? 'on' : 'off',
-    network: networkOf(p),
-    hosts: [...(p.network?.allow ?? [])],
-    agentsApply: p.agent_api?.apply !== false,
-  };
+const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+
+// changeOf is what draft changes from read: only the keys whose value
+// differs, nested as a policy. This is what a save sends (PATCH), never a
+// full copy with the defaults filled in, which would keep every default at
+// today's value after a later build changes it.
+export function changeOf(read: Policy, draft: Policy): Policy {
+  const r = flatPolicy(read);
+  const changed: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(flatPolicy(draft))) {
+    if (!(k in r) || !same(r[k], v)) changed[k] = v;
+  }
+  return nestPolicy(changed);
 }
 
-// withGrants is p with g written into its keys. Network off empties allow;
-// on keeps allow as it is (with the sandbox on, it still names the hosts of
-// this machine's own networks an agent may reach).
-export function withGrants(p: Policy, g: Grants): Policy {
-  const allow = g.network === 'off' ? [] : g.network === 'list' ? g.hosts : (p.network?.allow ?? []);
-  return {
-    ...p,
-    agent_api: { ...(p.agent_api ?? {}), apply: g.agentsApply },
-    network: { ...(p.network ?? {}), contain: g.network === 'on' ? 'off' : 'on', allow },
-    sandbox: { ...(p.sandbox ?? {}), mode: g.sandbox },
-  };
-}
+// isEmpty says a change holds no key.
+export const isEmpty = (p: Policy) => Object.keys(p).length === 0;
 
 // homeFilesOf is the files from the person's home copied into each
 // conversation's own home (home_files), sandbox on or off.
 export function homeFilesOf(p: Policy): string[] {
   return [...(p.home_files ?? [])];
-}
-
-// withHomeFiles is p with files as its home_files.
-export function withHomeFiles(p: Policy, files: string[]): Policy {
-  return { ...p, home_files: files };
 }
 
 // lines is text as a list: one entry per line, blank lines left out.
@@ -93,7 +95,9 @@ export function lines(text: string): string[] {
 export interface SettingsApi {
   getSettings(): Promise<Versioned<SettingsInfo>>;
   getPolicy(): Promise<Versioned<Policy>>;
-  putPolicy(p: Policy, etag: string): Promise<Versioned<Policy>>;
+  // patchPolicy changes only the keys change holds; every other key keeps
+  // what it holds (PATCH /api/v0/settings/permissions).
+  patchPolicy(change: Policy, etag: string): Promise<Versioned<Policy>>;
   getInstructions(): Promise<Versioned<string>>;
   putInstructions(text: string, etag: string): Promise<Versioned<string>>;
 }

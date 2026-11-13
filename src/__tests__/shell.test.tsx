@@ -356,7 +356,7 @@ describe('The event stream', () => {
     };
     await follow('Settings');
     expect(r.container.querySelector('#page[aria-label="Settings"]')).not.toBeNull();
-    expect(r.container.querySelector('table[aria-label="Grants"]')).not.toBeNull();
+    expect(r.container.querySelector('[data-part="agents"][aria-current="true"]')).not.toBeNull();
     expect(svc.openStreams()).toBe(0);
     await follow('Cockpit');
     expect(svc.openStreams()).toBe(1);

@@ -533,6 +533,7 @@ export interface DataSource {
   getSettings?(): Promise<Versioned<SettingsInfo>>;
   getPolicy?(): Promise<Versioned<Policy>>;
   putPolicy?(p: Policy, etag: string): Promise<Versioned<Policy>>;
+  patchPolicy?(change: Policy, etag: string): Promise<Versioned<Policy>>;
   getInstructions?(): Promise<Versioned<string>>;
   putInstructions?(text: string, etag: string): Promise<Versioned<string>>;
   // A source that can start and continue sessions has these two. Each
