@@ -1011,7 +1011,7 @@ tr.ev-open > td { background: #FBFBFA; border-bottom: 1px solid var(--line); pad
 /* The build stays on one line beside AgentBus. */
 .bus-card .brand, .bus-card .bc-v { white-space: nowrap; }
 
-/* The sign-in dot sits on the agent's mark, at its lower right corner, so
+/* The sign-in dot sits on the agent's mark, at its top right corner, so
    it takes no room beside the name. */
 #agents .agent .mark { position: relative; }
-#agents .agent .mark .signin-dot { position: absolute; right: -0.2rem; bottom: -0.2rem; margin: 0; box-shadow: 0 0 0 2px #fff; }
+#agents .agent .mark .signin-dot { position: absolute; right: -0.2rem; top: -0.2rem; margin: 0; box-shadow: 0 0 0 2px #fff; }
