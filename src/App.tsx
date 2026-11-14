@@ -64,6 +64,10 @@ const LIST_REFRESH_MS = 500;
 // How often a running turn of the shown session is read, to see it end.
 export const TURN_END_POLL_MS = 2000;
 
+// How often the subscriptions are read again, for how much of each plan is
+// left (GET /api/v0/subscriptions, usage).
+const SUBSCRIPTIONS_EVERY = 60_000;
+
 // Kinds that change a session's summary (agent, folder, open) as the service
 // computes it; on these, fetch the sessions again at once.
 const SUMMARY_KINDS = new Set(['session.registered', 'session.opened', 'session.closed', 'session.renamed', 'events.dropped']);
@@ -649,16 +653,21 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
     };
   }, [dataSource, agentsDialog, agentsKey, page]);
   // Read with the agents, so an agent's key_set and the OpenRouter key kept
-  // on control are read at the same moment.
+  // on control are read at the same moment; then once a minute, for how
+  // much of each plan is left, which every model call can change.
   useEffect(() => {
     if (!dataSource.listSubscriptions || agentsDialog !== null || page !== 'cockpit') return;
     let active = true;
-    dataSource.listSubscriptions().then(
-      (list) => active && setSubs(list),
-      () => undefined
-    );
+    const read = () =>
+      dataSource.listSubscriptions!().then(
+        (list) => active && setSubs(list),
+        () => undefined
+      );
+    read();
+    const timer = setInterval(read, SUBSCRIPTIONS_EVERY);
     return () => {
       active = false;
+      clearInterval(timer);
     };
   }, [dataSource, agentsDialog, agentsKey, page]);
   // Removes a saved agent from its row, then lists the agents again. A
