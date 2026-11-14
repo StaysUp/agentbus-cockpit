@@ -3,6 +3,7 @@ import { follow, PAGE_PATHS } from '../page';
 import { SavedAgent, SubscriptionList } from '../types';
 import { FeedbackDialog } from './FeedbackDialog';
 import { PlusIcon } from './Icons';
+import { PlanUsage, planOf } from './PlanUsage';
 import { SignInDot, signInOf } from './SignInDot';
 
 interface AgentsColumnProps {
@@ -28,8 +29,9 @@ interface AgentsColumnProps {
   // The service's build, from GET /api/v0/version, shown on the AgentBus card.
   version?: string;
   // The subscriptions control keeps (GET /api/v0/subscriptions), for each
-  // agent's sign-in dot; undefined before the first read, null when the
-  // service keeps none. onOpenSignIn opens Settings → Subscriptions.
+  // agent's sign-in dot and how much of its plan is left; undefined before
+  // the first read, null when the service keeps none. onOpenSignIn opens
+  // Settings → Subscriptions.
   subscriptions?: SubscriptionList | null;
   onOpenSignIn?: () => void;
 }
@@ -100,6 +102,7 @@ export const AgentsColumn: React.FC<AgentsColumnProps> = ({
                   <SignInDot signIn={signInOf(a, subscriptions)} onOpen={onOpenSignIn} />
                 </b>
                 <span className="q-l">{savedLine(a)}</span>
+                <PlanUsage plan={planOf(a, subscriptions)} />
               </span>
             </>
           );

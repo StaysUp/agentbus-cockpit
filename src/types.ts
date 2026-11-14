@@ -502,6 +502,24 @@ export interface SubscriptionState {
   // Why it cannot be used, when it cannot.
   error?: string;
   connect?: ConnectView;
+  // How much of the plan is used, per window, shortest first, as the vendor
+  // said on the latest model reply on this subscription. Absent until one.
+  usage?: PlanReading[];
+}
+// One window of a subscription's plan (GET /api/v0/subscriptions, usage).
+export interface PlanReading {
+  // The vendor's name for it: 5h or 7d (claude), primary or secondary (codex).
+  window: string;
+  // Its length, such as 300 or 10080. Absent when the vendor did not say.
+  window_minutes?: number;
+  // 0 to 100; it can pass 100 over the limit.
+  used_percent: number;
+  resets_at?: string;
+  // The vendor's own word, such as allowed or rejected (claude).
+  status?: string;
+  // When it was read. It is stored when it changes, and at most every 10
+  // minutes while calls keep it the same.
+  read_at: string;
 }
 export interface SubscriptionList {
   subscriptions: SubscriptionState[];
