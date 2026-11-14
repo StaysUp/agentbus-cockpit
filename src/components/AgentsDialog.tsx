@@ -401,7 +401,9 @@ export const AgentsDialog: React.FC<AgentsDialogProps> = ({
                       ? "Reading the models this access can use…"
                       : modelsError
                         ? modelsError
-                        : listed?.error
+                        : listed && listed.models.length === 0 && listed.source !== "fixed"
+                          ? `No list of ${harness?.label ?? form.harness}'s models yet. Type a model id above.`
+                          : listed?.error
                           ? listed.error
                           : listed
                             ? `${listed.models.length} models from ${sourceText(listed.source, harness?.label ?? form.harness, apiKey ? access?.key_name : undefined)}${listed.fetched_at ? `, read ${when(listed.fetched_at)}` : ""}.`

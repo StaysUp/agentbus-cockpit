@@ -80,14 +80,14 @@ describe('The agent form and the list of models', () => {
     expect(createAgent).toHaveBeenCalledWith({ name: 'Codex', harness: 'codex', access: 'subscription' });
   });
 
-  it("shows the list's own words when it has none, and still takes a typed name", async () => {
+  it("asks for a typed model id when the list has none, and takes it", async () => {
     const loadModels = vi.fn(async (): Promise<ModelList> => ({ harness: 'codex', access: 'subscription', models: [], source: 'runner', error: "no runner has reported Codex's models yet" }));
     const createAgent = vi.fn(async () => ({}) as never);
     const { container } = await render(
       <AgentsDialog loadHarnesses={async () => [harnesses[1]]} createAgent={createAgent} updateAgent={vi.fn()} onClose={() => undefined} loadModels={loadModels} />,
     );
     await flush();
-    expect(container.querySelector('.ad-models')?.textContent).toContain("no runner has reported Codex's models yet");
+    expect(container.querySelector('.ad-models')?.textContent).toContain("No list of Codex's models yet. Type a model id above.");
     const input = container.querySelector('input[name="model"]') as HTMLInputElement;
     await act(async () => {
       const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
