@@ -116,11 +116,40 @@ describe('Markdown: the agent reply in the chat', () => {
     r.unmount();
   });
 
-  it('a javascript:, data: or relative link is not a link, and shows as written', async () => {
-    const src = '[a](javascript:alert(1)) [b](JavaScript:alert(2)) [c](data:text/html,x) [d](./file) <javascript:x>';
+  it('a javascript:, data: or mailto: link is not a link, and shows as written', async () => {
+    const src = '[a](javascript:alert(1)) [b](JavaScript:alert(2)) [c](data:text/html,x) [m](mailto:x@e.com) <javascript:x>';
     const r = await md(src);
     expect(r.container.querySelector('a')).toBeNull();
     expect(r.container.textContent).toBe(src);
+    r.unmount();
+  });
+
+  it('a link to a local file is a file reference, never a browser link: its words, the path from the session folder with its line, the full path on hover', async () => {
+    const full = '/Users/test/.local/share/agentbus-mac/sessions/14b92fbf510e8dce/cmd/agentbus/main.go:69';
+    const r = await render(
+      <Markdown
+        text={`See [current CLI source](${full}) and [a.ts](/home/me/proj/src/a.ts#L12) and [./file](./file) and [x](file:///tmp/x%20y.txt).`}
+        files={{ session: '14b92fbf510e8dce', folder: '/home/me/proj/' }}
+      />,
+    );
+    expect(r.container.querySelector('a')).toBeNull();
+    const refs = Array.from(r.container.querySelectorAll('.md-file'));
+    expect(refs.map((f) => f.textContent)).toEqual([
+      'current CLI source cmd/agentbus/main.go:69',
+      'a.ts src/a.ts:12',
+      './file',
+      'x /tmp/x y.txt',
+    ]);
+    expect(refs.map((f) => f.getAttribute('title'))).toEqual([full, '/home/me/proj/src/a.ts:12', './file', '/tmp/x y.txt']);
+    expect(refs[0].querySelector('.md-file-path')!.textContent).toBe('cmd/agentbus/main.go:69');
+    r.unmount();
+  });
+
+  it('a file link outside the session folder keeps its whole path; without a session the path shows as written', async () => {
+    const r = await md('[other](/Users/test/.local/share/agentbus-mac/sessions/aaaaaaaaaaaaaaaa/x.go) [main.go:3](main.go:3)');
+    const refs = Array.from(r.container.querySelectorAll('.md-file'));
+    expect(refs.map((f) => f.textContent)).toEqual(['other /Users/test/.local/share/agentbus-mac/sessions/aaaaaaaaaaaaaaaa/x.go', 'main.go:3']);
+    expect(r.container.querySelector('a')).toBeNull();
     r.unmount();
   });
 

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { createContext, useContext } from 'react';
 import { CopyButton } from './Icons';
 
 // A small markdown renderer for an agent's reply in the chat. It reads the
@@ -228,8 +228,9 @@ function parseBlocks(src: string): Block[] {
   return out;
 }
 
-// Only web links become links. Anything else (javascript:, data:, file:, a
-// relative path) stays as the text the agent wrote.
+// Only web links become links. A local path becomes a file reference
+// (FileLink); anything else (javascript:, data:) stays as the text the agent
+// wrote.
 export function safeHref(url: string): string | undefined {
   try {
     const u = new URL(url);
@@ -359,6 +360,67 @@ function trimUrl(u: string): string {
   }
 }
 
+// Where a reply's local paths are read from: the session (its copy is
+// <runner data>/sessions/<session id>, or worktrees/<id> before 0.5) and the
+// person's folder. A path inside either is shown relative to it.
+export interface FileBase {
+  session?: string;
+  folder?: string;
+}
+const FileBaseContext = createContext<FileBase>({});
+
+// A link's destination that names a local file: a file: URL, or a path with
+// no scheme ("/Users/…/main.go:69", "src/a.ts"). A ":69" after a name is a
+// line, not a scheme. Anything else (javascript:, mailto:, "#…") is not.
+export function localPath(url: string): string | undefined {
+  if (url === '' || url.startsWith('#') || url.startsWith('//')) return undefined;
+  let p = url;
+  if (/^file:/i.test(url)) {
+    p = url.replace(/^file:(\/\/[^/]*)?/i, '');
+  } else if (/^[a-z][a-z0-9+.-]*:(?!\d)/i.test(url)) {
+    return undefined;
+  }
+  try {
+    p = decodeURIComponent(p);
+  } catch {
+    // Not percent-encoded as it should be: keep it as written.
+  }
+  return p || undefined;
+}
+
+// A local path as the chat shows it: relative to the session's copy or the
+// person's folder when inside one, with its line (":69", or "#L69" as
+// ":69"), and the full path for hover.
+export function fileRef(path: string, base: FileBase): { rel: string; full: string } {
+  const m = path.match(/^(.*?)(?:#L(\d+)(?:-L?\d+)?)?$/);
+  const full = m && m[2] ? `${m[1]}:${m[2]}` : path;
+  let rel = full;
+  const copy = base.session ? full.match(new RegExp(`/(?:sessions|worktrees)/${base.session.replace(/[^\w-]/g, '')}/(.+)$`)) : null;
+  const folder = base.folder?.replace(/\/+$/, '');
+  if (copy) rel = copy[1];
+  else if (folder && full.startsWith(`${folder}/`)) rel = full.slice(folder.length + 1);
+  return { rel, full };
+}
+
+// A link to a local file: its words, then its path, quietly. It is not a
+// browser link; the full path shows on hover.
+function FileLink({ path, label, children }: { path: string; label: string; children: React.ReactNode }) {
+  const { rel, full } = fileRef(path, useContext(FileBaseContext));
+  const said = label.trim();
+  const noPath = said === rel || said === full || said === '';
+  return (
+    <span className="md-file" title={full}>
+      {noPath ? <code>{rel}</code> : children}
+      {!noPath && (
+        <>
+          {' '}
+          <code className="md-file-path">{rel}</code>
+        </>
+      )}
+    </span>
+  );
+}
+
 function Link({ href, children }: { href: string; children: React.ReactNode }) {
   // A link opens in a new tab and does not also select the turn under it.
   return (
@@ -426,8 +488,15 @@ function inline(s: string, key = 'i', links = true): React.ReactNode[] {
                 {inline(s.slice(i + 1, close), k(), false)}
               </Link>,
             );
+          } else if (localPath(dest.url)) {
+            const label = s.slice(i + 1, close);
+            push(
+              <FileLink key={k()} path={localPath(dest.url)!} label={label}>
+                {inline(label, k(), false)}
+              </FileLink>,
+            );
           } else {
-            // Not a web link: the whole thing stays as written.
+            // Neither a web link nor a local file: the whole thing stays as written.
             text += s.slice(i, dest.end);
           }
           i = dest.end;
@@ -595,8 +664,10 @@ function renderBlocks(blocks: Block[], key: string, tight = false, tail?: React.
 }
 
 // `cut` says the text is a preview cut short: a "…" follows its last block.
-export function Markdown({ text, cut = false }: { text: string; cut?: boolean }) {
+// `files` is where local paths in links are shown relative to.
+export function Markdown({ text, cut = false, files }: { text: string; cut?: boolean; files?: FileBase }) {
   const blocks = parseBlocks(text);
   if (cut && blocks.length === 0) return <p className="md-cut">…</p>;
-  return <>{renderBlocks(blocks, 'b', false, cut ? '…' : undefined)}</>;
+  const out = <>{renderBlocks(blocks, 'b', false, cut ? '…' : undefined)}</>;
+  return files ? <FileBaseContext.Provider value={files}>{out}</FileBaseContext.Provider> : out;
 }

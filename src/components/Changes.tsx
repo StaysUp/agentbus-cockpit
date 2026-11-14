@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { ApplyPreview, ApplyState, TurnDiff } from '../types';
+import { PanelHead } from './PanelHead';
 
 // A file as a turn's diff or the apply preview lists it. The preview counts
 // its lines; a turn's diff is counted here.
@@ -11,7 +12,6 @@ interface ChangedFile {
   diff?: string;
   diff_left_out?: boolean;
 }
-import { PanelHead } from './PanelHead';
 
 // Files changed by a conversation or a turn, each with its diff: added lines
 // green, removed lines red, hunk headers quiet.
@@ -20,6 +20,25 @@ import { PanelHead } from './PanelHead';
 const FOLD_OVER = 3;
 
 const CONFLICT = 'you changed this file since; it would be refused';
+
+// A copy past the framework's 200,000 files (MaxSnapshotFiles) gets cut-off
+// checkpoints: its changes are not real and cannot be applied.
+export const TOO_BIG = 'This folder is too big to track changes (over 200,000 files). Pick a smaller folder.';
+
+// The preview, or an apply, refused because the copy had more files than a
+// checkpoint holds (the framework's connector.ErrTruncated).
+export function refusedTooBig(msg?: string | null): boolean {
+  return !!msg && msg.includes('more files than a checkpoint holds');
+}
+
+// A turn's changes were cut because the copy was too big. truncated alone
+// also means the list was cut (past 1,000 files, or to fit), so it counts
+// only when every counted file is listed, or when the session's preview
+// already said its copy is too big.
+export function turnTooBig(f: { count: number; truncated?: boolean; changes: unknown[] } | null | undefined, sessionTooBig?: boolean): boolean {
+  if (!f?.truncated) return false;
+  return !!sessionTooBig || f.changes.length >= f.count;
+}
 
 // One changed file: its path, kind and line counts, and its diff, which
 // scrolls sideways in its own box. A file the person changed since is
@@ -90,7 +109,11 @@ const files = (n: number) => `${n} ${n === 1 ? 'file' : 'files'}`;
 // The turn panel's Changes tab: what this one turn changed, read-only, from
 // GET /api/v0/turns/<id>/diff. Applying is done for the whole conversation,
 // from the bar above the message box.
-export const TurnChangesTab: React.FC<{ turnId: string; loadDiff: () => Promise<TurnDiff> }> = ({ turnId, loadDiff }) => {
+export const TurnChangesTab: React.FC<{ turnId: string; loadDiff: () => Promise<TurnDiff>; tooBig?: boolean }> = ({
+  turnId,
+  loadDiff,
+  tooBig,
+}) => {
   const [diff, setDiff] = useState<{ turn: string; d: TurnDiff } | null>(null);
   const [error, setError] = useState<{ turn: string; msg: string } | null>(null);
   const loadRef = useRef(loadDiff);
@@ -110,6 +133,13 @@ export const TurnChangesTab: React.FC<{ turnId: string; loadDiff: () => Promise<
   if (err) return <div className="form-error">{err}</div>;
   if (!d) return <p className="dim">Reading…</p>;
   const f = d.files;
+  if (turnTooBig(f, tooBig)) {
+    return (
+      <div className="turn-changes">
+        <div className="form-error too-big">{TOO_BIG}</div>
+      </div>
+    );
+  }
   return (
     <div className="turn-changes">
       <div className="tab-sum">
@@ -205,12 +235,14 @@ export const ApplyPanel: React.FC<ApplyPanelProps> = ({ preview, error, apply, r
   // After an apply, the panel says so until a later turn has new work.
   const applied = state?.state === 'applied' && (!preview || !preview.unapplied || preview.turn === asked!.turn);
   const refused = state && (state.state === 'refused' || state.state === 'failed') ? state : null;
+  // The copy is too big to track: no count, no files, no apply.
+  const tooBig = refusedTooBig(error) || refusedTooBig(refused?.error);
   // Each file an apply would refuse, by path.
   const conflicts = preview?.conflicts ?? [];
   const conflictOf = new Map(conflicts.map((c) => [c.path, c.why]));
   const conflicted = conflicts.length > 0;
   const has = !!preview && preview.unapplied && (preview.count > 0 || preview.files.length > 0 || conflicted);
-  const canApply = !!apply && !!preview?.turn && has && !pending && !conflicted;
+  const canApply = !!apply && !!preview?.turn && has && !pending && !conflicted && !tooBig;
 
   return (
     <section id="right" className="apply-panel">
@@ -218,60 +250,66 @@ export const ApplyPanel: React.FC<ApplyPanelProps> = ({ preview, error, apply, r
         {has && !applied ? 'Changes not applied' : 'Changes'}
       </PanelHead>
       <div id="d-body">
-        {error && <div className="form-error">{error}</div>}
-        {!preview && !error && <p className="dim">Reading…</p>}
-        {applied ? (
-          <p className="nd-note ok" role="status">Applied. Your folder matches this conversation.</p>
+        {tooBig ? (
+          <div className="form-error too-big">{TOO_BIG}</div>
         ) : (
-          preview && (
-            <>
-              <div className="tab-sum">
-                <b>{has ? files(preview.count || preview.files.length) : 'Nothing to apply'}</b>
-                <span className="sep"> · </span>
-                {has
-                  ? 'would be written to your folder, each against what it holds now'
-                  : preview.why || 'your folder matches this conversation'}
-              </div>
-              {conflicted && (
-                <div className="form-error ap-conflicts">
-                  <b>{files(conflicts.length)} would be refused.</b> You changed{' '}
-                  {conflicts.length === 1 ? 'this file' : 'these files'} in your folder since this conversation copied it:
+          <>
+            {error && <div className="form-error">{error}</div>}
+            {!preview && !error && <p className="dim">Reading…</p>}
+            {applied ? (
+              <p className="nd-note ok" role="status">Applied. Your folder matches this conversation.</p>
+            ) : (
+              preview && (
+                <>
+                  <div className="tab-sum">
+                    <b>{has ? files(preview.count || preview.files.length) : 'Nothing to apply'}</b>
+                    <span className="sep"> · </span>
+                    {has
+                      ? 'would be written to your folder, each against what it holds now'
+                      : preview.why || 'your folder matches this conversation'}
+                  </div>
+                  {conflicted && (
+                    <div className="form-error ap-conflicts">
+                      <b>{files(conflicts.length)} would be refused.</b> You changed{' '}
+                      {conflicts.length === 1 ? 'this file' : 'these files'} in your folder since this conversation copied it:
+                      <ul className="ch-conflicts">
+                        {conflicts.map((c) => (
+                          <li key={c.path}>
+                            <code>{c.path}</code>: {c.why}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  {has && (
+                    <FileList files={preview.files} truncated={preview.truncated} diffsCut={preview.diffs_cut} conflicts={conflictOf} />
+                  )}
+                </>
+              )
+            )}
+            {refused && (
+              <div className="form-error">
+                {refused.error || 'The apply was refused.'}
+                {refused.conflicts && refused.conflicts.length > 0 && (
                   <ul className="ch-conflicts">
-                    {conflicts.map((c) => (
+                    {refused.conflicts.map((c) => (
                       <li key={c.path}>
                         <code>{c.path}</code>: {c.why}
                       </li>
                     ))}
                   </ul>
-                </div>
-              )}
-              {has && (
-                <FileList files={preview.files} truncated={preview.truncated} diffsCut={preview.diffs_cut} conflicts={conflictOf} />
-              )}
-            </>
-          )
-        )}
-        {refused && (
-          <div className="form-error">
-            {refused.error || 'The apply was refused.'}
-            {refused.conflicts && refused.conflicts.length > 0 && (
-              <ul className="ch-conflicts">
-                {refused.conflicts.map((c) => (
-                  <li key={c.path}>
-                    <code>{c.path}</code>: {c.why}
-                  </li>
-                ))}
-              </ul>
+                )}
+              </div>
             )}
-          </div>
-        )}
-        {applyError && <div className="form-error">{applyError}</div>}
-        {apply && !applied && has && (
-          <div className="ap-actions">
-            <button type="button" className="btn btn-primary" disabled={!canApply} onClick={doApply}>
-              {pending ? 'Applying…' : 'Apply to my folder'}
-            </button>
-          </div>
+            {applyError && <div className="form-error">{applyError}</div>}
+            {apply && !applied && has && (
+              <div className="ap-actions">
+                <button type="button" className="btn btn-primary" disabled={!canApply} onClick={doApply}>
+                  {pending ? 'Applying…' : 'Apply to my folder'}
+                </button>
+              </div>
+            )}
+          </>
         )}
       </div>
     </section>

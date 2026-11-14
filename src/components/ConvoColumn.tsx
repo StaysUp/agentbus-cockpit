@@ -10,9 +10,10 @@ import { folderLabel, sessionFolderRef, useFolders } from '../data/folders';
 import { LiveLine } from './LiveLine';
 import { PencilIcon, TitleEdit } from './TitleEdit';
 import { ShellEntry } from './ShellEntry';
-import { Select, Switch } from './Controls';
+import { Button, Select, Switch } from './Controls';
 import { commandsAfter } from '../data/shell';
 import { BackButton } from './BackButton';
+import { TOO_BIG } from './Changes';
 
 interface ConvoColumnProps {
   session: SessionDetail;
@@ -80,14 +81,30 @@ interface ConvoColumnProps {
   onRename?: (sessionId: string, title: string) => Promise<void>;
   // While the conversation has work not yet in the person's folder: how many
   // files, and Review, which opens the apply preview in the right panel.
-  applyBar?: { count: number; onReview: () => void } | null;
+  // tooBig: the copy has too many files to track, so no count and no Review.
+  applyBar?: { count: number; onReview: () => void; tooBig?: boolean } | null;
   // The session's "!" commands from before AgentBus 0.5, oldest first, shown
   // read-only between its turns. A "!" message now goes to the agent like
   // any other: it runs the command with its own shell tool.
   commands?: ShellRun[];
   // Back to the Sessions column, on a narrow screen (src/columns.ts).
   onBack?: () => void;
+  // Given when the source can close a session: Close, after the person
+  // confirms. 'running' when a turn of it has not ended. Rejects with the
+  // API's words.
+  onCloseSession?: (sessionId: string) => Promise<'closed' | 'running'>;
+  // Files changed here and not applied to the person's folder: the close
+  // confirmation warns of them.
+  unapplied?: number;
+  // Given when the source keeps a record: Export saves the session's events
+  // as one .jsonl file. Rejects with the API's words.
+  onExport?: (sessionId: string) => Promise<void>;
 }
+
+// What closing removes, and what it keeps.
+export const CLOSE_NOTE =
+  "Closing removes this conversation's copy of your folder and its home. Your folder stays as it is. The conversation takes no more messages.";
+export const CLOSE_RUNNING = 'A turn is still running. Stop it or wait for it to end, then close.';
 
 // The name of the agent that ran a turn: its saved agent's, else its
 // harness's. Empty when the turn names none.
@@ -252,6 +269,9 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
   applyBar,
   commands,
   onBack,
+  onCloseSession,
+  unapplied = 0,
+  onExport,
 }) => {
   // A turn's folder is shown when it is not the session's: by name when the
   // service lists its reference.
@@ -261,6 +281,32 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
   const [draft, setDraft] = useState('');
   // The header's name is being edited.
   const [renaming, setRenaming] = useState(false);
+  // The close confirmation: open, and while closing, and why it was refused.
+  const [closeAsk, setCloseAsk] = useState<{ busy: boolean; error: string | null } | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
+  const doClose = async () => {
+    if (!onCloseSession) return;
+    setCloseAsk({ busy: true, error: null });
+    try {
+      const r = await onCloseSession(session.id);
+      setCloseAsk(r === 'running' ? { busy: false, error: CLOSE_RUNNING } : null);
+    } catch (err) {
+      setCloseAsk({ busy: false, error: (err as Error).message });
+    }
+  };
+  const doExport = async () => {
+    if (!onExport || exporting) return;
+    setExporting(true);
+    setExportError(null);
+    try {
+      await onExport(session.id);
+    } catch (err) {
+      setExportError(`Export failed: ${(err as Error).message}`);
+    } finally {
+      setExporting(false);
+    }
+  };
   const inputRef = useRef<HTMLTextAreaElement>(null);
   // The message box grows with its text, wrapped lines too, up to its CSS
   // max-height (about ten lines), and then scrolls inside.
@@ -520,9 +566,66 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
                 <PencilIcon />
               </button>
             )}
+            {(onExport || (onCloseSession && !closed)) && (
+              <div className="c-acts">
+                {exportError && (
+                  <span className="c-act-error" role="alert" title={exportError}>
+                    {exportError}
+                  </span>
+                )}
+                {onExport && (
+                  <button
+                    type="button"
+                    className="link-btn c-export"
+                    title="Save this conversation's events as one .jsonl file"
+                    disabled={exporting}
+                    onClick={doExport}
+                  >
+                    {exporting ? 'Exporting…' : 'Export'}
+                  </button>
+                )}
+                {onCloseSession && !closed && (
+                  <Button kind="quiet" small className="c-close" onClick={() => setCloseAsk({ busy: false, error: null })}>
+                    Close
+                  </Button>
+                )}
+              </div>
+            )}
           </>
         )}
       </header>
+      {closeAsk && onCloseSession && (
+        <div className="modal-back" onMouseDown={(e) => e.target === e.currentTarget && !closeAsk.busy && setCloseAsk(null)}>
+          <div
+            className="new-dialog close-ask"
+            role="alertdialog"
+            aria-label="Close this conversation"
+            onKeyDown={(e) => e.key === 'Escape' && !closeAsk.busy && setCloseAsk(null)}
+          >
+            <div className="nd-title">Close this conversation?</div>
+            <div className="nd-note">{CLOSE_NOTE}</div>
+            {unapplied > 0 && (
+              <div className="form-error close-unapplied">
+                {unapplied} {unapplied === 1 ? 'file' : 'files'} changed here {unapplied === 1 ? 'is' : 'are'} not in your folder yet.
+                Apply what you want to keep first.
+              </div>
+            )}
+            {closeAsk.error && (
+              <div className="form-error close-refused" role="alert">
+                {closeAsk.error}
+              </div>
+            )}
+            <div className="nd-actions">
+              <Button kind="primary" className="close-keep" onClick={() => setCloseAsk(null)} disabled={closeAsk.busy} autoFocus>
+                Keep it open
+              </Button>
+              <Button kind="secondary" className="close-go" onClick={doClose} disabled={closeAsk.busy}>
+                {closeAsk.busy ? 'Closing…' : 'Close conversation'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div id="c-msgs">
         <div className="c-in">
@@ -615,7 +718,7 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
                   {answer && !showLive && (
                     <div className={`m-agent md-reply${detail ? '' : ' preview'}`}>
                       {/* The agent's reply is markdown, shown formatted. The turn panel keeps it raw. */}
-                      <Markdown text={answer} cut={answerCut} />
+                      <Markdown text={answer} cut={answerCut} files={{ session: session.id, folder: session.folder }} />
                     </div>
                   )}
 
@@ -659,7 +762,14 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
       </div>
 
       <div id="c-reply">
-        {applyBar && applyBar.count > 0 && (
+        {applyBar?.tooBig ? (
+          <div className="apply-bar too-big">
+            <span className="ab-dot" aria-hidden="true">
+              ●
+            </span>
+            <span className="ab-text">{TOO_BIG}</span>
+          </div>
+        ) : applyBar && applyBar.count > 0 && (
           <div className="apply-bar">
             <span className="ab-dot" aria-hidden="true">
               ●

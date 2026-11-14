@@ -14,8 +14,9 @@ import { useTabShown } from './data/useTabShown';
 import { SubscriptionApi } from './components/ConnectStep';
 import { SignInDot, signInOf } from './components/SignInDot';
 import { NewSessionDialog } from './components/NewSessionDialog';
-import { ApplyPanel } from './components/Changes';
-import { RightPanel } from './components/RightPanel';
+import { ApplyPanel, refusedTooBig } from './components/Changes';
+import { RightPanel, usePanelTabs } from './components/RightPanel';
+import { recordFileName, saveRecord } from './data/exportRecord';
 import { SessionsColumn } from './components/SessionsColumn';
 import { FolderInfo, FoldersContext, rememberFolder, rememberMachine } from './data/folders';
 import { ReplayDataSource } from './data/ReplayDataSource';
@@ -575,6 +576,9 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
   readPreviewRef.current = readPreview;
   // The right panel shows the apply preview instead of a turn.
   const [applyOpen, setApplyOpen] = useState(false);
+  // The turn panel's chosen tabs, kept here so they outlive the panel while
+  // the apply preview takes its place.
+  const panelTabs = usePanelTabs();
   useEffect(() => {
     if (!panelOpen) setApplyOpen(false);
   }, [panelOpen]);
@@ -902,6 +906,29 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
       }
     : undefined;
 
+  // PATCH closed: true, after the person confirmed. The session shows as
+  // closed at once; its preview is read again (a closed session has nothing
+  // to apply).
+  const closeSession = dataSource.closeSession
+    ? async (id: string) => {
+        const r = await dataSource.closeSession!(id);
+        if (r === 'closed') {
+          setClosedIds((set) => (set.has(id) ? set : new Set(set).add(id)));
+          setListKey((k) => k + 1);
+          readPreview(id);
+        }
+        return r;
+      }
+    : undefined;
+  // Every event of the session, saved as one .jsonl file.
+  const exportSession = dataSource.getSessionEvents
+    ? async (id: string) => {
+        const events = await dataSource.getSessionEvents!(id);
+        const title = allSessionsRef.current?.find((s) => s.id === id)?.title ?? id;
+        saveRecord(recordFileName(title, id), events);
+      }
+    : undefined;
+
   // A review of a turn, asked by its id. It rejects with the API's words.
   const reviewTurn = queue
     ? async (turn: Turn, agent: string, model: string) => {
@@ -1035,6 +1062,8 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
     if (previewSession) readPreview(previewSession);
   }, [previewSession, readPreview]);
   const shownPreview = preview && preview.session === previewSession ? preview : null;
+  // The copy has more files than a checkpoint holds: its changes cannot be tracked.
+  const previewTooBig = refusedTooBig(shownPreview?.error);
   const openApply = () => {
     setApplyOpen(true);
     columns.forward('turn');
@@ -1286,7 +1315,16 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
             chooseSession(id);
           }}
           onRename={renameSession}
-          applyBar={shownPreview?.p?.unapplied ? { count: shownPreview.p.count || shownPreview.p.files.length, onReview: openApply } : null}
+          applyBar={
+            previewTooBig
+              ? { count: 0, onReview: openApply, tooBig: true }
+              : shownPreview?.p?.unapplied
+                ? { count: shownPreview.p.count || shownPreview.p.files.length, onReview: openApply }
+                : null
+          }
+          onCloseSession={closeSession}
+          unapplied={!previewTooBig && shownPreview?.p?.unapplied ? shownPreview.p.count || shownPreview.p.files.length : 0}
+          onExport={exportSession}
           commands={commandsBySession[sessionView.id]}
           onBack={() => columns.back('convo')}
         />
@@ -1352,6 +1390,8 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
         onClose={closePanel}
         escRef={panelEscRef}
         loadDiff={dataSource.getTurnDiff ? loadTurnDiff : undefined}
+        tooBig={previewTooBig}
+        tabs={panelTabs}
       />
       )}
       </div>

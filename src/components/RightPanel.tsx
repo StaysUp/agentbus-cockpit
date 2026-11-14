@@ -73,21 +73,35 @@ interface RightPanelProps {
   escRef?: React.MutableRefObject<(() => boolean) | null>;
   // Given when the source keeps each turn's diff: the Changes tab reads it.
   loadDiff?: (sessionId: string, turnId: string) => Promise<TurnDiff>;
+  // The session's apply preview said its copy is too big to track: a turn's
+  // cut changes say so instead of a count.
+  tooBig?: boolean;
+  // The chosen tabs and open row, from usePanelTabs in the caller, so they
+  // outlive this panel while the apply preview takes its place. Absent:
+  // kept here.
+  tabs?: PanelTabs;
 }
 
 type TabKey = 'result' | 'changes' | 'events' | 'model' | 'tools' | 'prompt' | 'skills' | 'mcp' | 'cicd';
 
 // Follows the selected level: the session, one turn, or one model call. The
 // turn and call tabs are kept here, so stepping down and back keeps them.
-export const RightPanel: React.FC<RightPanelProps> = (props) => {
-  const { level = 'turn', turn, session, callId } = props;
+export function usePanelTabs() {
   // Each level opens on its first tab, as in the mockup: Result, and Sent.
   const [turnTab, setTurnTab] = useState<TabKey>('result');
   const [callTab, setCallTab] = useState<CallTab>('sent');
-  // The turn panel's open row, for the turn it was opened in. Kept here so a
+  // The turn panel's open row, for the turn it was opened in. Kept so a
   // visit to the session or a call does not lose it; another turn starts
   // with its default row.
   const [openRow, setOpenRow] = useState<OpenRow | null>(null);
+  return { turnTab, setTurnTab, callTab, setCallTab, openRow, setOpenRow };
+}
+export type PanelTabs = ReturnType<typeof usePanelTabs>;
+
+export const RightPanel: React.FC<RightPanelProps> = (props) => {
+  const { level = 'turn', turn, session, callId } = props;
+  const own = usePanelTabs();
+  const { turnTab, setTurnTab, callTab, setCallTab, openRow, setOpenRow } = props.tabs ?? own;
 
   if (level === 'session' && session) {
     return (
@@ -170,6 +184,7 @@ const TurnPanel: React.FC<TurnPanelProps> = ({
   onFix,
   loadAgents,
   loadDiff,
+  tooBig,
 }) => {
   // A running turn's status from its events, read each second while it runs.
   const running = !!live && turn?.state === 'running' && !!turn.detail;
@@ -595,7 +610,7 @@ const TurnPanel: React.FC<TurnPanelProps> = ({
         {tab === 'cicd' && <TurnTab turn={turn} row={row} reviews={reviews} onStop={onStopQueued} />}
 
         {tab === 'changes' && loadDiff && (
-          <TurnChangesTab turnId={turn.id} loadDiff={() => loadDiff(turn.sessionId, turn.id)} />
+          <TurnChangesTab turnId={turn.id} loadDiff={() => loadDiff(turn.sessionId, turn.id)} tooBig={tooBig} />
         )}
 
         {tab === 'result' && (

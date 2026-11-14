@@ -35,3 +35,7 @@
 .md-reply th, .md-reply td { border: 1px solid var(--line); padding: 0.25rem 0.625rem; text-align: left; vertical-align: top; overflow-wrap: normal; }
 .md-reply th { background: var(--code-bg); font-weight: 600; }
 .md-reply .md-cut { margin: 0; color: var(--ink3); }
+
+/* A link to a local file is not a browser link: its words, then its path, quiet; the full path on hover. */
+.md-reply .md-file { cursor: default; }
+.md-reply .md-file .md-file-path { color: var(--ink3); font-size: 0.85em; }

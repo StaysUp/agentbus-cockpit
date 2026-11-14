@@ -55,7 +55,7 @@ describe('Feedback box', () => {
     const box = await openBox();
     expect(box.textContent).toContain("What's missing or broken?");
     expect(box.querySelector('input[name="email"]')).not.toBeNull();
-    expect(box.textContent).toContain('Tell me when hosted Lorebug is ready');
+    expect(box.textContent).toContain('Tell me when hosted version is ready');
     expect(box.querySelector('.fb-what')!.textContent).toBe('This sends your message to the Lorebug team.');
     expect(box.querySelector('button.fb-close')!.textContent).toBe('Close');
     expect(box.textContent).not.toContain('Cancel');

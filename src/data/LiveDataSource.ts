@@ -473,6 +473,46 @@ export class LiveDataSource implements DataSource {
     await this.send('PATCH', `/api/v0/sessions/${encodeURIComponent(sessionId)}`, { title });
   }
 
+  // PATCH /api/v0/sessions/<id> closed: true. The runner removes the
+  // session's copy and its home; the person's folder stays. 'running' when a
+  // turn of it has not ended (409). Any other refusal rejects with the API's
+  // words.
+  async closeSession(sessionId: string): Promise<'closed' | 'running'> {
+    try {
+      await this.send('PATCH', `/api/v0/sessions/${encodeURIComponent(sessionId)}`, { closed: true });
+      return 'closed';
+    } catch (err) {
+      if ((err as { status?: number }).status === 409) return 'running';
+      throw err;
+    }
+  }
+
+  // GET /api/v0/sessions/<id>/events: every event of the session, oldest
+  // first, 1000 a page, paged by next_after until it is null. A 409 means
+  // the store changed: start over once.
+  async getSessionEvents(sessionId: string): Promise<unknown[]> {
+    const path = `${this.baseUrl}/api/v0/sessions/${encodeURIComponent(sessionId)}/events`;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const events: unknown[] = [];
+      let cursor: { store: string; after: number } | null = null;
+      for (;;) {
+        const params = new URLSearchParams({ limit: '1000' });
+        if (cursor) {
+          params.set('store', cursor.store);
+          params.set('after', String(cursor.after));
+        }
+        const res = await fetch(`${path}?${params}`, { headers: this.headers() });
+        if (res.status === 409) break;
+        if (!res.ok) throw new Error(await apiError(res));
+        const data = await res.json();
+        events.push(...((data.events || []) as unknown[]));
+        if (data.next_after === null || data.next_after === undefined) return events;
+        cursor = { store: data.store, after: data.next_after };
+      }
+    }
+    throw new Error(`Store changed twice while reading session ${sessionId}; try again`);
+  }
+
   // GET /api/v0/sessions/<id>/events?kind=<the command kinds>: the session's
   // "!" command events from before AgentBus 0.5, read-only, oldest first,
   // paged by next_after until it is null.

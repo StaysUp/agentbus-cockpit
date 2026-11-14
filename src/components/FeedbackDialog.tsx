@@ -107,7 +107,7 @@ export const FeedbackDialog: React.FC<FeedbackDialogProps> = ({ version, onClose
         <Switch
           className="fb-hosted"
           name="wants_hosted"
-          label="Tell me when hosted Lorebug is ready"
+          label="Tell me when hosted version is ready"
           on={wantsHosted}
           onChange={setWantsHosted}
           disabled={locked}

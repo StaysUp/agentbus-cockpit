@@ -596,6 +596,13 @@ export interface DataSource {
   // A source that can name sessions has this: a new title for one. Rejects
   // with an Error in the API's own words.
   renameSession?(sessionId: string, title: string): Promise<void>;
+  // A source that keeps isolated copies can close a session: it takes no more
+  // turns, and its copy and home are removed (the person's folder stays).
+  // 'running' when a turn of it has not ended. Rejects with the API's words.
+  closeSession?(sessionId: string): Promise<'closed' | 'running'>;
+  // A source that keeps a record has this: every event of one session, oldest
+  // first, as the API sends them. Rejects with the API's words.
+  getSessionEvents?(sessionId: string): Promise<unknown[]>;
   // A source that runs turns can stop one: 'stopping' when the service took
   // the stop (202, also when it was already stopping), 'not-running' when the
   // turn has already ended (409). Rejects with an Error in the API's own words.

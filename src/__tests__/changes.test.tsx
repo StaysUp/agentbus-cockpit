@@ -5,7 +5,7 @@
 import { act } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { App } from '../App';
-import { ApplyPanel } from '../components/Changes';
+import { ApplyPanel, TOO_BIG, TurnChangesTab, turnTooBig } from '../components/Changes';
 import { LiveDataSource } from '../data/LiveDataSource';
 import { ApplyPreview, ApplyState, TurnDiff } from '../types';
 import { click, ev, flush, liveReplay, panelOpen, render } from './helpers';
@@ -339,5 +339,79 @@ describe('The live source', () => {
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+});
+
+const TRUNCATED_ERR = 'the copy had more files than a checkpoint holds, so its changes cannot be applied; nothing was written';
+
+describe('A folder too big to track (over 200,000 files)', () => {
+  it('the bar says so in place of a count, with no Review', async () => {
+    const { r } = await open({ getApplyPreview: vi.fn(async () => Promise.reject(new Error(TRUNCATED_ERR))), applyTurn: vi.fn() });
+    const b = bar(r.container)!;
+    expect(b.className).toContain('too-big');
+    expect(b.querySelector('.ab-text')!.textContent).toBe(TOO_BIG);
+    expect(TOO_BIG).toBe('This folder is too big to track changes (over 200,000 files). Pick a smaller folder.');
+    expect(b.querySelector('.ab-review')).toBeNull();
+    r.unmount();
+  });
+
+  it('the preview panel says so, with no count and no Apply, also when an apply is refused for it', async () => {
+    const a = await render(<ApplyPanel preview={preview} error={TRUNCATED_ERR} apply={vi.fn()} />);
+    expect(a.container.querySelector('#d-body')!.textContent).toBe(TOO_BIG);
+    expect(button(a.container, 'Apply to my folder')).toBeUndefined();
+    a.unmount();
+    const apply = vi.fn(async (): Promise<ApplyState> => ({ state: 'refused', error: TRUNCATED_ERR }));
+    const b = await render(<ApplyPanel preview={preview} apply={apply} />);
+    await click(button(b.container, 'Apply to my folder'));
+    await flush();
+    expect(b.container.querySelector('#d-body')!.textContent).toBe(TOO_BIG);
+    expect(button(b.container, 'Apply to my folder')).toBeUndefined();
+    b.unmount();
+  });
+
+  it("a turn's Changes tab says so in place of its count when the cut is the copy's", async () => {
+    const cut: TurnDiff = { ...diff, files: { isolated: true, count: 1, truncated: true, changes: diff.files!.changes } };
+    const r = await render(<TurnChangesTab turnId="T1" loadDiff={async () => cut} />);
+    await flush();
+    expect(r.container.textContent).toBe(TOO_BIG);
+    expect(r.container.querySelector('.tab-sum')).toBeNull();
+    r.unmount();
+  });
+
+  it('a list cut past 1,000 files is not the copy: it counts, unless the preview said the copy is too big', async () => {
+    const many = { count: 32692, truncated: true, changes: new Array(1000).fill({}) };
+    expect(turnTooBig(many)).toBe(false);
+    expect(turnTooBig(many, true)).toBe(true);
+    expect(turnTooBig({ ...many, truncated: false }, true)).toBe(false);
+    expect(turnTooBig({ count: 3, truncated: true, changes: [{}, {}, {}] })).toBe(true);
+    const cut: TurnDiff = { ...diff, files: { isolated: true, ...many, changes: diff.files!.changes } };
+    const a = await render(<TurnChangesTab turnId="T1" loadDiff={async () => cut} />);
+    await flush();
+    expect(a.container.querySelector('.tab-sum')!.textContent).toContain('32692 files');
+    a.unmount();
+    const b = await render(<TurnChangesTab turnId="T1" loadDiff={async () => cut} tooBig />);
+    await flush();
+    expect(b.container.textContent).toBe(TOO_BIG);
+    b.unmount();
+  });
+});
+
+describe('The turn panel after the preview', () => {
+  it('keeps the chosen tab when the preview was open in its place', async () => {
+    const { r } = await open({ getApplyPreview: vi.fn(async () => preview), getTurnDiff: vi.fn(async () => diff), applyTurn: vi.fn() });
+    await click(r.container.querySelector('#convo .tb'));
+    await flush();
+    const tab = (t: string) => Array.from(r.container.querySelectorAll('#d-tabs .tab')).find((x) => x.textContent === t);
+    await click(tab('Events'));
+    expect(tab('Events')!.className).toContain('on');
+    await click(bar(r.container)!.querySelector('.ab-review'));
+    await flush();
+    expect(r.container.querySelector('#right.apply-panel')).not.toBeNull();
+    await click(r.container.querySelector('#convo .tb'));
+    await flush();
+    expect(r.container.querySelector('#right.apply-panel')).toBeNull();
+    expect(tab('Events')!.className).toContain('on');
+    expect(tab('Result')!.className).not.toContain('on');
+    r.unmount();
   });
 });
