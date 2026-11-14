@@ -95,12 +95,12 @@ export const AgentsColumn: React.FC<AgentsColumnProps> = ({
           const isSelected = selectedAgentId === a.id;
           const body = (
             <>
-              <span className={`mark ${a.harness}`}>{agentMark(a)}</span>
+              <span className={`mark ${a.harness}`}>
+                {agentMark(a)}
+                <SignInDot signIn={signInOf(a, subscriptions)} onOpen={onOpenSignIn} />
+              </span>
               <span className="ag-t">
-                <b>
-                  {a.name}
-                  <SignInDot signIn={signInOf(a, subscriptions)} onOpen={onOpenSignIn} />
-                </b>
+                <b>{a.name}</b>
                 <span className="q-l">{savedLine(a)}</span>
                 <PlanUsage usage={usageOf(a, subscriptions)} />
               </span>
