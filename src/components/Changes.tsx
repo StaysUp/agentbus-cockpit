@@ -23,7 +23,7 @@ const CONFLICT = 'you changed this file since; it would be refused';
 
 // A copy past the framework's 200,000 files (MaxSnapshotFiles) gets cut-off
 // checkpoints: its changes are not real and cannot be applied.
-export const TOO_BIG = 'This folder is too big to track changes (over 200,000 files). Pick a smaller folder.';
+export const TOO_BIG = 'This folder is too big to track changes (over 200,000 files)';
 
 // The preview, or an apply, refused because the copy had more files than a
 // checkpoint holds (the framework's connector.ErrTruncated).

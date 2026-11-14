@@ -350,7 +350,7 @@ describe('A folder too big to track (over 200,000 files)', () => {
     const b = bar(r.container)!;
     expect(b.className).toContain('too-big');
     expect(b.querySelector('.ab-text')!.textContent).toBe(TOO_BIG);
-    expect(TOO_BIG).toBe('This folder is too big to track changes (over 200,000 files). Pick a smaller folder.');
+    expect(TOO_BIG).toBe('This folder is too big to track changes (over 200,000 files)');
     expect(b.querySelector('.ab-review')).toBeNull();
     r.unmount();
   });
