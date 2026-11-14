@@ -556,12 +556,12 @@ tr.ev-open > td { background: #FBFBFA; border-bottom: 1px solid var(--line); pad
 .tab-sum b { color: var(--ink); font-weight: 620; }
 
 /* The AgentBus card at the foot of the agents column. */
-.bus-card { display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 0.6rem; background: #fff; border: 1px solid var(--line2); border-radius: var(--sel-r); box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+.bus-card { display: flex; flex-direction: column; align-items: stretch; gap: 0.35rem; padding: 0.5rem 0.6rem; background: #fff; border: 1px solid var(--line2); border-radius: var(--sel-r); box-shadow: 0 1px 2px rgba(0,0,0,.04); }
 .bc-t { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .bus-card .brand { padding: 0; font-size: var(--fs-m); font-weight: 650; }
 .bus-card .bc-a { display: flex; align-items: center; gap: 0.4rem; padding: 0; margin: 0; font-size: var(--fs-xs); color: var(--ink2); }
 .bus-card .bc-a .live { width: 0.35rem; height: 0.35rem; transform: none; }
-.bus-card .disconnect { flex: none; align-self: center; }
+.bus-card .disconnect { flex: none; align-self: flex-start; font-size: var(--fs-xs); }
 .brand-foot { padding: 0.6rem 0.75rem 0.8rem; border-top: 1px solid var(--line); }
 #agents { min-height: 0; overflow: hidden; }
 .bus-card .bc-t { min-width: 0; flex: 1; }
@@ -702,8 +702,8 @@ tr.ev-open > td { background: #FBFBFA; border-bottom: 1px solid var(--line); pad
 #agents .agent { flex-wrap: wrap; }
 #agents .agent .mark:not(.claude):not(.codex) { background: #6B6B66; }
 #agents .ag-t .q-l { overflow: hidden; text-overflow: ellipsis; }
-/* The usage line wraps rather than cutting its reset time off. */
-#agents .ag-t .plan-line { white-space: normal; overflow: visible; text-overflow: clip; }
+/* The usage line stays on one line. */
+#agents .ag-t .plan-line { white-space: nowrap; }
 #agents .ag-act { flex-basis: 100%; display: flex; align-items: center; gap: 0.25rem; padding-left: 2.125rem; color: var(--ink3); font-size: var(--fs-xs); font-weight: 400; }
 #agents .agent .form-error { flex-basis: 100%; padding-left: 2.125rem; font-weight: 400; white-space: normal; }
 
@@ -1009,4 +1009,4 @@ tr.ev-open > td { background: #FBFBFA; border-bottom: 1px solid var(--line); pad
 .feedback-dialog .fb-failed a { color: inherit; text-decoration: underline; }
 
 /* The build stays on one line beside AgentBus. */
-.bus-card .bc-v { white-space: nowrap; }
+.bus-card .brand, .bus-card .bc-v { white-space: nowrap; }

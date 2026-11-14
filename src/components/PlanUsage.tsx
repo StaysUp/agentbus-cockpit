@@ -4,7 +4,7 @@ import { PlanReading, SavedAgent, SubscriptionList } from '../types';
 // How much of an agent's own plan is left, as one quiet bar and one line.
 // The bar is the longest window (such as the week), with its words in the
 // bar's tooltip; the line is the shortest (such as "5h · 62% left
-// · resets 14:20"). With one window, only the bar shows. It comes from the
+// · 14:20"). With one window, only the bar shows. It comes from the
 // subscription control keeps for the agent's harness (GET
 // /api/v0/subscriptions, usage), which the vendor reports on each model
 // reply: claude and codex do. An agent with no reading yet shows nothing.
@@ -72,11 +72,12 @@ export function shortLabel(p: PlanReading): string {
   return `${m}m`;
 }
 
-// shortLine is the line under the bar: "5h · 62% left · resets 14:20".
+// shortLine is the line under the bar, short enough for one line:
+// "5h · 62% left · 14:20", the time being when it resets. The full words,
+// "as of" included, are its tooltip (planLine).
 export function shortLine(p: PlanReading, now: Date): string {
   const parts = [shortLabel(p), `${percentLeft(p)}% left`];
-  if (p.resets_at && new Date(p.resets_at).getTime() > now.getTime()) parts.push(`resets ${when(new Date(p.resets_at), now)}`);
-  if (stale(p, now)) parts.push(`as of ${when(new Date(p.read_at), now)}`);
+  if (p.resets_at && new Date(p.resets_at).getTime() > now.getTime()) parts.push(when(new Date(p.resets_at), now));
   return parts.join(' · ');
 }
 
@@ -91,7 +92,7 @@ export const PlanUsage: React.FC<{ usage: PlanReading[] | undefined; now?: Date 
       <span className="quota" role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={left} aria-label={words} title={words}>
         <i style={{ width: `${left}%` }} />
       </span>
-      {usage.length > 1 && <span className="q-l plan-line">{shortLine(shortest, now)}</span>}
+      {usage.length > 1 && <span className="q-l plan-line" title={planLine(shortest, now)}>{shortLine(shortest, now)}</span>}
     </>
   );
 };

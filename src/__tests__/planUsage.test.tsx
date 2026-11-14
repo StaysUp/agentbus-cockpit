@@ -2,7 +2,7 @@
 // What is left of each agent's own plan, under its name in the Agents
 // column, from the subscription's usage (GET /api/v0/subscriptions): one
 // quiet bar for the longest window, its words in the bar's tooltip, and the
-// line "5h · 62% left · resets 14:20" for the shortest. Nothing
+// line "5h · 62% left · 14:20" for the shortest. Nothing
 // without a reading. A subscription agent's turn end reads it again.
 import { act } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -44,7 +44,7 @@ afterEach(() => {
 describe('the plan line', () => {
   it('names the window, what is left and when it resets', () => {
     expect(planLine({ ...fiveHour, used_percent: 38 }, now)).toBe('5-hour limit · 62% left · resets 14:20');
-    expect(shortLine({ ...fiveHour, used_percent: 38 }, now)).toBe('5h · 62% left · resets 14:20');
+    expect(shortLine({ ...fiveHour, used_percent: 38 }, now)).toBe('5h · 62% left · 14:20');
     expect(shortLabel({ ...fiveHour, window_minutes: 7 * 24 * 60 })).toBe('7d');
     expect(planLine(weekly, now)).toBe('Weekly limit · 31% left · resets Fri 09:00');
   });
@@ -100,7 +100,7 @@ describe('the Agents column', () => {
     expect((bar.querySelector('i') as HTMLElement).style.width).toBe('31%');
     expect(bar.getAttribute('title')).toMatch(/^Weekly limit · 31% left · resets \w+ \d\d:\d\d$/);
     expect(bar.getAttribute('aria-label')).toBe(bar.getAttribute('title'));
-    expect(row.querySelector('.plan-line')?.textContent).toMatch(/^5h · 62% left · resets \d\d:\d\d$/);
+    expect(row.querySelector('.plan-line')?.textContent).toMatch(/^5h · 62% left · \d\d:\d\d$/);
     const other = rowOf(r.container, 'codex');
     expect(other.querySelector('.quota')).toBeNull();
     expect(other.querySelector('.plan-line')).toBeNull();
