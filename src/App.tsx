@@ -65,6 +65,15 @@ const LIST_REFRESH_MS = 500;
 // How often a running turn of the shown session is read, to see it end.
 export const TURN_END_POLL_MS = 2000;
 
+// onSubscription says the turn event e ends ran on a subscription, as its
+// turn.started held in live says (access absent means subscription), or
+// that nothing held says otherwise.
+function onSubscription(live: LiveTurns, e: CockpitEvent): boolean {
+  const start = live[e.session]?.turn === e.turn ? live[e.session].events.find((x) => x.kind === 'turn.started') : undefined;
+  const access = start?.access;
+  return access === undefined || access === 'subscription';
+}
+
 // How often the subscriptions are read again, for how much of each plan is
 // left (GET /api/v0/subscriptions, usage).
 const SUBSCRIPTIONS_EVERY = 60_000;
@@ -231,6 +240,8 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
   // where one is connected or a key set). Undefined before the first read, null when the
   // service keeps none. No polling of its own.
   const [subs, setSubs] = useState<SubscriptionList | null | undefined>(undefined);
+  // Reads the subscriptions again now, while the cockpit shows them.
+  const readSubsRef = useRef<(() => void) | undefined>(undefined);
   // Settings opens on Subscriptions when an agent's sign-in dot sent it.
   const [settingsAtSubs, setSettingsAtSubs] = useState(false);
   // An agent's name for a screen: a saved agent's, else its harness's.
@@ -427,6 +438,12 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
         // an apply would write: the bar above the message box reads it again.
         if (s && event.session === s.session.id && PREVIEW_KINDS.has(event.kind)) {
           readPreviewRef.current(s.session.id);
+        }
+        // A turn's end: its last reply's plan usage is stored by then, so a
+        // subscription agent's bar reads it now rather than at the next
+        // minute. A turn whose start is not held may be one: read anyway.
+        if (event.kind === 'turn.completed' && !event.probe && onSubscription(liveTurnsRef.current, event)) {
+          readSubsRef.current?.();
         }
 
         // A call adds to its row's total now, unless the shown list already
@@ -657,8 +674,9 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
     };
   }, [dataSource, agentsDialog, agentsKey, page]);
   // Read with the agents, so an agent's key_set and the OpenRouter key kept
-  // on control are read at the same moment; then once a minute, for how
-  // much of each plan is left, which every model call can change.
+  // on control are read at the same moment; then when a subscription
+  // agent's turn ends (the stream calls readSubsRef), for how much of its
+  // plan is left, and once a minute in case no turn tells.
   useEffect(() => {
     if (!dataSource.listSubscriptions || agentsDialog !== null || page !== 'cockpit') return;
     let active = true;
@@ -668,9 +686,11 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
         () => undefined
       );
     read();
+    readSubsRef.current = read;
     const timer = setInterval(read, SUBSCRIPTIONS_EVERY);
     return () => {
       active = false;
+      readSubsRef.current = undefined;
       clearInterval(timer);
     };
   }, [dataSource, agentsDialog, agentsKey, page]);

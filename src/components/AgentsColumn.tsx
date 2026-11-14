@@ -3,7 +3,7 @@ import { follow, PAGE_PATHS } from '../page';
 import { SavedAgent, SubscriptionList } from '../types';
 import { FeedbackDialog } from './FeedbackDialog';
 import { PlusIcon } from './Icons';
-import { PlanUsage, planOf } from './PlanUsage';
+import { PlanUsage, usageOf } from './PlanUsage';
 import { SignInDot, signInOf } from './SignInDot';
 
 interface AgentsColumnProps {
@@ -102,7 +102,7 @@ export const AgentsColumn: React.FC<AgentsColumnProps> = ({
                   <SignInDot signIn={signInOf(a, subscriptions)} onOpen={onOpenSignIn} />
                 </b>
                 <span className="q-l">{savedLine(a)}</span>
-                <PlanUsage plan={planOf(a, subscriptions)} />
+                <PlanUsage usage={usageOf(a, subscriptions)} />
               </span>
             </>
           );

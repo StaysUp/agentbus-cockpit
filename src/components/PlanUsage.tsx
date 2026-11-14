@@ -1,20 +1,22 @@
 import React from 'react';
 import { PlanReading, SavedAgent, SubscriptionList } from '../types';
 
-// How much of an agent's own plan is left, as one quiet bar and one line:
-// "5-hour limit · 62% left · resets 14:20". It comes from the subscription
-// control keeps for the agent's harness (GET /api/v0/subscriptions, usage),
-// which the vendor reports on each model reply: claude and codex do. An
-// agent with no reading yet shows nothing.
+// How much of an agent's own plan is left, as one quiet bar and one line.
+// The bar is the longest window (such as the week), with its words in the
+// bar's tooltip; the line is the shortest (such as "5h · 62% left
+// · resets 14:20"). With one window, only the bar shows. It comes from the
+// subscription control keeps for the agent's harness (GET
+// /api/v0/subscriptions, usage), which the vendor reports on each model
+// reply: claude and codex do. An agent with no reading yet shows nothing.
 
-// planOf is the window to show for agent: the one with the least left,
-// since that is the one that stops it. Undefined when there is none.
-export function planOf(agent: SavedAgent, subs: SubscriptionList | null | undefined): PlanReading | undefined {
+// usageOf is agent's readings, shortest window first (one whose length is
+// unknown last), or undefined when there is none.
+export function usageOf(agent: SavedAgent, subs: SubscriptionList | null | undefined): PlanReading[] | undefined {
   if (agent.access !== 'subscription' || !subs) return undefined;
   const usage = subs.subscriptions.find((s) => s.harness === agent.harness && s.connected)?.usage;
   if (!usage || usage.length === 0) return undefined;
-  // The API lists the shortest window first, so a tie keeps it.
-  return usage.reduce((a, b) => (b.used_percent > a.used_percent ? b : a));
+  const len = (p: PlanReading) => p.window_minutes || Infinity;
+  return [...usage].sort((a, b) => len(a) - len(b));
 }
 
 // windowLabel names a window by its length: "5-hour limit", "Weekly limit".
@@ -61,15 +63,35 @@ export function planLine(p: PlanReading, now: Date): string {
   return parts.join(' · ');
 }
 
-export const PlanUsage: React.FC<{ plan: PlanReading | undefined; now?: Date }> = ({ plan, now = new Date() }) => {
-  if (!plan) return null;
-  const left = percentLeft(plan);
+// shortLabel names a window in a few letters: "5h", "7d", "30m".
+export function shortLabel(p: PlanReading): string {
+  const m = p.window_minutes;
+  if (!m) return p.window;
+  if (m % (24 * 60) === 0) return `${m / (24 * 60)}d`;
+  if (m % 60 === 0) return `${m / 60}h`;
+  return `${m}m`;
+}
+
+// shortLine is the line under the bar: "5h · 62% left · resets 14:20".
+export function shortLine(p: PlanReading, now: Date): string {
+  const parts = [shortLabel(p), `${percentLeft(p)}% left`];
+  if (p.resets_at && new Date(p.resets_at).getTime() > now.getTime()) parts.push(`resets ${when(new Date(p.resets_at), now)}`);
+  if (stale(p, now)) parts.push(`as of ${when(new Date(p.read_at), now)}`);
+  return parts.join(' · ');
+}
+
+export const PlanUsage: React.FC<{ usage: PlanReading[] | undefined; now?: Date }> = ({ usage, now = new Date() }) => {
+  if (!usage || usage.length === 0) return null;
+  const shortest = usage[0];
+  const longest = usage[usage.length - 1];
+  const left = percentLeft(longest);
+  const words = planLine(longest, now);
   return (
     <>
-      <span className="quota" role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={left} aria-label={`${windowLabel(plan)}: ${left}% left`}>
+      <span className="quota" role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={left} aria-label={words} title={words}>
         <i style={{ width: `${left}%` }} />
       </span>
-      <span className="q-l plan-line">{planLine(plan, now)}</span>
+      {usage.length > 1 && <span className="q-l plan-line">{shortLine(shortest, now)}</span>}
     </>
   );
 };
