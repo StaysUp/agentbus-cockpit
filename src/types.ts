@@ -713,6 +713,12 @@ export interface AppDef extends AppSummary {
   run: AppRun;
 }
 
+// How a caller follows and stops a long read of a session's events.
+export interface SessionEventsOptions {
+  signal?: AbortSignal;
+  onProgress?: (events: number) => void;
+}
+
 export interface DataSource {
   getSessions(): Promise<SessionSummary[]>;
   // The sessions with the cursor they were taken at. A source without it is
@@ -829,8 +835,10 @@ export interface DataSource {
   // record to carry the flag). Rejects with the API's words.
   archiveSession?(sessionId: string, archived: boolean): Promise<'ok' | 'running'>;
   // A source that keeps a record has this: every event of one session, oldest
-  // first, as the API sends them. Rejects with the API's words.
-  getSessionEvents?(sessionId: string): Promise<unknown[]>;
+  // first, as the API sends them. Rejects with the API's words. onProgress is
+  // told how many events have been read after each page; aborting signal
+  // stops between pages and rejects with an AbortError.
+  getSessionEvents?(sessionId: string, opts?: SessionEventsOptions): Promise<unknown[]>;
   // A source that runs turns can stop one: 'stopping' when the service took
   // the stop (202, also when it was already stopping), 'not-running' when the
   // turn has already ended (409). Rejects with an Error in the API's own words.
