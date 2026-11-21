@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { FolderInfo, lastMachine, recentFolders } from '../data/folders';
+import { FolderInfo, byRecentUse, lastMachine, recentFolders } from '../data/folders';
 import { Harness, RunRequest, RunnerInfo, SavedAgent } from '../types';
 import { agentLine } from './AgentsDialog';
 import { Button, Select } from './Controls';
@@ -82,25 +82,39 @@ export const NewSessionDialog: React.FC<NewSessionDialogProps> = ({
     // usable is derived from machines each render.
   }, [machines, machineTouched, machine]);
   const picked = usable.find((m) => m.machine === machine);
-  // The listed folders and the recent paths of the machine picked; all of
-  // them on a service that names no machine. At most five recent paths,
-  // newest first (recentFolders keeps no more).
-  const folders = byMachine ? allFolders.filter((f) => f.machine === machine) : allFolders;
+  // Every listed folder, on whichever machine holds it, recently used first;
+  // the recent paths are the machine picked's (all of them on a service that
+  // names no machine). At most five recent paths, newest first (recentFolders
+  // keeps no more).
+  const folderKey = allFolders.map((f) => f.ref).join(',');
+  const folders = useMemo(() => byRecentUse(allFolders), [folderKey]);
   const recent = useMemo(() => recentFolders(byMachine ? machine : undefined), [byMachine, machine]);
+  // A listed folder names its machine when there is more than one to start on.
+  const machineOf = (f: FolderInfo) => usable.find((m) => m.machine === f.machine);
+  const nameMachines = byMachine && usable.length > 1;
   // No folder is picked for the person: the session runs where they say,
   // so Start waits for a listed folder, a recent one or a typed path. A
   // listed folder that leaves the list is dropped.
   const [where, setWhere] = useState<Where | null>(null);
-  const folderKey = folders.map((f) => f.ref).join(',');
   useEffect(() => {
-    setWhere((cur) => (cur && 'ref' in cur && !folders.some((f) => f.ref === cur.ref) ? null : cur));
-    // folders is derived from allFolders and machine each render.
+    setWhere((cur) => (cur && 'ref' in cur && !allFolders.some((f) => f.ref === cur.ref) ? null : cur));
+    // allFolders is a new array each render; its references are the key.
   }, [folderKey]);
   const pick = (w: Where) => setWhere(w);
-  // Another machine holds other folders: the folder is picked again.
+  // A listed folder runs where it is: picking one on another machine picks
+  // that machine too.
+  const pickFolder = (f: FolderInfo) => {
+    if (byMachine && f.machine && f.machine !== machine) {
+      setMachineTouched(true);
+      setMachine(f.machine);
+    }
+    pick({ ref: f.ref, machine: f.machine });
+  };
+  // Another machine holds other folders: a typed path, or a listed folder of
+  // the machine left, is picked again.
   const pickMachine = (m: string) => {
     setMachineTouched(true);
-    if (m !== machine) setWhere(null);
+    if (m !== machine) setWhere((cur) => (cur && 'ref' in cur && cur.machine === m ? cur : null));
     setMachine(m);
   };
   const path = where && 'path' in where ? where.path : '';
@@ -228,17 +242,30 @@ export const NewSessionDialog: React.FC<NewSessionDialogProps> = ({
         </label>
         {(folders.length > 0 || recent.length > 0) && (
           <div className="nd-recent">
-            {folders.map((f) => (
-              <button
-                type="button"
-                key={f.ref}
-                className={`pick${where && 'ref' in where && where.ref === f.ref ? ' on' : ''}`}
-                title={f.ref}
-                onClick={() => pick({ ref: f.ref, machine: f.machine })}
-              >
-                <code>{f.name || f.ref}</code>
-              </button>
-            ))}
+            {folders.map((f) => {
+              const on = machineOf(f);
+              // A folder on a machine that is offline, or not one a session
+              // can start on, cannot be picked.
+              const off = byMachine && (!on || !on.online);
+              return (
+                <button
+                  type="button"
+                  key={f.ref}
+                  className={`pick${where && 'ref' in where && where.ref === f.ref ? ' on' : ''}`}
+                  title={f.ref}
+                  disabled={off}
+                  onClick={() => pickFolder(f)}
+                >
+                  <code>{f.name || f.ref}</code>
+                  {nameMachines && (
+                    <span className="nd-machine">
+                      {on ? on.name : f.machine}
+                      {off ? ' · offline' : ''}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
             {recent.map((f) => (
               <button type="button" key={f} className={`pick${f === path ? ' on' : ''}`} onClick={() => pick({ path: f })}>
                 <code>{f}</code>
