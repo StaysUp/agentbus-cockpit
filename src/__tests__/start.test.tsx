@@ -1861,7 +1861,13 @@ describe('New session: the machine, then a folder on it', () => {
   const picks = (dialog: Element) => Array.from(dialog.querySelectorAll('.nd-recent button')).map((b) => b.textContent);
   const choose = (dialog: Element, v: string) => chooseOpt(dialog, 'machine', v);
 
-  it('lists the machines, offline ones disabled, and shows only the picked machine\'s folders and recents', async () => {
+  // A listed folder's name, and the machine the button names.
+  const listed = (dialog: Element) =>
+    Array.from(dialog.querySelectorAll('.nd-recent button')).flatMap((b) =>
+      b.querySelector('.nd-machine') ? [[b.querySelector('code')!.textContent, b.querySelector('.nd-machine')!.textContent]] : []
+    );
+
+  it('lists the machines, offline ones disabled, every listed folder with its machine, and the picked machine\'s recents', async () => {
     localStorage.setItem('agentbus.folders.con_a', JSON.stringify(['/Users/ana/web']));
     localStorage.setItem('agentbus.folders.con_c', JSON.stringify(['/work/ops']));
     const svc = fakeService({ sessions: [row('s1')], events: { s1: oneTurn('s1', 'hi') }, agents: AGENTS, folders: FOLDERS, runners: MACHINES });
@@ -1873,14 +1879,57 @@ describe('New session: the machine, then a folder on it', () => {
       ['con_b', 'box', true],
     ]);
     expect(selectIn(dialog, 'machine')!.value).toBe('con_a');
-    expect(picks(dialog)).toEqual(['app', '/Users/ana/web']);
-    // A folder picked on one machine is dropped when the machine changes.
+    expect(listed(dialog)).toEqual([
+      ['app', 'mac'],
+      ['infra', 'vm'],
+    ]);
+    expect(picks(dialog)).toEqual(['appmac', 'infravm', '/Users/ana/web']);
+    // A folder of one machine is dropped when another machine is picked.
     await click(dialog.querySelector('.nd-recent button'));
-    expect(dialog.querySelector('.nd-recent button.on')?.textContent).toBe('app');
+    expect(dialog.querySelector('.nd-recent button.on code')?.textContent).toBe('app');
     await choose(dialog, 'con_c');
-    expect(picks(dialog)).toEqual(['infra', '/work/ops']);
+    expect(picks(dialog)).toEqual(['appmac', 'infravm', '/work/ops']);
     expect(dialog.querySelector('.nd-recent button.on')).toBeNull();
     expect((dialog.querySelector('input[name="folder"]') as HTMLInputElement).value).toBe('');
+    r.unmount();
+  });
+
+  it('picking a folder on another machine picks that machine, and the session starts there', async () => {
+    const svc = fakeService({ sessions: [row('s1')], events: { s1: oneTurn('s1', 'hi') }, agents: AGENTS, folders: FOLDERS, runners: MACHINES });
+    const { r, dialog } = await openDialog(svc);
+    expect(selectIn(dialog, 'machine')!.value).toBe('con_a');
+    const infra = Array.from(dialog.querySelectorAll('.nd-recent button')).find((b) => b.querySelector('code')?.textContent === 'infra')!;
+    await click(infra);
+    expect(selectIn(dialog, 'machine')!.value).toBe('con_c');
+    expect(dialog.querySelector('.nd-recent button.on code')?.textContent).toBe('infra');
+    // The recents shown are the new machine's.
+    await setValue(dialog.querySelector('textarea[name="prompt"]'), 'x');
+    await submitForm(dialog);
+    expect(sentBody(svc)).toEqual({ agent: 'claude', folder_ref: 'fld_00000000000000c1', machine: 'con_c', isolate: true, prompt: 'x' });
+    // Remembered by reference, so it is offered first next time; never as a path.
+    expect(JSON.parse(localStorage.getItem('agentbus.folderRefs') ?? '[]')).toEqual(['fld_00000000000000c1']);
+    expect(localStorage.getItem('agentbus.folders.con_c')).toBeNull();
+    r.unmount();
+  });
+
+  it('offers recently used folders first, and a folder on an offline machine cannot be picked', async () => {
+    const folders = [
+      ...FOLDERS,
+      { ref: 'fld_00000000000000b1', name: 'docs', machine: 'con_b', runner: 'run_box' },
+    ];
+    localStorage.setItem('agentbus.folderRefs', JSON.stringify(['fld_00000000000000c1', 'fld_00000000000000b1']));
+    const svc = fakeService({ sessions: [row('s1')], events: { s1: oneTurn('s1', 'hi') }, agents: AGENTS, folders, runners: MACHINES });
+    const { r, dialog } = await openDialog(svc);
+    expect(listed(dialog)).toEqual([
+      ['infra', 'vm'],
+      ['docs', 'box · offline'],
+      ['app', 'mac'],
+    ]);
+    const docs = Array.from(dialog.querySelectorAll('.nd-recent button')).find((b) => b.querySelector('code')?.textContent === 'docs') as HTMLButtonElement;
+    expect(docs.disabled).toBe(true);
+    await click(docs);
+    expect(dialog.querySelector('.nd-recent button.on')).toBeNull();
+    expect(selectIn(dialog, 'machine')!.value).toBe('con_a');
     r.unmount();
   });
 
