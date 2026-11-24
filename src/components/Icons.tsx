@@ -21,7 +21,7 @@ export const CloseIcon: React.FC = () => <X size={16} strokeWidth={2.2} aria-hid
 // or is hidden from the list.
 export const LockIcon: React.FC = () => <Lock size={13} strokeWidth={1.8} aria-hidden="true" />;
 
-export const CopyButton: React.FC<{ text: string }> = ({ text }) => {
+export const CopyButton: React.FC<{ text: string; label?: string }> = ({ text, label = 'Copy' }) => {
   const [copied, setCopied] = React.useState(false);
 
   const handleCopy = (e: React.MouseEvent) => {
@@ -32,7 +32,7 @@ export const CopyButton: React.FC<{ text: string }> = ({ text }) => {
   };
 
   return (
-    <button className="copy" onClick={handleCopy} title={copied ? 'Copied!' : 'Copy to clipboard'} aria-label="Copy">
+    <button className="copy" onClick={handleCopy} title={copied ? 'Copied!' : label} aria-label={label}>
       {copied ? <TickIcon /> : <CopyIcon />}
     </button>
   );

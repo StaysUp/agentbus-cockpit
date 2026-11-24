@@ -4,6 +4,7 @@ import { harnessName, turnNotes } from '../data/turns';
 import { Level, QueuedTurn, SavedAgent, SessionDetail, ShellRun, Started, Turn } from '../types';
 import { useNow } from '../utils/useNow';
 import { Markdown } from './Markdown';
+import { CopyButton } from './Icons';
 import { formatCost, formatTokens, stateLabel, turnStateClass } from '../utils/format';
 import { Cost } from './Cost';
 import { folderLabel, sessionFolderRef, useFolders } from '../data/folders';
@@ -824,6 +825,10 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
                     <div className={`m-agent md-reply${detail ? '' : ' preview'}`}>
                       {/* The agent's reply is markdown, shown formatted. The turn panel keeps it raw. */}
                       <Markdown text={answer} cut={answerCut} files={{ session: session.id, folder: session.folder }} />
+                      {/* Copies the agent's own markdown, not the rendered text. */}
+                      <div className="reply-actions">
+                        <CopyButton text={answer} label="Copy this reply" />
+                      </div>
                     </div>
                   )}
 
