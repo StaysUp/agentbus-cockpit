@@ -475,6 +475,12 @@ tr.ev-open > td { background: var(--bg); border-bottom: 1px solid var(--line); p
 .nd-note { font-size: var(--fs-xs); color: var(--ink3); margin-top: -0.375rem; }
 .nd-sandbox { display: flex; flex-direction: column; gap: 0.25rem; margin-top: 0.125rem; }
 .nd-sandbox .nd-note { margin-top: 0; }
+/* Start from: the folder as it is, or a git base (a branch, tag or commit). */
+.nd-start { display: flex; flex-direction: column; gap: 0.25rem; }
+.nd-start .nd-note { margin-top: 0; }
+.nd-base { display: flex; flex-direction: column; gap: 0.5rem; }
+.nd-base .nd-note { margin-top: 0; }
+.new-dialog input[name="base"], .new-dialog input[name="remote"] { font-family: var(--mono); font-size: var(--fs-xs); }
 /* A quiet confirmation: Settings' "Saved.", the apply panel's "Applied." */
 .nd-note.ok { color: var(--green); }
 .nd-actions { display: flex; align-items: center; gap: 0.75rem; margin-top: 0.1875rem; }

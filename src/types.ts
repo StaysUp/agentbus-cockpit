@@ -381,6 +381,12 @@ export interface RunRequest {
   // changes are applied on request. False: the agent works in the folder as it
   // is. The workspace's one mode, set when it is created.
   sandbox?: boolean;
+  // Where a sandbox workspace starts, when not the folder as it is: a branch,
+  // tag or commit of the folder's git repo (base), fetched first from remote
+  // when that is set. Resolved by the folder's machine when the workspace is
+  // made.
+  base?: string;
+  remote?: string;
   // The session's name, set on POST /api/v0/sessions. Absent leaves the first
   // message as its title.
   title?: string;

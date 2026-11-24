@@ -714,6 +714,8 @@ export class LiveDataSource implements DataSource {
     if (req.machine) wsBody.machine = req.machine;
     // Sent explicitly, both ways, so the record carries the person's choice.
     wsBody.sandbox = req.sandbox !== false;
+    if (req.base) wsBody.base = req.base;
+    if (req.base && req.remote) wsBody.remote = req.remote;
     if (key) wsBody.idempotency_key = key;
     const ws = await this.send<{ workspace: string }>('POST', '/api/v0/workspaces', wsBody);
     return ws.workspace;

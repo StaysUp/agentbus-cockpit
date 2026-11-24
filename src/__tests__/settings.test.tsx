@@ -17,6 +17,7 @@ function policy(): Policy {
     forbid: ['git push'],
     isolation: 'auto',
     home_files: [],
+    carry_files: [],
     limits: { max_depth: 2, max_jobs_per_turn: 10, max_jobs_per_tree: 30, max_cost_usd_per_tree: 0 },
     agent_api: { apply: false },
   };
@@ -284,7 +285,7 @@ describe('the Settings page', () => {
     expect([...SETTINGS_CONTROLS].sort()).toEqual(Object.keys(flatPolicy(policy())).filter((k) => !advancedOnly.includes(k)).sort());
     const groups: Record<string, string[]> = {
       permissions: ['agent_api.apply', 'allow', 'ask', 'forbid', 'allow.tool', 'ask.tool', 'forbid.tool'],
-      config: ['home_files'],
+      config: ['home_files', 'carry_files'],
       limits: ['limits.max_depth', 'limits.max_jobs_per_turn', 'limits.max_jobs_per_tree', 'limits.max_cost_usd_per_tree'],
     };
     for (const [g, keys] of Object.entries(groups)) {

@@ -173,6 +173,13 @@ export const NewSessionDialog: React.FC<NewSessionDialogProps> = ({
   // run in a copy of the folder whose changes you apply. Off: the agent works
   // in the folder as it is.
   const [sandbox, setSandbox] = useState(lastSandbox);
+  // Where a Copy session starts: the folder as it is (the default), or a git
+  // base of the folder's repo -- a local branch, tag or commit, or a branch
+  // fetched from a remote first. The service resolves it when the workspace
+  // is made, so a name it cannot find is refused here, on the form.
+  const [start, setStart] = useState<'folder' | 'local' | 'remote'>('folder');
+  const [base, setBase] = useState('');
+  const [remote, setRemote] = useState('origin');
   const [starting, setStarting] = useState(false);
   // Start was pressed with something missing: the missing field says so.
   const [tried, setTried] = useState(false);
@@ -212,7 +219,9 @@ export const NewSessionDialog: React.FC<NewSessionDialogProps> = ({
   const mixed = several && rowMachines.size > 1;
   const rowsOk = !twice && !mixed;
   const machineOk = !byMachine || (!!picked && picked.online);
-  const ready = agent !== '' && hasWhere && rowsOk && machineOk && !starting;
+  const fromBase = sandbox && !several && start !== 'folder';
+  const baseOk = !fromBase || (base.trim() !== '' && (start !== 'remote' || remote.trim() !== ''));
+  const ready = agent !== '' && hasWhere && rowsOk && machineOk && baseOk && !starting;
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -232,8 +241,11 @@ export const NewSessionDialog: React.FC<NewSessionDialogProps> = ({
         : 'ref' in one
           ? { folder_ref: one.ref, machine: one.machine }
           : { folder: one.path.trim(), ...(byMachine ? { machine: machine } : {}) };
+      const from = fromBase
+        ? { base: base.trim(), ...(start === 'remote' ? { remote: remote.trim() } : {}) }
+        : {};
       rememberSandbox(sandbox);
-      await onStart({ agent, ...at, sandbox, prompt: prompt.trim() === '' ? '' : prompt }, name.trim() || undefined);
+      await onStart({ agent, ...at, sandbox, ...from, prompt: prompt.trim() === '' ? '' : prompt }, name.trim() || undefined);
     } catch (err) {
       const msg = (err as Error).message;
       setError((wheres.some((w) => w && 'path' in w) && folderRefusal(msg)) || msg);
@@ -412,6 +424,69 @@ export const NewSessionDialog: React.FC<NewSessionDialogProps> = ({
               : 'Works in your folder as it is — no copy to apply.'}
           </div>
         </label>
+        {sandbox && (
+          <label className="nd-start">
+            <span>Start from</span>
+            <Seg
+              label="Where the session starts from"
+              dataKey="start"
+              value={start}
+              options={[
+                { value: 'folder', label: 'Folder as it is' },
+                { value: 'local', label: 'Local branch' },
+                { value: 'remote', label: 'Remote branch' },
+              ]}
+              onChange={(v) => setStart(v as 'folder' | 'local' | 'remote')}
+            />
+            {start === 'folder' && (
+              <div className="nd-note">The copy has your folder exactly as it is, uncommitted edits included.</div>
+            )}
+          </label>
+        )}
+        {fromBase && (
+          <div className="nd-base">
+            {start === 'remote' && (
+              <label>
+                <span>Remote</span>
+                <input
+                  name="remote"
+                  type="text"
+                  value={remote}
+                  onChange={(e) => setRemote(e.target.value)}
+                  placeholder="origin"
+                  spellCheck={false}
+                  autoComplete="off"
+                  aria-invalid={tried && remote.trim() === '' ? true : undefined}
+                />
+              </label>
+            )}
+            <label>
+              <span>{start === 'remote' ? 'Branch' : 'Branch, tag or commit'}</span>
+              <input
+                name="base"
+                type="text"
+                value={base}
+                onChange={(e) => setBase(e.target.value)}
+                placeholder={start === 'remote' ? 'feature/login' : 'main, feature/login, v1.2 or a commit id'}
+                spellCheck={false}
+                autoComplete="off"
+                aria-invalid={tried && base.trim() === '' ? true : undefined}
+                className={tried && base.trim() === '' ? 'invalid' : undefined}
+              />
+            </label>
+            {tried && !baseOk && (
+              <Notice kind="error" className="nd-missing">
+                {start === 'remote' ? 'Name the remote and the branch to start from.' : 'Name the branch, tag or commit to start from.'}
+              </Notice>
+            )}
+            <div className="nd-note">
+              {start === 'remote'
+                ? 'Fetched from the remote first, so the session starts from what it has now. Your folder and its branch do not change.'
+                : 'Starts from that commit as your repo has it. Your uncommitted edits are not in it, and your folder does not change.'}{' '}
+              Files git ignores, such as .env, come along only when Settings, Config, Copied from your folder names them.
+            </div>
+          </div>
+        )}
         <label>
           <span>Name (optional)</span>
           <input

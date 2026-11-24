@@ -541,6 +541,83 @@ describe('The mode selector', () => {
     r.unmount();
   });
 
+  const startAt = (dialog: Element, v: string) => dialog.querySelector(`[data-start="${v}"]`) as HTMLButtonElement;
+
+  it('starts from the folder as it is by default: no base is sent', async () => {
+    const svc = fakeService({ sessions: [row('s1')], events: { s1: oneTurn('s1', 'hi') }, agents: AGENTS });
+    const r = await mount(svc);
+    await click(r.container.querySelector('#sessions button.new-session'));
+    await settle();
+    const dialog = r.container.querySelector('.new-dialog')!;
+    expect(startAt(dialog, 'folder').getAttribute('aria-checked')).toBe('true');
+    expect(dialog.querySelector('input[name="base"]')).toBeNull();
+    r.unmount();
+  });
+
+  it('a local branch is sent as base, and a remote branch as base and remote', async () => {
+    for (const [pick, want] of [
+      ['local', { folder: '/Users/ana/x', sandbox: true, base: 'feature/login' }],
+      ['remote', { folder: '/Users/ana/x', sandbox: true, base: 'feature/login', remote: 'origin' }],
+    ] as const) {
+      const svc = fakeService({ sessions: [row('s1')], events: { s1: oneTurn('s1', 'hi') }, agents: AGENTS });
+      const r = await mount(svc);
+      await click(r.container.querySelector('#sessions button.new-session'));
+      await settle();
+      const dialog = r.container.querySelector('.new-dialog')!;
+      await click(startAt(dialog, pick));
+      expect(dialog.querySelector('input[name="remote"]') !== null).toBe(pick === 'remote');
+      await setValue(dialog.querySelector('input[name="folder"]'), '/Users/ana/x');
+      await setValue(dialog.querySelector('input[name="base"]'), ' feature/login ');
+      await setValue(dialog.querySelector('textarea[name="prompt"]'), 'go');
+      await submitForm(dialog);
+      expect(workspaceBody(svc)).toEqual(want);
+      r.unmount();
+    }
+  });
+
+  it('a branch start waits for the branch name, and Direct has no start picker', async () => {
+    const svc = fakeService({ sessions: [row('s1')], events: { s1: oneTurn('s1', 'hi') }, agents: AGENTS });
+    const r = await mount(svc);
+    await click(r.container.querySelector('#sessions button.new-session'));
+    await settle();
+    const dialog = r.container.querySelector('.new-dialog')!;
+    await click(startAt(dialog, 'local'));
+    await setValue(dialog.querySelector('input[name="folder"]'), '/Users/ana/x');
+    await setValue(dialog.querySelector('textarea[name="prompt"]'), 'go');
+    await submitForm(dialog);
+    expect(svc.reqs.filter((q) => q.method === 'POST' && q.path === '/api/v0/workspaces')).toHaveLength(0);
+    expect(dialog.textContent).toContain('Name the branch, tag or commit to start from.');
+    await click(mode(dialog, 'direct'));
+    expect(startAt(dialog, 'local')).toBeNull();
+    expect(dialog.querySelector('input[name="base"]')).toBeNull();
+    await submitForm(dialog);
+    expect(workspaceBody(svc)).toEqual({ folder: '/Users/ana/x', sandbox: false });
+    r.unmount();
+  });
+
+  it('a base the folder\'s repo does not have is refused on the form, with the service\'s words', async () => {
+    const svc = fakeService({
+      sessions: [row('s1')],
+      events: { s1: oneTurn('s1', 'hi') },
+      agents: AGENTS,
+      workspaces: () => json({ error: "base is not a branch, tag or commit in the folder's repo" }, 400),
+    });
+    const r = await mount(svc);
+    await click(r.container.querySelector('#sessions button.new-session'));
+    await settle();
+    const dialog = r.container.querySelector('.new-dialog')!;
+    await click(startAt(dialog, 'local'));
+    await setValue(dialog.querySelector('input[name="folder"]'), '/Users/ana/x');
+    await setValue(dialog.querySelector('input[name="base"]'), 'nope');
+    await submitForm(dialog);
+    await settle();
+    const back = r.container.querySelector('.new-dialog')!;
+    expect(back.querySelector('.form-error')?.textContent).toBe("base is not a branch, tag or commit in the folder's repo");
+    expect((back.querySelector('input[name="base"]') as HTMLInputElement).value).toBe('nope');
+    expect(sessionBody(svc)).toBeUndefined();
+    r.unmount();
+  });
+
   it('starts from the remembered choice', async () => {
     localStorage.setItem('agentbus.sandbox', '0');
     const svc = fakeService({ sessions: [row('s1')], events: { s1: oneTurn('s1', 'hi') }, agents: AGENTS });
