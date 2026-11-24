@@ -86,6 +86,9 @@ code { font-size: .86em; }
 .wl.denied .why code { color: var(--bad); }
 .tb .m-agent { font-size: 0.9375rem; line-height: 1.5; }
 .tb .m-agent p { margin: 0 0 0.375rem; }
+/* The copy control under an agent reply: quiet, at the reply's end, and
+   visible on a touch screen without hover. */
+.tb .reply-actions { display: flex; justify-content: flex-end; margin-top: 0.125rem; }
 .after { font-size: var(--fs-m); color: var(--ink2); padding: 2px 0; }
 .after code { font-size: var(--fs-xs); }
 .after:hover { color: var(--ink); }
