@@ -445,6 +445,26 @@ export interface CloseState {
   error?: string;
 }
 
+// POST /api/v0/folders/branches: which folder, and optionally which remote.
+export interface BranchesRequest {
+  folder?: string;
+  folder_ref?: string;
+  machine?: string;
+  remote?: string;
+}
+
+// Its answer: the repo's remotes, and the branches of the repo (current is
+// the one checked out) or of the remote named. stale: the remote could not be
+// reached, so these are the ones last fetched from it.
+export interface BranchList {
+  remotes: string[];
+  remote?: string;
+  current?: string;
+  branches: { name: string; commit: string }[];
+  stale?: boolean;
+  truncated?: boolean;
+}
+
 // GET /api/v0/turns/<id>/diff, as the cockpit reads it: what one turn
 // changed, ran and called.
 export interface TurnDiffFile {
@@ -936,6 +956,10 @@ export interface DataSource {
   // startInWorkspace makes the session and its first turn in a workspace
   // createWorkspace already made, so the folder is never re-checked there.
   createWorkspace?(req: RunRequest): Promise<string>;
+  // POST /api/v0/folders/branches: the git branches a workspace may start
+  // from, listed by the folder's machine -- the repo's own, or with remote
+  // the ones that remote has now.
+  listBranches?(req: BranchesRequest): Promise<BranchList>;
   startInWorkspace?(workspace: string, req: RunRequest): Promise<Started>;
   // agent names a saved agent: the turn runs on it, in the session's folder.
   sendMessage?(
