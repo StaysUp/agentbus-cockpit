@@ -656,6 +656,30 @@ describe('The mode selector', () => {
     r.unmount();
   });
 
+  it('with no folder picked, a branch start sends the person to the folder field, and lists nothing', async () => {
+    const svc = fakeService({ sessions: [row('s1')], events: { s1: oneTurn('s1', 'hi') }, agents: AGENTS, branches: lists });
+    const r = await mount(svc);
+    await click(r.container.querySelector('#sessions button.new-session'));
+    await settle();
+    const dialog = r.container.querySelector('.new-dialog')!;
+    for (const pick of ['local', 'remote']) {
+      await click(startAt(dialog, pick));
+      expect(dialog.querySelector('input[name="base"]')).toBeNull();
+      const need = dialog.querySelector('.nd-need-folder') as HTMLButtonElement;
+      expect(need.textContent).toContain('Pick a folder above');
+      await click(need);
+      expect(document.activeElement).toBe(dialog.querySelector('input[name="folder"]'));
+    }
+    expect(branchPosts(svc)).toEqual([]);
+    // Once a folder is typed, its branches are listed and the picker is there.
+    await setValue(dialog.querySelector('input[name="folder"]'), '/Users/ana/x');
+    await typingStops();
+    await settle();
+    expect(dialog.querySelector('.nd-need-folder')).toBeNull();
+    expect(await suggested(dialog)).toEqual(['feature/login', 'only-online', 'main']);
+    r.unmount();
+  });
+
   it('a tag or commit not in the list may still be typed', async () => {
     const svc = fakeService({ sessions: [row('s1')], events: { s1: oneTurn('s1', 'hi') }, agents: AGENTS, branches: lists });
     const r = await mount(svc);
