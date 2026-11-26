@@ -52,7 +52,7 @@ describe('the setup guide', () => {
     // AgentBus is already running: step 1 is done, and the count leaves the
     // optional steps out.
     expect(row(r.container, 'running').getAttribute('data-done')).toBe('yes');
-    expect(r.container.querySelector('.gd-sumline')!.textContent).toBe('1 of 4 steps done');
+    expect(r.container.querySelector('.gd-sumline')!.textContent).toBe('1 of 6 steps done');
     // The middle opens on the first step still to do.
     expect(row(r.container, 'agents').getAttribute('aria-current')).toBe('step');
     expect(main(r.container).querySelector('.colhead')!.textContent).toBe('Add your agentsstep 2 of 6');
@@ -106,9 +106,9 @@ describe('the setup guide', () => {
     expect(main(r.container).textContent).toContain('Add an agent first.');
   });
 
-  it('reports the facts it read, and marks the required steps done', async () => {
+  it('reports the facts it read, and marks the steps done', async () => {
     const r = await page({ agents: 2, signIn: true, sessions: 1, workedTogether: 1 });
-    expect(r.container.querySelector('.gd-sumline')!.textContent).toBe('4 of 4 steps done');
+    expect(r.container.querySelector('.gd-sumline')!.textContent).toBe('5 of 6 steps done');
     const side = r.container.querySelector('.pg-side') as HTMLElement;
     const text = side.textContent!;
     expect(text).toContain('Agents2');

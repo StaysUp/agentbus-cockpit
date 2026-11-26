@@ -84,11 +84,11 @@ export function guideSteps(f: GuideFacts): GuideStep[] {
   ];
 }
 
-// guideProgress counts the steps that are part of setup. The two optional
-// steps are left out, so a person with one agent still reaches the end.
+// guideProgress counts every step of the quickstart. The optional steps stay
+// marked as optional, but they are part of the walkthrough's count: six steps,
+// of which the person can see how many are done.
 export function guideProgress(steps: GuideStep[]): { done: number; total: number } {
-  const required = steps.filter((s) => !s.optional);
-  return { done: required.filter((s) => s.done).length, total: required.length };
+  return { done: steps.filter((s) => s.done).length, total: steps.length };
 }
 
 // nextGuideStep is the step to open first: the earliest one still to do, and

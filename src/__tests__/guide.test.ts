@@ -38,13 +38,13 @@ describe('the setup guide steps', () => {
     expect(steps.filter((s) => s.optional).map((s) => s.id)).toEqual(['config', 'second-agent']);
   });
 
-  it('counts only the required steps, and opens the first one left to do', () => {
+  it('counts every step, and opens the first required one left to do', () => {
     const fresh = guideSteps(facts({ agents: 0, signIn: false, sessions: 0, workedTogether: 0 }));
-    expect(guideProgress(fresh)).toEqual({ done: 1, total: 4 });
+    expect(guideProgress(fresh)).toEqual({ done: 1, total: 6 });
     expect(nextGuideStep(fresh)?.id).toBe('agents');
 
     const ready = guideSteps(facts({ agents: 1, signIn: true, sessions: 1, workedTogether: 0 }));
-    expect(guideProgress(ready)).toEqual({ done: 4, total: 4 });
+    expect(guideProgress(ready)).toEqual({ done: 4, total: 6 });
     // The optional steps are the next thing to try, in their own order.
     expect(nextGuideStep(ready)?.id).toBe('config');
   });

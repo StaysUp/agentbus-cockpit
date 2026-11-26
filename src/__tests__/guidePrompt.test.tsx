@@ -89,9 +89,9 @@ describe('the way back to the guide', () => {
   it('shows the steps done, returns to the guide, and can be put away', async () => {
     const open = vi.fn();
     const dismiss = vi.fn();
-    const r = await render(<GuideReturn done={2} total={4} onOpen={open} onDismiss={dismiss} />);
+    const r = await render(<GuideReturn done={2} total={6} onOpen={open} onDismiss={dismiss} />);
     expect(r.container.querySelector('.guide-return')!.textContent).toContain('Setup guide');
-    expect(r.container.querySelector('.gr-p')!.textContent).toBe('2 of 4');
+    expect(r.container.querySelector('.gr-p')!.textContent).toBe('2 of 6');
     await click(r.container.querySelector('.gr-open'));
     expect(open).toHaveBeenCalledTimes(1);
     await click(r.container.querySelector('.gr-x'));
@@ -115,7 +115,7 @@ describe('the way back to the guide', () => {
     expect(window.location.pathname).toBe('/');
     const back = r.container.querySelector('.guide-return') as HTMLElement;
     expect(back).not.toBeNull();
-    expect(back.querySelector('.gr-p')!.textContent).toBe('2 of 4');
+    expect(back.querySelector('.gr-p')!.textContent).toBe('2 of 6');
 
     // The pill returns to the guide and leaves the page.
     await click(back.querySelector('.gr-open'));
