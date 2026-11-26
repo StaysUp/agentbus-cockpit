@@ -2,6 +2,7 @@
 // Archiving a conversation (PATCH archived: true|false, a direct toggle, no
 // confirm: archive is only a view and removes nothing) and Export (every
 // event, saved as one .jsonl).
+import { act } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../App';
 import { ARCHIVE_RUNNING } from '../components/ConvoColumn';
@@ -111,7 +112,7 @@ describe('Export', () => {
     expect(link.nextElementSibling!.className).toContain('c-archive');
     await click(link);
     await flush();
-    expect(getSessionEvents).toHaveBeenCalledWith('c1');
+    expect(getSessionEvents).toHaveBeenCalledWith('c1', expect.objectContaining({ signal: expect.any(AbortSignal) }));
     expect(names).toHaveLength(1);
     expect(names[0]).toMatch(/c1\.jsonl$/);
     const text = await new Promise<string>((ok) => {
@@ -131,6 +132,50 @@ describe('Export', () => {
     await flush();
     expect(r.container.querySelector('#c-head .c-act-error')!.textContent).toBe('Export failed: the store could not be read');
     r.unmount();
+  });
+
+  it('counts the events read while it pages, and Cancel stops it with no file and no error', async () => {
+    let progress: ((n: number) => void) | undefined;
+    let signal: AbortSignal | undefined;
+    const getSessionEvents = vi.fn(
+      (_id: string, opts?: { signal?: AbortSignal; onProgress?: (n: number) => void }) =>
+        new Promise<unknown[]>((_ok, fail) => {
+          progress = opts?.onProgress;
+          signal = opts?.signal;
+          signal?.addEventListener('abort', () => fail(new DOMException('aborted', 'AbortError')));
+        })
+    );
+    const saved = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+    const { r } = await open({ getSessionEvents, archiveSession: vi.fn() });
+    const link = () => r.container.querySelector('#c-head .c-export') as HTMLButtonElement;
+    const cancel = () => r.container.querySelector('#c-head .c-export-cancel') as HTMLButtonElement | null;
+    expect(cancel()).toBeNull();
+    await click(link());
+    expect(link().textContent).toBe('Exporting… 0 events');
+    expect(link().disabled).toBe(true);
+    await act(async () => progress!(2000));
+    expect(link().textContent).toBe('Exporting… 2,000 events');
+    await click(cancel());
+    await flush();
+    expect(signal!.aborted).toBe(true);
+    expect(link().textContent).toBe('Export');
+    expect(cancel()).toBeNull();
+    expect(r.container.querySelector('#c-head .c-act-error')).toBeNull();
+    expect(saved).not.toHaveBeenCalled();
+    r.unmount();
+  });
+
+  it('leaving the conversation stops a running export', async () => {
+    let signal: AbortSignal | undefined;
+    const getSessionEvents = vi.fn((_id: string, opts?: { signal?: AbortSignal }) => {
+      signal = opts?.signal;
+      return new Promise<unknown[]>(() => undefined);
+    });
+    const { r } = await open({ getSessionEvents, archiveSession: vi.fn() });
+    await click(r.container.querySelector('#c-head .c-export'));
+    expect(signal!.aborted).toBe(false);
+    r.unmount();
+    expect(signal!.aborted).toBe(true);
   });
 
   it('names the file from the conversation name and id', () => {
@@ -188,5 +233,42 @@ describe('The live source', () => {
       'http://cockpit.test/api/v0/sessions/c1/events?limit=1000',
       'http://cockpit.test/api/v0/sessions/c1/events?limit=1000&store=s2&after=1',
     ]);
+  });
+
+  it('reports the events read after each page, starting over with the read after a 409', async () => {
+    let first = true;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        const q = new URL(url).searchParams;
+        if (q.get('after') && first) {
+          first = false;
+          return new Response('{"error":"store changed"}', { status: 409 });
+        }
+        if (!q.get('after')) return new Response(JSON.stringify({ store: 's', events: [{ seq: 1 }, { seq: 2 }], next_after: 2 }), { status: 200 });
+        return new Response(JSON.stringify({ store: 's', events: [{ seq: 3 }], next_after: null }), { status: 200 });
+      })
+    );
+    const seen: number[] = [];
+    const src = new LiveDataSource({ baseUrl: 'http://cockpit.test', token: 'tok' });
+    expect(await src.getSessionEvents('c1', { onProgress: (n) => seen.push(n) })).toHaveLength(3);
+    expect(seen).toEqual([2, 2, 3]);
+  });
+
+  it('stops between pages when the signal is aborted, and asks for no later page', async () => {
+    const ctl = new AbortController();
+    const urls: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        urls.push(url);
+        expect(init?.signal).toBe(ctl.signal);
+        return new Response(JSON.stringify({ store: 's', events: [{ seq: urls.length }], next_after: urls.length }), { status: 200 });
+      })
+    );
+    const src = new LiveDataSource({ baseUrl: 'http://cockpit.test', token: 'tok' });
+    const read = src.getSessionEvents('c1', { signal: ctl.signal, onProgress: (n) => n === 2 && ctl.abort() });
+    await expect(read).rejects.toMatchObject({ name: 'AbortError' });
+    expect(urls).toHaveLength(2);
   });
 });

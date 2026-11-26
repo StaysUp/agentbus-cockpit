@@ -42,6 +42,7 @@ import {
   RunRequest,
   SavedAgent,
   SessionDetail,
+  SessionEventsOptions,
   SessionList,
   SessionSummary,
   ShellRun,
@@ -1251,8 +1252,8 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
     : undefined;
   // Every event of the session, saved as one .jsonl file.
   const exportSession = dataSource.getSessionEvents
-    ? async (id: string) => {
-        const events = await dataSource.getSessionEvents!(id);
+    ? async (id: string, opts?: SessionEventsOptions) => {
+        const events = await dataSource.getSessionEvents!(id, opts);
         const title = allSessionsRef.current?.find((s) => s.id === id)?.title ?? id;
         saveRecord(recordFileName(title, id), events);
       }

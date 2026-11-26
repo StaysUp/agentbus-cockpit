@@ -6,6 +6,7 @@ import {
   CallContext,
   CockpitEvent,
   DataSource,
+  SessionEventsOptions,
   AgentFields,
   Harness,
   ModelList,
@@ -619,23 +620,29 @@ export class LiveDataSource implements DataSource {
 
   // GET /api/v0/sessions/<id>/events: every event of the session, oldest
   // first, 1000 a page, paged by next_after until it is null. A 409 means
-  // the store changed: start over once.
-  async getSessionEvents(sessionId: string): Promise<unknown[]> {
+  // the store changed: start over once, and the count starts over with it.
+  // After each page onProgress hears how many events are read so far. An
+  // aborted signal cancels the request in flight and rejects with an
+  // AbortError; no later page is asked for.
+  async getSessionEvents(sessionId: string, opts: SessionEventsOptions = {}): Promise<unknown[]> {
+    const { signal, onProgress } = opts;
     const path = `${this.baseUrl}/api/v0/sessions/${encodeURIComponent(sessionId)}/events`;
     for (let attempt = 0; attempt < 2; attempt++) {
       const events: unknown[] = [];
       let cursor: { store: string; after: number } | null = null;
       for (;;) {
+        signal?.throwIfAborted();
         const params = new URLSearchParams({ limit: '1000' });
         if (cursor) {
           params.set('store', cursor.store);
           params.set('after', String(cursor.after));
         }
-        const res = await fetch(`${path}?${params}`, { headers: this.headers() });
+        const res = await fetch(`${path}?${params}`, { headers: this.headers(), signal });
         if (res.status === 409) break;
         if (!res.ok) throw new Error(await apiError(res));
         const data = await res.json();
         events.push(...((data.events || []) as unknown[]));
+        onProgress?.(events.length);
         if (data.next_after === null || data.next_after === undefined) return events;
         cursor = { store: data.store, after: data.next_after };
       }

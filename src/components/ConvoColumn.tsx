@@ -1,7 +1,7 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { liveStatus, LiveTurn, RUNNER_WAIT_MS, steadyNow } from '../data/liveStatus';
 import { harnessName, turnNotes } from '../data/turns';
-import { Level, QueuedTurn, SavedAgent, SessionDetail, ShellRun, Started, Turn } from '../types';
+import { Level, QueuedTurn, SavedAgent, SessionDetail, SessionEventsOptions, ShellRun, Started, Turn } from '../types';
 import { useNow } from '../utils/useNow';
 import { Markdown } from './Markdown';
 import { formatCost, formatTokens, stateLabel, turnStateClass } from '../utils/format';
@@ -118,8 +118,9 @@ interface ConvoColumnProps {
   // with the API's words.
   onArchiveSession?: (sessionId: string, archived: boolean) => Promise<'ok' | 'running'>;
   // Given when the source keeps a record: Export saves the session's events
-  // as one .jsonl file. Rejects with the API's words.
-  onExport?: (sessionId: string) => Promise<void>;
+  // as one .jsonl file, reporting progress and stopping when the signal is
+  // aborted. Rejects with the API's words.
+  onExport?: (sessionId: string, opts: SessionEventsOptions) => Promise<void>;
 }
 
 // Why an archive could not be done: the session has no record yet.
@@ -333,7 +334,13 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
   // The header's name is being edited.
   const [renaming, setRenaming] = useState(false);
   const [exporting, setExporting] = useState(false);
+  // Events read so far while an export pages through the record.
+  const [exported, setExported] = useState(0);
   const [exportError, setExportError] = useState<string | null>(null);
+  // The running export's controller: Cancel aborts it, and so does leaving
+  // the session, so a long read never keeps going for a session not shown.
+  const exportAbort = useRef<AbortController | null>(null);
+  useEffect(() => () => exportAbort.current?.abort(), [session.id]);
   const [archiving, setArchiving] = useState(false);
   const [archiveError, setArchiveError] = useState<string | null>(null);
   // Archive is only a view and reversible, so it is a direct toggle: no
@@ -354,13 +361,18 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
   };
   const doExport = async () => {
     if (!onExport || exporting) return;
+    const ctl = new AbortController();
+    exportAbort.current = ctl;
     setExporting(true);
+    setExported(0);
     setExportError(null);
     try {
-      await onExport(session.id);
+      await onExport(session.id, { signal: ctl.signal, onProgress: setExported });
     } catch (err) {
-      setExportError(`Export failed: ${(err as Error).message}`);
+      // A cancel is the person's choice, not a failure: nothing to report.
+      if (!ctl.signal.aborted) setExportError(`Export failed: ${(err as Error).message}`);
     } finally {
+      if (exportAbort.current === ctl) exportAbort.current = null;
       setExporting(false);
     }
   };
@@ -769,7 +781,12 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
                     disabled={exporting}
                     onClick={doExport}
                   >
-                    {exporting ? 'Exporting…' : 'Export'}
+                    {exporting ? `Exporting… ${exported.toLocaleString('en-US')} events` : 'Export'}
+                  </Button>
+                )}
+                {exporting && (
+                  <Button kind="link" className="c-export-cancel" title="Stop the export; nothing is saved" onClick={() => exportAbort.current?.abort()}>
+                    Cancel
                   </Button>
                 )}
                 {onArchiveSession && (
