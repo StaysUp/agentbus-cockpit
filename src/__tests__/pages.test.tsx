@@ -327,7 +327,6 @@ describe('signing a machine in, and removing one', () => {
       arch: 'arm64',
       labels: ['agentbus'],
       capacity: 4,
-      sandbox: { can: false, why: 'AppArmor refuses user namespaces' },
       asked: new Date().toISOString(),
       expires: new Date(Date.now() + 15 * 60_000).toISOString(),
     },
@@ -355,7 +354,7 @@ describe('signing a machine in, and removing one', () => {
     await click(row);
     const main = r.container.querySelector('.pg-main')!;
     expect(main.querySelector('.colhead')!.textContent).toBe('vmwaiting for approval');
-    expect(main.textContent).toContain('cannot: AppArmor refuses user namespaces');
+    expect(main.textContent).toContain('linux arm64');
     const approve = [...main.querySelectorAll('button')].find((b) => b.textContent === 'Approve')!;
     expect(approve.disabled).toBe(true);
     await type(main.querySelector('input[aria-label="Code shown on the machine"]'), ' bcdf-ghjk ');
@@ -380,16 +379,14 @@ describe('signing a machine in, and removing one', () => {
     expect(a.refuse).toHaveBeenCalledWith('lgn_0123456789abcdef');
   });
 
-  it('shows whether a runner can sandbox, and Remove only for one offline, after the cockpit\'s own confirm', async () => {
+  it('shows Remove only for a runner offline, after the cockpit\'s own confirm', async () => {
     const a = actions();
     const confirm = vi.spyOn(window, 'confirm');
-    const list: RunnerInfo[] = [{ ...runners[0], sandbox: { can: true } }, { ...runners[2], sandbox: { can: false, why: 'bwrap is missing' } }];
+    const list: RunnerInfo[] = [runners[0], runners[2]];
     const r = await render(<RunnersPage runners={list} error={null} onBack={() => {}} actions={a} />);
     const main = () => r.container.querySelector('.pg-main')!;
-    expect(main().textContent).toContain('can build it');
     expect([...main().querySelectorAll('button')].some((b) => b.textContent === 'Remove')).toBe(false);
     await click(r.container.querySelector('[data-runner="run_c"]'));
-    expect(main().textContent).toContain('cannot: bwrap is missing');
     expect(main().textContent).toContain('Offline. Remove takes it off this list.');
     expect(main().textContent).not.toContain('credential');
     await click([...main().querySelectorAll('button')].find((b) => b.textContent === 'Remove')!);

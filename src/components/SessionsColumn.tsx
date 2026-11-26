@@ -1,18 +1,21 @@
 import React, { useEffect, useState } from 'react';
-import { Button } from './Controls';
-import { Session, SESSION, Sessions, SESSIONS } from '../words';
+import { Button, FoldButton } from './Controls';
+import { SESSION, Sessions, SESSIONS } from '../words';
 import { liveStatus, LiveTurns } from '../data/liveStatus';
 import { sessionAgents } from '../data/turns';
 import { SavedAgent, SessionSummary } from '../types';
 import { useNow } from '../utils/useNow';
 import { formatAgo, formatCost, formatTokens } from '../utils/format';
 import { Cost } from './Cost';
-import { CopyButton, LockIcon, PlusIcon } from './Icons';
+import { CopyButton, PlusIcon, SessionStatus } from './Icons';
 import { LiveLine } from './LiveLine';
 import { PencilIcon, TitleEdit } from './TitleEdit';
 
 interface SessionsColumnProps {
   sessions: SessionSummary[];
+  // The sessions with something under way: their own turn queued or running,
+  // or work they asked another agent for. Their row shows the running dot.
+  active?: Set<string>;
   selectedSessionId: string | null;
   onSelectSession: (sessionId: string) => void;
   // Given only when the source can start sessions.
@@ -40,6 +43,7 @@ interface SessionsColumnProps {
 
 export const SessionsColumn: React.FC<SessionsColumnProps> = ({
   sessions,
+  active,
   selectedSessionId,
   onSelectSession,
   onNewSession,
@@ -54,6 +58,8 @@ export const SessionsColumn: React.FC<SessionsColumnProps> = ({
 }) => {
   // The session whose name is being edited, if any.
   const [editing, setEditing] = useState<string | null>(null);
+  // Folded to a thin strip by the button at the head of the column.
+  const [folded, setFolded] = useState(false);
   // "3 min ago" moves on with the clock, not only when an event arrives.
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -74,8 +80,9 @@ export const SessionsColumn: React.FC<SessionsColumnProps> = ({
     }
   }
   return (
-    <section id="sessions">
+    <section id="sessions" className={folded ? 'folded' : undefined}>
       <header className="colhead">
+        <FoldButton folded={folded} name="sessions" onToggle={() => setFolded((f) => !f)} />
         {onAgents && (
           <Button kind="quiet" className="agents-menu" onClick={onAgents} aria-label="Agents" title="Agents">
             <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" aria-hidden="true">
@@ -88,7 +95,7 @@ export const SessionsColumn: React.FC<SessionsColumnProps> = ({
         {onNewSession && (
           <Button kind="quiet" className="new-session" onClick={onNewSession} aria-label={`New ${SESSION}`} title={`New ${SESSION}`}>
             <PlusIcon />
-            {Session}
+            New
           </Button>
         )}
       </header>
@@ -117,24 +124,30 @@ export const SessionsColumn: React.FC<SessionsColumnProps> = ({
           const isEditing = editing === s.id && !!onRename;
           // While its turn runs, the cost moves to the title line (as in the sketch).
           // The selected card's name starts a rename when clicked.
+          {/* One slot of status marks after the name: running dot, Sandbox
+              shield, archived lock. It goes inside the title span so it
+              flows right after the last word when the name wraps to two lines. */}
+          const statusIcons = (
+            <SessionStatus
+              running={!!s.open || !!active?.has(s.id)}
+              sandbox={!!s.sandbox}
+              lock={s.archived ? 'Archived' : null}
+            />
+          );
           const title = (
             <span className="s-t">
-              {s.open ? <i className="live" /> : null}
-              {s.closed || s.archived ? (
-                // Archived uses the same lock the closed state used, in the
-                // same place: a quiet mark, not a word.
-                <span className="s-lock" title={s.closed ? 'Closed' : 'Archived'} aria-label={s.closed ? 'Closed' : 'Archived'}>
-                  <LockIcon />
-                </span>
-              ) : null}
               {isEditing ? (
                 <TitleEdit title={s.title} onSave={(t) => onRename!(s.id, t)} onDone={() => setEditing(null)} />
               ) : isSelected && onRename ? (
                 <span className="s-tt s-tt-edit" title="Rename" onClick={() => setEditing(s.id)}>
                   {s.title}
+                  {statusIcons}
                 </span>
               ) : (
-                <span className="s-tt">{s.title}</span>
+                <span className="s-tt">
+                  {s.title}
+                  {statusIcons}
+                </span>
               )}
               {/* A new session's row says $0 before its first reply is priced; show nothing until one is. */}
               {status && formatCost(s.cost_usd) && !(s.cost_usd === 0 && status.costUsd === null) ? (

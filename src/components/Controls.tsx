@@ -1,5 +1,6 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import { DownIcon } from './Icons';
 
 // The cockpit's own controls. Every select, checkbox, switch and segmented
@@ -407,8 +408,25 @@ export type ButtonKind = 'primary' | 'secondary' | 'quiet' | 'link';
 export const buttonClass = (kind: ButtonKind, small?: boolean, className?: string) =>
   `${kind === 'link' ? 'link-btn' : `btn btn-${kind}${small ? ' btn-sm' : ''}`}${className ? ` ${className}` : ''}`;
 
+// accent marks the one orange action of a screen (Apply): a primary button in
+// the accent colour. Orange is for the moment, so at most one per screen.
 export const Button: React.FC<
-  React.ButtonHTMLAttributes<HTMLButtonElement> & { kind: ButtonKind; small?: boolean }
-> = ({ kind, small, className, type = 'button', ...rest }) => (
-  <button type={type} className={buttonClass(kind, small, className)} {...rest} />
+  React.ButtonHTMLAttributes<HTMLButtonElement> & { kind: ButtonKind; small?: boolean; accent?: boolean }
+> = ({ kind, small, accent, className, type = 'button', ...rest }) => (
+  <button type={type} className={buttonClass(kind, small, accent ? `btn-accent${className ? ` ${className}` : ''}` : className)} {...rest} />
+);
+
+// FoldButton folds a side column to a thin strip and back. The icon points the
+// way the column will move.
+export const FoldButton: React.FC<{ folded: boolean; name: string; onToggle: () => void }> = ({ folded, name, onToggle }) => (
+  <button
+    type="button"
+    className="icon-btn col-fold"
+    onClick={onToggle}
+    aria-expanded={!folded}
+    aria-label={folded ? `Show ${name}` : `Hide ${name}`}
+    title={folded ? `Show ${name}` : `Hide ${name}`}
+  >
+    {folded ? <PanelLeftOpen size={16} strokeWidth={1.8} aria-hidden="true" /> : <PanelLeftClose size={16} strokeWidth={1.8} aria-hidden="true" />}
+  </button>
 );

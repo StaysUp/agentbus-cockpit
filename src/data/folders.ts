@@ -62,6 +62,28 @@ export function byRecentUse(folders: FolderInfo[], recent: string[] = recentFold
     .map((x) => x.f);
 }
 
+// Whether the last new session ran in a sandbox, remembered per viewer so the
+// dialog offers the same choice next time. A copy behind a wall (true, the
+// default) or the folder as it is (false). Stored as '1' or '0'; anything else,
+// or storage blocked, reads as a sandbox.
+const SANDBOX_KEY = 'agentbus.sandbox';
+
+export function lastSandbox(): boolean {
+  try {
+    return localStorage.getItem(SANDBOX_KEY) !== '0';
+  } catch {
+    return true;
+  }
+}
+
+export function rememberSandbox(sandbox: boolean): void {
+  try {
+    localStorage.setItem(SANDBOX_KEY, sandbox ? '1' : '0');
+  } catch {
+    // Storage blocked: a sandbox is offered next time.
+  }
+}
+
 // The machine a session was last started on, so the dialog offers it first.
 const MACHINE_KEY = 'agentbus.machine';
 

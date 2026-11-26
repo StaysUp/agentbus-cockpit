@@ -42,7 +42,7 @@ it('provides the files after the first preview page', async () => {
       ? json({ ...page, files: [{ path: 'a.txt', change: 'added', added: 1, removed: 0 }], next_before: null })
       : json(page);
   }));
-  const preview = await new LiveDataSource({ baseUrl: 'http://service.test' }).getApplyPreview('s1');
+  const preview = await new LiveDataSource({ baseUrl: 'http://service.test' }).getWorkspaceChanges('s1');
   const r = await render(<ApplyPanel preview={preview} apply={vi.fn()} />);
   const paths = Array.from(r.container.querySelectorAll('.ch-path code')).map((e) => e.textContent);
   const hasMore = Array.from(r.container.querySelectorAll('button')).some((b) => b.textContent === 'Load more');
@@ -80,7 +80,7 @@ it('shows the stale warning after an earlier apply in the same panel', async () 
   };
   const apply = async () => ({ state: 'applied' as const });
   const r = await render(<ApplyPanel preview={initial} apply={apply} />);
-  await click(Array.from(r.container.querySelectorAll('button')).find((b) => b.textContent === 'Apply to my folder'));
+  await click(Array.from(r.container.querySelectorAll('button')).find((b) => b.textContent === 'Apply'));
   await flush();
   const stale: ApplyPreview = {
     ...initial, unapplied: false, count: 0, files: [], stale: true,
@@ -105,7 +105,7 @@ it('carries stale status from a later preview page', async () => {
       ? json({ ...page1, files: [{ path: 'a.txt', change: 'added', added: 1, removed: 0 }], next_before: null, stale: true, why: 'the session changed after this preview was taken' })
       : json(page1);
   }));
-  const preview = await new LiveDataSource({ baseUrl: 'http://service.test' }).getApplyPreview('s1');
+  const preview = await new LiveDataSource({ baseUrl: 'http://service.test' }).getWorkspaceChanges('s1');
   expect(preview.stale).toBe(true);
   expect(preview.why).toContain('changed');
 });

@@ -4,7 +4,7 @@ import { ColumnFoot } from './ColumnFoot';
 import { PlusIcon } from './Icons';
 import { PlanUsage, usageOf } from './PlanUsage';
 import { SignInDot, signInOf } from './SignInDot';
-import { Button } from './Controls';
+import { Button, FoldButton } from './Controls';
 import { ConfirmDialog } from './Dialog';
 
 interface AgentsColumnProps {
@@ -68,15 +68,17 @@ export const AgentsColumn: React.FC<AgentsColumnProps> = ({
   // The agent whose Remove asks first, as every remove does; its answer and
   // any refusal show in the confirm.
   const [removing, setRemoving] = useState<SavedAgent | null>(null);
+  const [folded, setFolded] = useState(false);
 
   return (
-    <aside id="agents">
+    <aside id="agents" className={folded ? 'folded' : undefined}>
       <header className="colhead">
+        <FoldButton folded={folded} name="agents" onToggle={() => setFolded((f) => !f)} />
         <div className="colhead-title">Agents</div>
         {onAddAgent && (
           <Button kind="quiet" className="add-agent" onClick={onAddAgent} aria-label="Add agent" title="Add agent">
             <PlusIcon />
-            Agent
+            New
           </Button>
         )}
       </header>
@@ -108,12 +110,12 @@ export const AgentsColumn: React.FC<AgentsColumnProps> = ({
                 {body}
                 <span className="ag-act">
                   {onEditAgent && (
-                    <Button kind="secondary" small className="ag-edit" onClick={() => onEditAgent(a)}>
+                    <Button kind="quiet" small className="ag-edit" onClick={() => onEditAgent(a)}>
                       Edit
                     </Button>
                   )}
                   {onRemoveAgent && (
-                    <Button kind="secondary" small className="ag-remove" onClick={() => setRemoving(a)}>
+                    <Button kind="quiet" small className="ag-remove" onClick={() => setRemoving(a)}>
                       Remove
                     </Button>
                   )}

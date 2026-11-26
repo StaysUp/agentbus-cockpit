@@ -437,3 +437,76 @@ describe('closed and error fields, read before and after the service gives them'
     expect(isClosed(undefined)).toBe(false);
   });
 });
+
+describe('a stream that goes silent', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  // The service restarted behind a proxy, or the laptop slept: the connection
+  // stays open and sends nothing, not even the ping that comes every 15 s.
+  it('is closed after idleMs, said to be down, and opened again from the last seq', async () => {
+    const streams: string[] = [];
+    const enc = new TextEncoder();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: string, init?: RequestInit) => {
+        const url = new URL(input);
+        if (url.pathname === '/api/v0/sessions') return json({ store: 'st_1', seq: 20, sessions: [summary] });
+        streams.push(url.search);
+        if (streams.length === 1) {
+          const e = ev({ seq: 21, session: 'abc', kind: 'turn.started', turn: 'T9', text: 'x' });
+          const body = new ReadableStream<Uint8Array>({
+            start(c) {
+              c.enqueue(enc.encode(`data: ${JSON.stringify(e)}\n\n`));
+              // Then nothing, ever, and no close.
+              init?.signal?.addEventListener('abort', () => c.error(new DOMException('aborted', 'AbortError')));
+            },
+          });
+          return new Response(body, { status: 200 });
+        }
+        return sse([ev({ seq: 22, session: 'abc', kind: 'model.requested', turn: 'T9' })], init?.signal);
+      })
+    );
+    const src = new LiveDataSource({ baseUrl: BASE, retryBaseMs: 5, retryMaxMs: 20, idleMs: 40 });
+    const got: CockpitEvent[] = [];
+    const states: boolean[] = [];
+    const stop = src.subscribe((e) => got.push(e), undefined, (up) => states.push(up));
+    await vi.waitFor(() => expect(got.map((e) => e.seq)).toEqual([21, 22]), { timeout: 2000 });
+    expect(streams[1]).toContain('store=st_1');
+    expect(streams[1]).toContain('after=21');
+    expect(states.slice(0, 3)).toEqual([true, false, true]);
+    stop();
+  });
+
+  it('a ping keeps it open', async () => {
+    const streams: string[] = [];
+    const enc = new TextEncoder();
+    const timers: ReturnType<typeof setInterval>[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: string, init?: RequestInit) => {
+        const url = new URL(input);
+        if (url.pathname === '/api/v0/sessions') return json({ store: 'st_1', seq: 20, sessions: [summary] });
+        streams.push(url.search);
+        const body = new ReadableStream<Uint8Array>({
+          start(c) {
+            const t = setInterval(() => c.enqueue(enc.encode(': ping\n\n')), 10);
+            timers.push(t);
+            init?.signal?.addEventListener('abort', () => {
+              clearInterval(t);
+              c.error(new DOMException('aborted', 'AbortError'));
+            });
+          },
+        });
+        return new Response(body, { status: 200 });
+      })
+    );
+    const src = new LiveDataSource({ baseUrl: BASE, retryBaseMs: 5, retryMaxMs: 20, idleMs: 40 });
+    const states: boolean[] = [];
+    const stop = src.subscribe(() => {}, undefined, (up) => states.push(up));
+    await new Promise((r) => setTimeout(r, 200));
+    expect(streams).toHaveLength(1);
+    expect(states).toEqual([true]);
+    stop();
+    timers.forEach(clearInterval);
+  });
+});

@@ -5,10 +5,10 @@
 // line "5h · 62% left · 14:20" for the shortest. Nothing
 // without a reading. A subscription agent's turn end reads it again.
 import { act } from 'react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../App';
 import { AgentsColumn } from '../components/AgentsColumn';
-import { planLine, shortLabel, shortLine, stale, usageOf, windowLabel } from '../components/PlanUsage';
+import { isReset, leftNow, planLine, shortLabel, shortLine, stale, usageOf, windowLabel } from '../components/PlanUsage';
 import { CockpitEvent, DataSource, PlanReading, SavedAgent, SubscriptionList } from '../types';
 import { ev, liveReplay, render, unmountAll } from './helpers';
 
@@ -63,10 +63,25 @@ describe('the plan line', () => {
     const old = { ...fiveHour, read_at: iso(minutes(-31)) };
     expect(stale(old, now)).toBe(true);
     expect(planLine(old, now)).toBe('5-hour limit · 62% left · resets 14:20 · as of 09:29');
+    // A window whose reset time has passed is reset: what the reading said is
+    // over, and what was used since shows after the next turn.
     const reset = { ...fiveHour, resets_at: iso(minutes(-1)) };
-    expect(planLine(reset, now)).toBe('5-hour limit · 62% left · as of 09:58');
+    expect(planLine(reset, now)).toBe('5-hour limit · reset at 09:59 · use since then shows after the next turn');
     // A week's reading holds longer.
     expect(stale({ ...weekly, read_at: iso(minutes(-600)) }, now)).toBe(false);
+  });
+  it('reads a window past its reset time as reset, full, until a new reading', () => {
+    const spent = { ...fiveHour, used_percent: 100, resets_at: iso(minutes(-240)), read_at: iso(minutes(-400)) };
+    expect(isReset(spent, now)).toBe(true);
+    expect(leftNow(spent, now)).toBe(100);
+    expect(shortLine(spent, now)).toBe('5h · reset at 06:00');
+    // Before its reset time the reading holds, used up as it says.
+    const live = { ...spent, resets_at: iso(minutes(30)) };
+    expect(isReset(live, now)).toBe(false);
+    expect(leftNow(live, now)).toBe(0);
+    expect(shortLine(live, now)).toBe('5h · 0% left · 10:30');
+    // No reset time: never claimed reset.
+    expect(isReset({ ...spent, resets_at: undefined }, now)).toBe(false);
   });
 });
 
@@ -89,7 +104,16 @@ describe('usageOf', () => {
 const rowOf = (c: HTMLElement, id: string) => c.querySelector(`[data-agent="${id}"]`)!;
 const barOf = (row: Element) => row.querySelector('.quota') as HTMLElement;
 
+// The card reads the clock: pin it to the readings' day, so their reset
+// times are ahead as written (Date only; timers stay real for rendering).
+const pinClock = () => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(now);
+};
+
 describe('the Agents column', () => {
+  beforeEach(pinClock);
+  afterEach(() => vi.useRealTimers());
   it('shows the longest window on the bar, in its tooltip, and the shortest on the line', async () => {
     const r = await render(
       <AgentsColumn agents={[claude, codex]} selectedAgentId={null} onSelectAgent={() => undefined} subscriptions={subs([{ ...fiveHour, read_at: iso(new Date()), resets_at: iso(new Date(Date.now() + 2 * 3600000)) }, { ...weekly, read_at: iso(new Date()), resets_at: iso(new Date(Date.now() + 3 * 86400000)) }])} />
@@ -169,6 +193,8 @@ describe("reading usage at a turn's end", () => {
 });
 
 describe('the bar colour', () => {
+  beforeEach(pinClock);
+  afterEach(() => vi.useRealTimers());
   it('is red at 5% left or less in any window, yellow at 20% or less, plain otherwise', async () => {
     const at = (used: number[]) =>
       render(
@@ -182,6 +208,23 @@ describe('the bar colour', () => {
     expect(await at([8, 98])).toBe('quota out');
     expect(await at([85, 10])).toBe('quota low');
     expect(await at([8, 40])).toBe('quota');
+  });
+  it('does not count a window that reset since its reading: the bar shows it full', async () => {
+    const r = await render(
+      <AgentsColumn
+        agents={[claude]}
+        selectedAgentId={null}
+        onSelectAgent={() => undefined}
+        subscriptions={subs([
+          { ...fiveHour, used_percent: 100, resets_at: iso(minutes(-240)), read_at: iso(minutes(-400)) },
+          { ...weekly, used_percent: 26 },
+        ])}
+      />
+    );
+    const row = rowOf(r.container, 'claude');
+    expect(barOf(row).className).toBe('quota');
+    expect(barOf(row).getAttribute('aria-valuenow')).toBe('74');
+    expect(row.querySelector('.plan-line')?.textContent).toBe('5h · reset at 06:00');
   });
 });
 

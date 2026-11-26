@@ -37,8 +37,8 @@ export function turnOrigin(o: unknown): TurnOrigin | undefined {
 // Kinds that belong to the session, not to any turn.
 const SESSION_KINDS = new Set([
   'session.registered',
-  'session.opened',
-  'session.closed',
+  'run.started',
+  'run.ended',
   'events.dropped',
 ]);
 
@@ -199,13 +199,13 @@ export function replyPreview(text: string): { text: string; truncated: boolean }
   return { text: chars.slice(0, REPLY_PREVIEW_CHARS).join(''), truncated: true };
 }
 
-// A turn's state by the API's rule: a run's turn (it has session.opened) is
-// running until its session.closed, then finished on exit code 0 with no
+// A turn's state by the API's rule: a run's turn (it has run.started) is
+// running until its run.ended, then finished on exit code 0 with no
 // error, stopped when someone stopped it, else failed. Any other turn is
 // finished once it has a turn.completed.
 function replayState(turnEvents: CockpitEvent[]): { state: TurnState; ended?: CockpitEvent; stopped?: boolean } {
-  const opened = turnEvents.some((e) => e.kind === 'session.opened');
-  const closed = turnEvents.find((e) => e.kind === 'session.closed');
+  const opened = turnEvents.some((e) => e.kind === 'run.started');
+  const closed = turnEvents.find((e) => e.kind === 'run.ended');
   if (opened && closed) {
     const ok = closed.exit_code === 0 && !closed.error;
     const stopped = closed.stopped === true;
@@ -342,14 +342,14 @@ export function summarizeSession(
   let folder = (named?.folder as string) || '';
   if (!folder) folder = guessFolder(events);
 
-  // Open while a run's child is running: a session.opened whose hold has no
-  // session.closed yet.
+  // Open while a run's child is running: a run.started whose hold has no
+  // run.ended yet.
   const holds = new Set<string>();
   for (const e of events) {
     const hold = e.hold as string | undefined;
     if (!hold) continue;
-    if (e.kind === 'session.opened') holds.add(hold);
-    if (e.kind === 'session.closed') holds.delete(hold);
+    if (e.kind === 'run.started') holds.add(hold);
+    if (e.kind === 'run.ended') holds.delete(hold);
   }
 
   const usage = createEmptyUsage();
@@ -390,9 +390,9 @@ export function summarizeSession(
 }
 
 // The events that can name a session's agent and folder: a run's turn.started,
-// a run's session.opened, and session.registered in files from before
+// a run's run.started, and session.registered in files from before
 // 2026-11-05. The latest one that names an agent wins.
-const NAMING_KINDS = new Set(['turn.started', 'session.opened', 'session.registered']);
+const NAMING_KINDS = new Set(['turn.started', 'run.started', 'session.registered']);
 
 function latestNamed(events: CockpitEvent[]): CockpitEvent | undefined {
   for (let i = events.length - 1; i >= 0; i--) {

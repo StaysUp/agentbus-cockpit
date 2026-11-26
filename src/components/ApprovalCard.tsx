@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { HeldApproval, ApprovalGone, ApprovalDecision } from '../types';
 import { harnessName } from '../words';
+import { Button } from './Controls';
 import { Notice } from './Notice';
 
 // The gateway holds an Ask reply for this long (gateway.HoldTimeout) while it
@@ -79,15 +80,15 @@ export const ApprovalCard: React.FC<{
       </ul>
       {error && <Notice kind="error">{error}</Notice>}
       <div className="ask-card-actions">
-        <button type="button" className="ask-allow" disabled={busy !== ''} onClick={() => answer('once')}>
-          {busy === 'once' ? '…' : 'Allow once'}
-        </button>
-        <button type="button" className="ask-always" disabled={busy !== ''} onClick={() => answer('always')}>
-          {busy === 'always' ? '…' : isFolderTool ? 'Always for this folder' : 'Always allow'}
-        </button>
-        <button type="button" className="ask-refuse" disabled={busy !== ''} onClick={() => answer('refuse')}>
+        <Button kind="secondary" className="ask-refuse" disabled={busy !== ''} onClick={() => answer('refuse')}>
           {busy === 'refuse' ? '…' : 'Refuse'}
-        </button>
+        </Button>
+        <Button kind="secondary" className="ask-always" disabled={busy !== ''} onClick={() => answer('always')}>
+          {busy === 'always' ? '…' : isFolderTool ? 'Always for this folder' : 'Always allow'}
+        </Button>
+        <Button kind="primary" className="ask-allow" disabled={busy !== ''} onClick={() => answer('once')}>
+          {busy === 'once' ? '…' : 'Allow once'}
+        </Button>
       </div>
       <div className="ask-card-note">
         {isFolderTool

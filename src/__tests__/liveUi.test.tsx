@@ -93,7 +93,7 @@ describe('live status on screen', () => {
     expect(text(r, '#d-head .cost-live')).toBe('$0.28+$0.01');
 
     // The agent exits: the card is back to cost and time, nothing ticks.
-    await pushUntil((e) => e.kind === 'session.closed');
+    await pushUntil((e) => e.kind === 'run.ended');
     await flush();
     expect(q(r, '#sessions .sess .s-live')).toBeNull();
     expect(text(r, '#sessions .sess .s-m')).toMatch(/^\$0\.28 · /);
@@ -102,9 +102,9 @@ describe('live status on screen', () => {
   });
 
   // The service holds a turn at running until its job has ended, a moment
-  // after session.closed, and no event says so. The cockpit reads the turn
+  // after run.ended, and no event says so. The cockpit reads the turn
   // until the service says it ended, then shows it finished.
-  it('a turn whose reply is in reads finished once its job has ended, with no event after session.closed', async () => {
+  it('a turn whose reply is in reads finished once its job has ended, with no event after run.ended', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     let jobEnded = false;
     const reads: string[] = [];

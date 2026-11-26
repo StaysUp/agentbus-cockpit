@@ -2,6 +2,7 @@ import React from 'react';
 import { SessionDetail, Turn } from '../types';
 import { formatDuration, formatTokens, stateLabel, turnStateClass } from '../utils/format';
 import { Cost } from './Cost';
+import { ShieldCheck } from 'lucide-react';
 import { CopyButton } from './Icons';
 import { PanelHead } from './PanelHead';
 import { folderLabel, sessionFolderRef, useFolders } from '../data/folders';
@@ -64,6 +65,14 @@ export const SessionPanel: React.FC<SessionPanelProps> = ({
           <span>{agentName}</span>
           <span>Folder</span>
           <span>{folder ? folder : <span className="dim">not known</span>}</span>
+          {session.sandbox && (
+            <>
+              <span>Mode</span>
+              <span className="s-mode-val" title="Runs in a copy of the folder; apply its changes when ready">
+                <ShieldCheck size={13} strokeWidth={1.8} aria-hidden="true" /> Sandbox
+              </span>
+            </>
+          )}
         </div>
       </div>
 

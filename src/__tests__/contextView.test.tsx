@@ -132,7 +132,7 @@ describe('ContextView', () => {
     r.unmount();
   });
 
-  // It reads once on open and does not read again on its own while running.
+  // It reads once on open and does not read again on its own.
   it('reads once on open', async () => {
     let n = 0;
     const loadTurn = async () => {
@@ -140,7 +140,7 @@ describe('ContextView', () => {
       return turnCtx;
     };
     const r = await render(
-      <ContextView session="s1" turn="T2" loadTurn={loadTurn} loadSession={async () => sessionCtx} running />
+      <ContextView session="s1" turn="T2" loadTurn={loadTurn} loadSession={async () => sessionCtx} rev={0} />
     );
     await flush();
     expect(n).toBe(1);
@@ -149,23 +149,24 @@ describe('ContextView', () => {
     r.unmount();
   });
 
-  // The turn ending re-reads once on its own, so a settled turn is current.
-  it('re-reads once when the turn ends', async () => {
+  // A rev bump (the turn's data changed: its end, among others) re-reads, so a
+  // settled turn is current without a Refresh.
+  it('re-reads when the turn data changes (rev bumps)', async () => {
     let n = 0;
     const loadTurn = async () => {
       n += 1;
       return turnCtx;
     };
     const loadSession = async () => sessionCtx;
-    const el = (running: boolean) => (
-      <ContextView session="s1" turn="T2" loadTurn={loadTurn} loadSession={loadSession} running={running} />
+    const el = (rev: number) => (
+      <ContextView session="s1" turn="T2" loadTurn={loadTurn} loadSession={loadSession} rev={rev} />
     );
-    const r = await render(el(true));
+    const r = await render(el(0));
     await flush();
     expect(n).toBe(1);
     const { act } = await import('react');
     await act(async () => {
-      r.root.render(el(false));
+      r.root.render(el(1));
     });
     await flush();
     expect(n).toBe(2);
@@ -179,13 +180,13 @@ describe('ContextView', () => {
     const resolvers: Array<(t: TurnContext) => void> = [];
     const loadTurn = () => new Promise<TurnContext>((res) => resolvers.push(res));
     const loadSession = async () => sessionCtx;
-    const el = (nonceKey: number) => (
-      <ContextView key="x" session="s1" turn="T2" loadTurn={loadTurn} loadSession={loadSession} running={nonceKey > 0} />
+    const el = (rev: number) => (
+      <ContextView key="x" session="s1" turn="T2" loadTurn={loadTurn} loadSession={loadSession} rev={rev} />
     );
-    const r = await render(el(1)); // read #1 in flight
-    // End the turn -> a second read starts; read #1 is now superseded.
+    const r = await render(el(0)); // read #1 in flight
+    // The turn's data changes -> a second read starts; read #1 is superseded.
     await act(async () => {
-      r.root.render(el(0));
+      r.root.render(el(1));
     });
     // Resolve the NEWER read first (33% full), then the OLDER one (11%).
     await act(async () => {

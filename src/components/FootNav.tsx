@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { LayoutGrid, MessageSquare, Monitor, Server, Settings } from 'lucide-react';
 import { follow, PAGE_PATHS, type Page } from '../page';
 import { FeedbackDialog } from './FeedbackDialog';
 
@@ -18,6 +19,14 @@ interface FootNavProps {
   version?: string;
 }
 
+// Each page's icon, before its name in the foot nav.
+const NAV_ICONS: Partial<Record<Page, typeof Server>> = {
+  cockpit: Monitor,
+  apps: LayoutGrid,
+  runners: Server,
+  settings: Settings,
+};
+
 // FootNav is the one foot nav list, the same rows in the same order on the
 // cockpit and on every page: Cockpit, Apps, Runners, Settings, Feedback. The page you
 // are on stays in its place, marked as current rather than left out, so nothing
@@ -36,9 +45,12 @@ export const FootNav: React.FC<FootNavProps> = ({
   const [feedback, setFeedback] = useState(false);
   // One row: the current page as plain marked text, any other as a link.
   const row = (page: Page, label: string, go: (() => void) | undefined, extra?: React.ReactNode) => {
+    const Icon = NAV_ICONS[page];
+    const icon = Icon ? <Icon className="sl-ic" size={16} strokeWidth={1.8} aria-hidden="true" /> : null;
     if (page === current) {
       return (
         <span className="side-link pick on" aria-current="page">
+          {icon}
           <span>{label}</span>
           {extra}
         </span>
@@ -47,6 +59,7 @@ export const FootNav: React.FC<FootNavProps> = ({
     if (!go) return null;
     return (
       <a className="side-link" href={PAGE_PATHS[page]} onClick={follow(go)}>
+        {icon}
         <span>{label}</span>
         {extra}
       </a>
@@ -66,6 +79,7 @@ export const FootNav: React.FC<FootNavProps> = ({
         {row('runners', 'Runners', onRunners, online)}
         {row('settings', 'Settings', onSettings)}
         <button type="button" className="side-link feedback-link" onClick={() => setFeedback(true)}>
+          <MessageSquare className="sl-ic" size={16} strokeWidth={1.8} aria-hidden="true" />
           <span>Feedback</span>
         </button>
       </nav>

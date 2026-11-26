@@ -9,7 +9,9 @@ export const LiveLine: React.FC<{ status: LiveStatus; className?: string }> = ({
   return (
     <span className={`live-line ${cls}${className ? ` ${className}` : ''}`} data-state={status.state}>
       {status.running ? <i className="spin run-spin" aria-hidden /> : mark ? <b className="mark">{mark}</b> : null}
-      <span className="live-text">{status.line}</span>
+      <span className="live-text" title={status.line}>
+        {status.line}
+      </span>
     </span>
   );
 };

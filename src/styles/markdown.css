@@ -1,6 +1,6 @@
 /* An agent's reply in the chat, formatted from its markdown (src/components/Markdown.tsx).
    Sizes follow the reply's own size; colours are the cockpit's tokens. */
-:root { --code-bg: #F1F1EE; --code-line: var(--line); }
+:root, .modal-back { --code-line: var(--line); }
 
 .md-reply { overflow-wrap: anywhere; min-width: 0; }
 .md-reply > :last-child { margin-bottom: 0; }

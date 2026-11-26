@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Button } from './Controls';
+import { BusMark } from './Icons';
 import { Notice, WithCode } from './Notice';
 import { PRODUCT } from '../words';
 
@@ -33,7 +34,10 @@ export const ConnectScreen: React.FC<ConnectScreenProps> = ({
           onConnect(address, token);
         }}
       >
-        <div className="brand">AgentBus</div>
+        <div className="brand">
+          <BusMark />
+          Agent<span className="bm-bus">Bus</span>
+        </div>
         <p className="connect-hint">
           {served ? (
             <>

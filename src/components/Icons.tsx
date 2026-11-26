@@ -1,35 +1,28 @@
 import React from 'react';
+import { Check, ChevronDown, ChevronRight, Copy, FileDiff, Lock, Plus, ShieldCheck, X } from 'lucide-react';
 
-export const ChevIcon: React.FC = () => (
-  <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M6 4l4 4-4 4" />
-  </svg>
-);
+// The cockpit's icons, from Lucide (thin-stroke, ISC), re-exported under the
+// cockpit's own names so callers do not change. Sizes match the hand-drawn
+// originals they replaced; colour is currentColor.
 
-export const DownIcon: React.FC = () => (
-  <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M4 6l4 4 4-4" />
-  </svg>
-);
+export const ChevIcon: React.FC = () => <ChevronRight size={12} strokeWidth={2} aria-hidden="true" />;
 
-export const PlusIcon: React.FC = () => (
-  <svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
-    <path d="M8 3v10M3 8h10" />
-  </svg>
-);
+export const DownIcon: React.FC = () => <ChevronDown size={12} strokeWidth={2} aria-hidden="true" />;
 
-export const CopyIcon: React.FC = () => (
-  <svg viewBox="0 0 20 20" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round">
-    <rect x="7" y="7" width="10" height="10" rx="2" />
-    <path d="M13 4.5V4a1.5 1.5 0 0 0-1.5-1.5h-7A1.5 1.5 0 0 0 3 4v7a1.5 1.5 0 0 0 1.5 1.5H5" />
-  </svg>
-);
+export const PlusIcon: React.FC = () => <Plus size={12} strokeWidth={2} aria-hidden="true" />;
 
-export const TickIcon: React.FC = () => (
-  <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M5 12.5l4.6 4.6L19 7.5" />
-  </svg>
-);
+export const CopyIcon: React.FC = () => <Copy size={12} strokeWidth={1.7} aria-hidden="true" />;
+
+export const TickIcon: React.FC = () => <Check size={13} strokeWidth={2.5} aria-hidden="true" />;
+
+export const CloseIcon: React.FC = () => <X size={16} strokeWidth={2.2} aria-hidden="true" />;
+
+// LockIcon marks a closed or archived conversation: it takes no more messages,
+// or is hidden from the list.
+export const LockIcon: React.FC = () => <Lock size={13} strokeWidth={1.8} aria-hidden="true" />;
+
+// UnappliedIcon marks a workspace with changes not applied to the folder yet.
+export const UnappliedIcon: React.FC = () => <FileDiff size={13} strokeWidth={1.8} aria-hidden="true" />;
 
 export const CopyButton: React.FC<{ text: string }> = ({ text }) => {
   const [copied, setCopied] = React.useState(false);
@@ -48,16 +41,42 @@ export const CopyButton: React.FC<{ text: string }> = ({ text }) => {
   );
 };
 
-export const CloseIcon: React.FC = () => (
-  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true">
-    <path d="M6 6l12 12M18 6L6 18" />
-  </svg>
-);
+// One slot for a session's status marks, right after its name, the same in the
+// list card and the conversation header: the running dot (as today), a shield
+// for a sandbox session (a copy of the folder), and a lock when it is archived
+// or closed. Each has its own tooltip. Colour and size are the muted tokens.
+export const SessionStatus: React.FC<{ running?: boolean; sandbox?: boolean; lock?: string | null }> = ({
+  running,
+  sandbox,
+  lock,
+}) => {
+  if (!running && !sandbox && !lock) return null;
+  return (
+    <span className="s-icons">
+      {running ? <i className="live" title="Running" aria-label="Running" /> : null}
+      {sandbox ? (
+        <span className="s-ic s-sandbox" title="Sandbox: runs in a copy of the folder; apply its changes when ready" aria-label="Sandbox">
+          <ShieldCheck size={14} strokeWidth={1.8} aria-hidden="true" />
+        </span>
+      ) : null}
+      {lock ? (
+        <span className="s-ic s-lock" title={lock} aria-label={lock}>
+          <Lock size={14} strokeWidth={1.8} aria-hidden="true" />
+        </span>
+      ) : null}
+    </span>
+  );
+};
 
-// LockIcon marks a closed conversation: it takes no more messages.
-export const LockIcon: React.FC = () => (
-  <svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-    <rect x="3.5" y="7" width="9" height="6.5" rx="1.2" />
-    <path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2" />
+// BusMark is the AgentBus logo: an orange bus with three navy windows and two
+// white wheels, as on the site. It sits before the name in the left column.
+export const BusMark: React.FC = () => (
+  <svg className="bus-mark" width="22" height="17" viewBox="0 0 26 20" fill="none" aria-hidden="true">
+    <rect x="1" y="2" width="24" height="13" rx="4" fill="#FE8919" />
+    <rect x="4" y="5" width="5" height="4" rx="1" fill="#0B1F4D" />
+    <rect x="10.5" y="5" width="5" height="4" rx="1" fill="#0B1F4D" />
+    <rect x="17" y="5" width="5" height="4" rx="1" fill="#0B1F4D" />
+    <circle cx="7" cy="16" r="2.6" fill="#FFFFFF" />
+    <circle cx="19" cy="16" r="2.6" fill="#FFFFFF" />
   </svg>
 );

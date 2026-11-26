@@ -24,6 +24,11 @@ import {
   Started,
   ApplyPreview,
   ApplyState,
+  DiscardState,
+  UpdateState,
+  WorkspaceInfo,
+  WorkspaceRow,
+  CloseState,
   Turn,
   TurnDiff,
   TurnChangesPage,
@@ -45,6 +50,9 @@ export interface LiveDataSourceConfig {
   token?: string;
   retryBaseMs?: number; // first reconnect wait, doubled each failure; default 1000
   retryMaxMs?: number; // longest reconnect wait; default 30000
+  // How long an open stream may stay silent before it counts as gone and is
+  // opened again. The service sends a ping every 15 seconds; default 45000.
+  idleMs?: number;
 }
 
 interface Snapshot {
@@ -92,6 +100,7 @@ function turnRow(t: ApiTurn, n: number): Turn {
     state: t.state,
     error: turnError((t as { error?: unknown }).error),
     stopped: t.stopped === true || t.state === 'stopped' || undefined,
+    discarded: t.discarded === true || undefined,
     outcome: t.outcome,
     usage: t.usage ?? null,
     costUsd: typeof t.cost_usd === 'number' ? t.cost_usd : null,
@@ -120,12 +129,14 @@ export class LiveDataSource implements DataSource {
   private token?: string;
   private retryBaseMs: number;
   private retryMaxMs: number;
+  private idleMs: number;
 
   constructor(config: LiveDataSourceConfig = {}) {
     this.baseUrl = config.baseUrl || 'http://127.0.0.1:8787';
     this.token = config.token;
     this.retryBaseMs = config.retryBaseMs ?? 1000;
     this.retryMaxMs = config.retryMaxMs ?? 30000;
+    this.idleMs = config.idleMs ?? 45000;
   }
 
   private headers(accept = 'application/json'): Record<string, string> {
@@ -176,7 +187,6 @@ export class LiveDataSource implements DataSource {
           sessions.push({
             ...s,
             title: s.title || s.id,
-            closed: isClosed((s as { closed?: unknown }).closed) || undefined,
             archived: isClosed((s as { archived?: unknown }).archived) || undefined,
           });
         }
@@ -187,16 +197,6 @@ export class LiveDataSource implements DataSource {
       return { store: first!.store, seq: first!.seq, sessions };
     }
     throw new Error('Store changed while reading the sessions; try again');
-  }
-
-  // GET /api/v0/sessions/<id>: closed on the session, or on its copy (now
-  // inside the session, where the service says it before the list does). A
-  // failed read is not closed.
-  async sessionClosed(sessionId: string): Promise<boolean> {
-    const res = await fetch(`${this.baseUrl}/api/v0/sessions/${encodeURIComponent(sessionId)}`, { headers: this.headers() });
-    if (!res.ok) return false;
-    const data = await res.json().catch(() => null);
-    return isClosed(data?.session?.closed) || isClosed(data?.session?.copy?.closed);
   }
 
   // The list with the store and seq it was computed at, so the screen can
@@ -669,10 +669,50 @@ export class LiveDataSource implements DataSource {
     }
   }
 
-  // POST /api/v0/turns: start an agent with a first prompt, in a new session.
-  // 202 {session, turn, state}: the turn's id is there even while it waits.
+  // POST /api/v0/workspaces: the folder (or folder_ref) and the mode. The
+  // runner checks the folder here, so a bad one is refused at this call, before
+  // any session exists. Returns the workspace's id.
+  async createWorkspace(req: RunRequest): Promise<string> {
+    const key = req.idempotency_key;
+    const wsBody: Record<string, unknown> = {};
+    if (req.folders && req.folders.length > 1) wsBody.folders = req.folders;
+    else if (req.folder_ref) wsBody.folder_ref = req.folder_ref;
+    else if (req.folder) wsBody.folder = req.folder;
+    if (req.machine) wsBody.machine = req.machine;
+    // Sent explicitly, both ways, so the record carries the person's choice.
+    wsBody.sandbox = req.sandbox !== false;
+    if (key) wsBody.idempotency_key = key;
+    const ws = await this.send<{ workspace: string }>('POST', '/api/v0/workspaces', wsBody);
+    return ws.workspace;
+  }
+
+  // POST /api/v0/sessions then POST /api/v0/turns in a workspace already made:
+  // the name goes on the session, the first message on its turn. The folder is
+  // not re-checked -- createWorkspace did that.
+  async startInWorkspace(workspace: string, req: RunRequest): Promise<Started> {
+    const key = req.idempotency_key;
+    const sBody: Record<string, unknown> = { workspace };
+    if (req.title) sBody.title = req.title;
+    if (key) sBody.idempotency_key = key;
+    const session = await this.send<{ session: string }>('POST', '/api/v0/sessions', sBody);
+
+    const tBody: Record<string, unknown> = { session: session.session, agent: req.agent, prompt: req.prompt };
+    if (req.model) tBody.model = req.model;
+    if (key) tBody.idempotency_key = key;
+    return this.post('/api/v0/turns', tBody);
+  }
+
+  // A new session with a first message is three calls in order, each noun
+  // created by its own POST (his API rules, 2026-11-21): workspace -> session
+  // -> turn. The turn carries no folder or mode; its workspace owns them. One
+  // idempotency_key covers all three (kept apart by noun on the service), so a
+  // retry reuses the same workspace, session and turn instead of making new
+  // ones. 202 {session, turn, state} from the turn. A session opened empty
+  // instead makes the workspace up front (createWorkspace) and these last two
+  // when its first message is sent (startInWorkspace).
   async startRun(req: RunRequest): Promise<Started> {
-    return this.post('/api/v0/turns', req);
+    const workspace = await this.createWorkspace(req);
+    return this.startInWorkspace(workspace, req);
   }
 
   // POST /api/v0/turns with session: the next turn of a session, in its own
@@ -753,11 +793,41 @@ export class LiveDataSource implements DataSource {
     return res.json();
   }
 
-  // GET /api/v0/sessions/<id>/changes: the apply preview. The runner
-  // answers within 30 s. A machine that is offline or does not answer is
-  // said plainly; other refusals are in the API's words.
-  async getApplyPreview(sessionId: string, fresh?: boolean): Promise<ApplyPreview> {
-    const path = `${this.baseUrl}/api/v0/sessions/${encodeURIComponent(sessionId)}/changes`;
+  // GET /api/v0/workspaces/<id>: the workspace's record, its folders.
+  async getWorkspace(workspace: string): Promise<WorkspaceInfo> {
+    const res = await fetch(`${this.baseUrl}/api/v0/workspaces/${encodeURIComponent(workspace)}`, { headers: this.headers() });
+    if (!res.ok) throw new Error(await apiError(res));
+    return res.json();
+  }
+
+  // GET /api/v0/workspaces: every workspace, newest first. null on a service
+  // without the route (404).
+  async listWorkspaces(): Promise<WorkspaceRow[] | null> {
+    const res = await fetch(`${this.baseUrl}/api/v0/workspaces`, { headers: this.headers() });
+    if (res.status === 404) return null;
+    if (!res.ok) throw new Error(await apiError(res));
+    const body = await res.json();
+    return Array.isArray(body?.workspaces) ? body.workspaces : [];
+  }
+
+  // POST /api/v0/workspaces/<id>/close: removes the workspace's copy. 200
+  // closed, 202 still waiting behind a turn. A 409 (another apply, discard,
+  // update or close in flight) and every other refusal reject with the API's
+  // words.
+  async closeWorkspace(workspace: string): Promise<CloseState> {
+    const res = await fetch(`${this.baseUrl}/api/v0/workspaces/${encodeURIComponent(workspace)}/close`, {
+      method: 'POST',
+      headers: this.headers(),
+    });
+    if (res.ok) return res.json().catch(() => ({}));
+    throw new Error(await apiError(res));
+  }
+
+  // GET /api/v0/workspaces/<id>/changes: the apply preview, on the session's
+  // workspace. The runner answers within 30 s. A machine that is offline or
+  // does not answer is said plainly; other refusals are in the API's words.
+  async getWorkspaceChanges(workspace: string, fresh?: boolean): Promise<ApplyPreview> {
+    const path = `${this.baseUrl}/api/v0/workspaces/${encodeURIComponent(workspace)}/changes`;
     const q = new URLSearchParams({ limit: '1000' });
     if (fresh) q.set('fresh', 'true');
     const res = await fetch(`${path}?${q.toString()}`, { headers: this.headers() });
@@ -794,14 +864,15 @@ export class LiveDataSource implements DataSource {
     return { ...preview, files, next_before: null, stale, why };
   }
 
-  // POST /api/v0/turns/<id>/apply: 200 applied (or already), 202 still
-  // running, 409 refused with each file and why. All three are answers. A
-  // 409 with no state (an apply of an earlier turn has not ended) is an
-  // error in the API's words.
-  async applyTurn(turnId: string): Promise<ApplyState> {
-    const res = await fetch(`${this.baseUrl}/api/v0/turns/${encodeURIComponent(turnId)}/apply`, {
+  // POST /api/v0/workspaces/<id>/apply: writes the workspace's unapplied
+  // changes to the person's folder, up to `turn` when given. 200 applied (or
+  // already), 202 still running, 409 refused with each file and why. All three
+  // are answers; any other status is an error in the API's words.
+  async applyWorkspace(workspace: string, turn?: string): Promise<ApplyState> {
+    const res = await fetch(`${this.baseUrl}/api/v0/workspaces/${encodeURIComponent(workspace)}/apply`, {
       method: 'POST',
-      headers: this.headers(),
+      headers: { ...this.headers(), 'Content-Type': 'application/json' },
+      body: JSON.stringify(turn ? { turn } : {}),
     });
     if (res.ok) return res.json();
     if (res.status === 409) {
@@ -816,6 +887,35 @@ export class LiveDataSource implements DataSource {
       const msg = (body as { error?: unknown } | undefined)?.error;
       throw new Error(typeof msg === 'string' && msg ? msg : text.trim() || 'agentbus answered 409');
     }
+    throw new Error(await apiError(res));
+  }
+
+  // POST /api/v0/workspaces/<id>/discard: drops the workspace's unapplied
+  // changes. 200 with the changes dropped (or already, nothing to drop); 202
+  // still running; 409 when a turn or apply is in flight. The conversation
+  // stays; dropped_turns names the turns whose file changes went.
+  async discardWorkspace(workspace: string): Promise<DiscardState> {
+    const res = await fetch(`${this.baseUrl}/api/v0/workspaces/${encodeURIComponent(workspace)}/discard`, {
+      method: 'POST',
+      headers: this.headers(),
+    });
+    if (res.ok) return res.json().catch(() => ({}));
+    throw new Error(await apiError(res));
+  }
+
+  // POST /api/v0/workspaces/<id>/update: merges the person's folder as it is
+  // now into the copy. 200 with state updated (the folder was merged in) or
+  // conflict (the files that changed on both sides; nothing changed); 202 still
+  // running; 409 when an apply, discard or update is in flight.
+  // mode merge leaves both sides in conflicting files for the agent (merged).
+  async updateWorkspace(workspace: string, mode?: 'merge'): Promise<UpdateState> {
+    const res = await fetch(`${this.baseUrl}/api/v0/workspaces/${encodeURIComponent(workspace)}/update`, {
+      method: 'POST',
+      ...(mode
+        ? { headers: { ...this.headers(), 'Content-Type': 'application/json' }, body: JSON.stringify({ mode }) }
+        : { headers: this.headers() }),
+    });
+    if (res.ok) return res.json().catch(() => ({}));
     throw new Error(await apiError(res));
   }
 
@@ -957,26 +1057,65 @@ export class LiveDataSource implements DataSource {
             onSnapshot?.(snap.sessions, { store: snap.store, seq: snap.seq });
           }
           const params = new URLSearchParams({ store: cursor.store, after: String(cursor.after) });
-          const res = await fetch(`${this.baseUrl}/api/v0/events?${params}`, {
-            headers: this.headers('text/event-stream'),
-            signal,
-          });
+          // Each connection has its own abort, so a silent one is closed and
+          // opened again without ending the subscription.
+          const conn = new AbortController();
+          const stopConn = () => conn.abort();
+          signal.addEventListener('abort', stopConn);
+          let res: Response;
+          try {
+            res = await fetch(`${this.baseUrl}/api/v0/events?${params}`, {
+              headers: this.headers('text/event-stream'),
+              signal: conn.signal,
+            });
+          } catch (err) {
+            signal.removeEventListener('abort', stopConn);
+            throw err;
+          }
           if (res.status === 409) {
+            signal.removeEventListener('abort', stopConn);
             cursor = null; // the next snapshot is handed over with onSnapshot
             // Start over at once; a second 409 in a row waits like a failure.
             resets++;
             if (resets === 1) continue;
             throw new Error('store changed again');
           }
-          if (!res.ok || !res.body) throw new Error(`Event stream failed: ${res.status}`);
+          if (!res.ok || !res.body) {
+            signal.removeEventListener('abort', stopConn);
+            throw new Error(`Event stream failed: ${res.status}`);
+          }
           onState?.(true);
           const c: { store: string; after: number } = cursor;
-          await readStream(res.body, (e) => {
-            if (typeof e.seq === 'number') c.after = e.seq;
-            delay = this.retryBaseMs;
-            resets = 0;
-            onEvent(e);
-          });
+          // A stream that sends nothing, not even its ping, for idleMs is a
+          // connection that is gone without closing (the service restarted
+          // behind a proxy, the laptop slept): close it and reconnect.
+          let idle: ReturnType<typeof setTimeout> | null = null;
+          let silent = false;
+          const heard = () => {
+            if (idle) clearTimeout(idle);
+            idle = setTimeout(() => {
+              silent = true;
+              conn.abort();
+            }, this.idleMs);
+          };
+          heard();
+          try {
+            await readStream(
+              res.body,
+              (e) => {
+                if (typeof e.seq === 'number') c.after = e.seq;
+                delay = this.retryBaseMs;
+                resets = 0;
+                onEvent(e);
+              },
+              heard,
+              conn.signal
+            );
+          } finally {
+            if (idle) clearTimeout(idle);
+            signal.removeEventListener('abort', stopConn);
+          }
+          if (silent) throw new Error(`no data for ${this.idleMs} ms`);
         } catch (err) {
           if (signal.aborted) return;
           console.warn('Event stream interrupted, reconnecting:', err);
@@ -1008,14 +1147,23 @@ async function apiError(res: Response): Promise<string> {
 }
 
 // Reads a text/event-stream body and calls onEvent for each `data:` message.
-async function readStream(body: ReadableStream<Uint8Array>, onEvent: (e: CockpitEvent) => void) {
+// onData, when given, is called for every chunk read, a ping included. An
+// abort of `stop` cancels the read, whatever the fetch does with its body.
+async function readStream(
+  body: ReadableStream<Uint8Array>,
+  onEvent: (e: CockpitEvent) => void,
+  onData?: () => void,
+  stop?: AbortSignal
+) {
   const reader = body.getReader();
+  stop?.addEventListener('abort', () => reader.cancel().catch(() => {}));
   const decoder = new TextDecoder();
   let buffer = '';
   let data: string[] = [];
   for (;;) {
     const { done, value } = await reader.read();
     if (done) return;
+    onData?.();
     buffer += decoder.decode(value, { stream: true });
     const lines = buffer.split('\n');
     buffer = lines.pop() || '';

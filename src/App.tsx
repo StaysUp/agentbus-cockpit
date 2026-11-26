@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import rawSessionsJsonl from '../testdata/sessions-v0.jsonl?raw';
 import { AgentsColumn } from './components/AgentsColumn';
-import { agentNameOf, ConvoColumn, Pending, PendingUpdate } from './components/ConvoColumn';
+import { agentNameOf, ConvoColumn, currentAgent, Pending, PendingUpdate } from './components/ConvoColumn';
 import { ApprovalsPanel } from './components/ApprovalsPanel';
 import { AgentsDialog } from './components/AgentsDialog';
 import { SettingsPage } from './components/SettingsPage';
@@ -13,12 +13,12 @@ import { Loading } from './components/Notice';
 import { PRODUCT, Session, SESSION, Sessions, SESSIONS } from './words';
 import { useColumns } from './columns';
 import { BackButton } from './components/BackButton';
-import { sandboxOffer, type SettingsApi } from './data/settings';
+import { type SettingsApi } from './data/settings';
 import { useTabShown } from './data/useTabShown';
 import { SubscriptionApi } from './components/ConnectStep';
 import { SignInDot, signInOf } from './components/SignInDot';
 import { NewSessionDialog } from './components/NewSessionDialog';
-import { ApplyPanel, refusedTooBig } from './components/Changes';
+import { ApplyPanel, MERGE_REQUEST, refusedTooBig } from './components/Changes';
 import { RightPanel, usePanelTabs } from './components/RightPanel';
 import { recordFileName, saveRecord } from './data/exportRecord';
 import { SessionsColumn } from './components/SessionsColumn';
@@ -26,6 +26,7 @@ import { FolderInfo, FoldersContext, rememberFolder, rememberFolderRef, remember
 import { ReplayDataSource } from './data/ReplayDataSource';
 import { applyList, countedIn, isNewerList, ListCursor, StreamedCost, streamedCost } from './data/sessionList';
 import { addLiveEvent, LiveTurns, mergeLive, noteEventTime } from './data/liveStatus';
+import { askedWork } from './data/askedWork';
 import { refreshNow } from './utils/useNow';
 import { versionLabel } from './utils/format';
 import { QueueSource } from './data/jobs';
@@ -85,7 +86,7 @@ const SUBSCRIPTIONS_EVERY = 60_000;
 
 // Kinds that change a session's summary (agent, folder, open) as the service
 // computes it; on these, fetch the sessions again at once.
-const SUMMARY_KINDS = new Set(['session.registered', 'session.opened', 'session.closed', 'session.renamed', 'events.dropped']);
+const SUMMARY_KINDS = new Set(['session.registered', 'run.started', 'run.ended', 'session.renamed', 'events.dropped']);
 
 // Kinds that change a row of GET /api/v0/turns: a new turn, its end, its
 // cost and usage, its state, its model calls, model and reply. On these the
@@ -95,13 +96,26 @@ const TURN_LIST_KINDS = new Set([
   'turn.completed',
   'model.requested',
   'model.responded',
-  'session.opened',
-  'session.closed',
+  'run.started',
+  'run.ended',
 ]);
 
 // Kinds that change what applying a conversation would write: a turn ended,
 // its changes recorded, or an apply done. On these the preview is read again.
-const PREVIEW_KINDS = new Set(['turn.completed', 'turn.changed', 'turn.applied']);
+const PREVIEW_KINDS = new Set(['turn.completed', 'turn.changed', 'turn.applied', 'workspace.applied', 'workspace.discarded']);
+
+// Kinds that change what a turn's Changes or Context tab would read: the turn
+// ended by its own completion, or its run closed (a stop or a failure ends
+// that way, with no turn.completed); its changes were recorded; or an apply or
+// a discard moved them. On these the shown turn's fetching tabs read again.
+const TURN_DATA_KINDS = new Set([
+  'turn.completed',
+  'turn.changed',
+  'turn.applied',
+  'workspace.applied',
+  'workspace.discarded',
+  'run.ended',
+]);
 
 // Whether a streamed event changes the turn list of `session`.
 function changesTurns(event: CockpitEvent, session: string): boolean {
@@ -136,6 +150,18 @@ function mergeIntoDetails(details: Record<string, TurnDetail>, events: CockpitEv
   return out;
 }
 
+// Bump the data revision of the turns a TURN_DATA_KINDS event changes: the one
+// it names, or, for an event that carries no turn (an apply, a discard, or a
+// run closing), every turn whose events are loaded. The Changes and Context
+// tabs re-read on a bump, so they follow the turn's live events without a timer.
+function bumpTurnRev(cur: Record<string, number>, event: CockpitEvent, details: Record<string, TurnDetail>): Record<string, number> {
+  const ids = event.turn ? [event.turn] : Object.keys(details);
+  if (ids.length === 0) return cur;
+  const next = { ...cur };
+  for (const id of ids) next[id] = (next[id] ?? 0) + 1;
+  return next;
+}
+
 function emptyRow(id: string): SessionSummary {
   return { id, agent: '', client: '', title: id, started: '', last: '', open: false, turns: 0, usage: createEmptyUsage() };
 }
@@ -158,6 +184,8 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
   // The turn list, read again every few seconds while the service keeps a queue.
   const queueView = useQueue(queue);
   const refreshQueue = queueView?.refresh;
+  const refreshQueueRef = useRef(refreshQueue);
+  refreshQueueRef.current = refreshQueue;
 
   // Every session from one snapshot, newest activity first. The Sessions
   // column lists all of them, whatever agent is selected: a session can use
@@ -172,6 +200,10 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
   // While switching, it stays the previous session until the new one's turns
   // arrive.
   const [shown, setShown] = useState<Shown | null>(null);
+  // Each loaded turn's data revision, by turn id: bumped when a streamed event
+  // changes what the turn's Changes and Context tabs would read. Those tabs
+  // depend on it, so they re-read on the turn's live events.
+  const [turnRev, setTurnRev] = useState<Record<string, number>>({});
   const [selectedTurnId, setSelectedTurnId] = useState<string | null>(null);
   // A selection is an action: the nonce changes on every click, so selecting
   // the same event again still reaches the panel.
@@ -255,9 +287,6 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
   const [settingsAtSubs, setSettingsAtSubs] = useState(false);
   // An agent's name for a screen: a saved agent's, else its harness's.
   const nameOf = (id?: string) => (id ? agentNameOf(id, savedAgents) : undefined);
-  // The sessions the service said are closed when one was opened
-  // (GET /api/v0/sessions/<id>), for a list that does not say it yet.
-  const [closedIds, setClosedIds] = useState<ReadonlySet<string>>(() => new Set());
   // Archive is a view the person toggles: hidden by default, shown with "Show
   // archived". archivedOverride holds what an Archive/Unarchive click just did,
   // so the row reflects it before the list is read again (the service is the
@@ -268,34 +297,44 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
     () =>
       (allSessions ?? []).map((s) => {
         let row = s;
-        if (!s.closed && closedIds.has(s.id)) row = { ...row, closed: true };
         const ov = archivedOverride.get(s.id);
         if (ov !== undefined && !!row.archived !== ov) row = { ...row, archived: ov || undefined };
         return row;
       }),
-    [allSessions, closedIds, archivedOverride]
+    [allSessions, archivedOverride]
   );
   // The list shows only the sessions the person started. A session an agent
   // asked for (origin kind asked, ask_agent) is reached from the ask inside
   // its asking session (ConvoColumn's origin link opens it), not the top-level
   // list -- a view filter on the recorded origin, nothing dropped: the full
   // sessions set still backs selection, titles and the convo.
-  // A session is set aside when archived, or closed under the retired close:
-  // both are hidden from the default list and shown under "Show archived".
+  // A session is set aside when archived: hidden from the default list and
+  // shown under "Show archived".
   const personSessions = useMemo(
-    () => sessions.filter((s) => s.origin?.kind !== 'asked' && (showArchived || (!s.archived && !s.closed))),
+    () => sessions.filter((s) => s.origin?.kind !== 'asked' && (showArchived || !s.archived)),
     [sessions, showArchived]
   );
   // How many of the person's sessions are set aside, so the list offers the
   // "Show archived" toggle only when there is something behind it.
-  const archivedCount = useMemo(() => sessions.filter((s) => s.origin?.kind !== 'asked' && (s.archived || s.closed)).length, [sessions]);
-  // The sessions a session asked for (ask_agent), from the recorded origin:
-  // shown as links in its conversation so an asked session, kept off the list,
-  // is reachable while it runs, before its result comes back.
-  const askedOf = (sessionId: string) =>
-    (allSessions ?? [])
-      .filter((s) => s.origin?.kind === 'asked' && s.origin.session === sessionId)
-      .map((s) => ({ id: s.id, title: s.title }));
+  const archivedCount = useMemo(() => sessions.filter((s) => s.origin?.kind !== 'asked' && s.archived).length, [sessions]);
+  // The work a session asked for (ask_agent, review_turn), from the recorded
+  // origin and the turn list: queued until a runner starts it, then running.
+  // An asked session is one-off and stays off the list; its asking
+  // conversation shows one status line for each until its result comes back.
+  const askedOf = (sessionId: string) => askedWork(allSessions ?? [], sessionId, queueView?.ofSession);
+  // The sessions with something under way: their own turn queued or running,
+  // or work they asked for. Each gets the running dot on its row.
+  const active = useMemo(() => {
+    const out = new Set<string>();
+    for (const s of allSessions ?? []) {
+      if (s.origin?.kind === 'asked') continue;
+      const own = queueView?.ofSession(s.id) ?? [];
+      if (s.open || own.some((t) => t.state === 'queued' || t.state === 'running') || askedWork(allSessions ?? [], s.id, queueView?.ofSession).length > 0) {
+        out.add(s.id);
+      }
+    }
+    return out;
+  }, [allSessions, queueView]);
   const loading = allSessions === null;
   // A session's title, from the sessions the cockpit holds (GET /sessions).
   // Overview views (the queue) name a turn by this session fact, not by its
@@ -401,6 +440,25 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
       .getTurns(sessionId)
       .then(async (list) => {
         const texts = await loadTexts(sessionId, list.turns);
+        // A turn settling (running -> finished/failed/stopped) is discovered
+        // through several paths -- a streamed event, the end poll, or an
+        // events.dropped refresh -- and the job's end has no event of its own.
+        // Whichever path re-read the list, bump the revision of each loaded
+        // turn whose state changed, here at the one place the list is re-read,
+        // so the Changes and Context tabs follow every path and a settled turn
+        // is current without each path having to know to bump.
+        const prev = shownRef.current;
+        if (prev && prev.session.id === sessionId && isNewerList(prev.cursor, list)) {
+          const was = new Map(prev.session.turnsList.map((t) => [t.id, t.state]));
+          const moved = list.turns.filter((t) => was.has(t.id) && was.get(t.id) !== t.state).map((t) => t.id);
+          if (moved.length > 0) {
+            setTurnRev((cur) => {
+              const next = { ...cur };
+              for (const id of moved) next[id] = (next[id] ?? 0) + 1;
+              return next;
+            });
+          }
+        }
         setShown((s) =>
           s && s.session.id === sessionId && isNewerList(s.cursor, list)
             ? {
@@ -421,7 +479,7 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
   };
 
   // A turn reads running until its job has ended, a moment after its last
-  // event (session.closed). No event says the job ended, so the stream never
+  // event (run.ended). No event says the job ended, so the stream never
   // asks for the list again. While the shown session has a running turn,
   // read each such turn alone every TURN_END_POLL_MS, and read the list once
   // one has ended.
@@ -439,6 +497,9 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
           const st = await dataSource.queuedTurn!(shownSession, turn).catch(() => null);
           if (!active) return;
           if (st?.ended) {
+            // The job ended with no event to say so. Read the list again: it
+            // now reads the turn as settled, and refreshTurns bumps the turn's
+            // revision on that change, so the Changes and Context tabs re-read.
             refreshTurns.current(shownSession);
             return;
           }
@@ -509,6 +570,7 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
   useEffect(() => {
     if (!dataSource.subscribe || !streamOn) return;
     let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+    let streamDropped = false;
     const unsubscribe = dataSource.subscribe(
       (event) => {
         noteEventTime(event.time);
@@ -537,6 +599,34 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
         // an apply would write: the bar above the message box reads it again.
         if (s && event.session === s.session.id && PREVIEW_KINDS.has(event.kind)) {
           readPreviewRef.current(s.session.id);
+        } else if (
+          // An update (or a Merge) of the workspace on screen ended: its job has
+          // no session, so it is matched by the workspace it names.
+          s &&
+          event.kind === 'workspace.updated' &&
+          !!s.session.workspace &&
+          (event as { workspace?: unknown }).workspace === s.session.workspace
+        ) {
+          readPreviewRef.current(s.session.id);
+        }
+        // Every workspace's latest update result, for the apply panel's Merge.
+        if (event.kind === 'workspace.updated') {
+          const ws = (event as { workspace?: unknown }).workspace;
+          const u = (event as { updated?: { result?: unknown; conflicts?: unknown } }).updated;
+          if (typeof ws === 'string' && u) {
+            const conflicts = Array.isArray(u.conflicts) ? u.conflicts.filter((c): c is string => typeof c === 'string') : undefined;
+            setLastUpdates((m) => ({ ...m, [ws]: { result: typeof u.result === 'string' ? u.result : undefined, conflicts } }));
+          }
+        }
+        // The shown turn's Changes and Context tabs re-read when its data
+        // changes (its end among them), so a settled turn is current.
+        if (s && event.session === s.session.id && TURN_DATA_KINDS.has(event.kind)) {
+          setTurnRev((cur) => bumpTurnRev(cur, event, s.details));
+        }
+        // A Discard dropped some turns' changes: mark them in the conversation.
+        if (event.kind === 'workspace.discarded') {
+          const dropped = (event.discarded as { dropped_turns?: unknown } | undefined)?.dropped_turns;
+          if (Array.isArray(dropped)) markDiscardedRef.current(dropped.filter((t): t is string => typeof t === 'string'));
         }
         // A turn's end: its last reply's plan usage is stored by then, so a
         // subscription agent's bar reads it now rather than at the next
@@ -583,7 +673,20 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
         loadOpenTurns.current(snapshot);
         setReloadKey((k) => k + 1);
       },
-      setStreamUp
+      (up) => {
+        setStreamUp(up);
+        // Back after a drop (the service restarted, the network went away):
+        // the stream resumes from its cursor, and the list, the shown session
+        // and the turn list are read again, so nothing the gap changed is left
+        // stale.
+        if (!up) streamDropped = true;
+        else if (streamDropped) {
+          streamDropped = false;
+          setListKey((k) => k + 1);
+          setReloadKey((k) => k + 1);
+          refreshQueueRef.current?.();
+        }
+      }
     );
     return () => {
       if (refreshTimer) clearTimeout(refreshTimer);
@@ -657,6 +760,19 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
     if (from === undefined) setAwaitedSession(started.session);
     setAwaitedTurn(started.turn ? { session: started.session, turn: started.turn } : null);
   };
+  // Opens a session from a link in the conversation: the session asked work
+  // ran in, which is off the sessions list. One not read yet opens once its
+  // row arrives.
+  const openSession = (id: string) => {
+    nextSend();
+    setAwaitedTurn(null);
+    if (!allSessions?.some((x) => x.id === id)) {
+      setAwaitedSession(id);
+      return;
+    }
+    setAwaitedSession(null);
+    chooseSession(id);
+  };
   useEffect(() => {
     if (awaitedSession === null) return;
     const s = allSessions?.find((x) => x.id === awaitedSession);
@@ -675,9 +791,27 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
   // after it. A reply for a session no longer on screen is dropped.
   const [preview, setPreview] = useState<{ session: string; p: ApplyPreview | null; error: string | null } | null>(null);
   const previewReads = useRef(new Map<string, { again: boolean; fresh: boolean }>());
+  // Turns a Discard dropped, learned live from workspace.discarded events (and
+  // from a discard this cockpit made). The conversation marks them "Discarded".
+  // A turn the record already marks (turn.discarded) is folded in at render.
+  const [discardedTurns, setDiscardedTurns] = useState<Set<string>>(new Set());
+  const markDiscarded = useCallback((ids: string[]) => {
+    if (ids.length === 0) return;
+    setDiscardedTurns((prev) => {
+      if (ids.every((id) => prev.has(id))) return prev;
+      const next = new Set(prev);
+      for (const id of ids) next.add(id);
+      return next;
+    });
+  }, []);
+  const markDiscardedRef = useRef(markDiscarded);
+  markDiscardedRef.current = markDiscarded;
   const readPreview = useCallback(
     (sessionId: string, fresh?: boolean) => {
-      if (!dataSource.getApplyPreview) return;
+      if (!dataSource.getWorkspaceChanges) return;
+      // The preview is of the session's workspace, which GET /sessions folds in.
+      const workspace = allSessionsRef.current?.find((x) => x.id === sessionId)?.workspace;
+      if (!workspace) return;
       const reads = previewReads.current;
       const inflight = reads.get(sessionId);
       if (inflight) {
@@ -695,7 +829,7 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
         reads.delete(sessionId);
         if (st?.again) readPreviewRef.current(sessionId, st.fresh);
       };
-      dataSource.getApplyPreview(sessionId, fresh).then(
+      dataSource.getWorkspaceChanges(workspace, fresh).then(
         (p) => done(() => ({ session: sessionId, p, error: null })),
         (err) =>
           done((cur) => ({ session: sessionId, p: cur?.session === sessionId ? cur.p : null, error: (err as Error).message }))
@@ -712,10 +846,6 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
   useEffect(() => {
     if (!panelOpen) setApplyOpen(false);
   }, [panelOpen]);
-  const applyTurn = useMemo(
-    () => (dataSource.applyTurn ? (turn: string) => dataSource.applyTurn!(turn) : undefined),
-    [dataSource]
-  );
   // One turn's own diff, for the turn panel's Changes tab.
   const loadTurnDiff = useCallback((sessionId: string, turnId: string) => dataSource.getTurnDiff!(sessionId, turnId), [dataSource]);
   const loadTurnChanges = useCallback(
@@ -878,6 +1008,12 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
       remove: (id: string) => d.removeRunner!(id),
     };
   }, [dataSource]);
+  // The workspaces under each machine on the Runners page, with Close.
+  const workspacesApi = useMemo(() => {
+    const d = dataSource;
+    if (!d.listWorkspaces || !d.closeWorkspace) return undefined;
+    return { list: () => d.listWorkspaces!(), close: (id: string) => d.closeWorkspace!(id) };
+  }, [dataSource]);
   const runnersOnline = runners.runners ? runners.runners.filter((r) => r.online).length : undefined;
   // Which build the service is, read once: it is fixed for the life of the
   // process. A source without the route, or a read that fails, shows none.
@@ -901,43 +1037,62 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
   // person gave is set right after, with PATCH /api/v0/sessions/<id>.
   const launch = async (req: RunRequest, title: string | undefined, gen: number): Promise<Started> => {
     // A listed folder goes by its reference; a typed path goes with the
-    // machine picked, whose runner checks it. The session runs there.
+    // machine picked, whose runner checks it. The session runs there. The
+    // source makes the three calls (workspace, session, turn); the name goes
+    // on the session, the folder and the mode on the workspace.
     const at = req.folder_ref
-      ? { folder_ref: req.folder_ref, machine: req.machine, isolate: true }
+      ? { folder_ref: req.folder_ref, machine: req.machine }
       : { folder: req.folder, ...(req.machine ? { machine: req.machine } : {}) };
-    // POST /api/v0/turns names the turn at once, even while it waits for a
-    // runner. With the queue, the session gets its own copy of the folder.
-    const started = await dataSource.startRun!(queue ? { ...req, ...at, isolate: true } : { ...req, ...at });
+    const started = await dataSource.startRun!({ ...req, ...at, title });
     refreshQueue?.();
     if (req.folder) rememberFolder(req.folder, req.machine);
     if (req.folder_ref) rememberFolderRef(req.folder_ref);
     if (req.machine) rememberMachine(req.machine);
-    if (title && dataSource.renameSession) {
-      // The session runs either way; a refused name leaves the first message as its title.
-      dataSource
-        .renameSession(started.session, title)
-        .then(() => setListKey((k) => k + 1))
-        .catch((err) => console.warn(`Naming session ${started.session} failed:`, err));
-    }
+    awaitTurn(gen, started);
+    return started;
+  };
+  // A draft's first message: the session and its first turn, in the workspace
+  // the draft already holds. The folder was checked when that workspace was
+  // made, so this cannot be refused for the folder.
+  const launchInWorkspace = async (workspace: string, req: RunRequest, title: string | undefined, gen: number): Promise<Started> => {
+    const started = await dataSource.startInWorkspace!(workspace, { ...req, title });
+    refreshQueue?.();
     awaitTurn(gen, started);
     return started;
   };
   // A session with no first message is a draft here: an empty conversation
   // with the agent, folder and name. A session in AgentBus starts with its
-  // first turn, so the draft becomes one when its first message is sent.
-  const [draft, setDraft] = useState<{ id: number; req: RunRequest; title?: string; session?: string } | null>(null);
+  // first turn, so the draft becomes one when its first message is sent. Its
+  // workspace is made up front (startRun), so the folder is already checked:
+  // the draft always names a good folder, and its first message cannot be
+  // refused for one.
+  // The latest workspace.updated result per workspace, as streamed.
+  const [lastUpdates, setLastUpdates] = useState<Record<string, { result?: string; conflicts?: string[] }>>({});
+  const [draft, setDraft] = useState<{ id: number; req: RunRequest; title?: string; session?: string; workspace: string } | null>(null);
   const draftSeq = useRef(0);
   const startRun = async (req: RunRequest, title?: string) => {
-    const gen = nextSend();
     if (req.prompt.trim() === '') {
+      // Make the workspace now, while the form is still open. That is where the
+      // runner checks the folder, so a bad one is refused here: the error
+      // throws out to the dialog, which stays open with everything kept, and no
+      // draft -- and no session -- is ever made from a folder that cannot be
+      // used.
+      const workspace = await dataSource.createWorkspace!(req);
+      if (req.folder) rememberFolder(req.folder, req.machine);
+      if (req.machine) rememberMachine(req.machine);
+      // Only now that the workspace exists do we make this the newest send and
+      // open the draft. Bumping after the refusal above would have stranded any
+      // other draft's in-flight turn (it reads the generation to auto-select).
+      nextSend();
       setAwaitedTurn(null);
       setAwaitedSession(null);
       setPanelOpen(false);
-      setDraft({ id: ++draftSeq.current, req, title });
+      setDraft({ id: ++draftSeq.current, req, title, workspace });
       setNewSession(null);
       columns.forward('convo');
       return;
     }
+    const gen = nextSend();
     await launch(req, title, gen);
     setDraft(null);
     setNewSession(null);
@@ -957,7 +1112,8 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
           refreshQueue?.();
           return next;
         }
-        const run = launch(
+        const run = launchInWorkspace(
+          draft.workspace,
           { ...draft.req, agent: agent ?? draft.req.agent, prompt, idempotency_key: key },
           draft.title,
           gen
@@ -967,7 +1123,10 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
         try {
           started = await run;
         } catch (err) {
-          // Refused: the next message tries a new session again.
+          // Refused (e.g. the agent cannot start, not the folder -- that was
+          // checked when the workspace was made). The message stays as a failed
+          // card the person can edit and send again, the agent picked right
+          // there.
           if (draftRun.current?.started === run) draftRun.current = null;
           throw err;
         }
@@ -1026,6 +1185,13 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
   // The messages sent from each session that are not turns yet, kept here so
   // they outlive a switch to another session and back.
   const [pendingBySession, setPendingBySession] = useState<Record<string, Pending[]>>({});
+  // What the person had typed in each session's box, so a switch to another
+  // session and back shows it again. Read once, when the session is shown.
+  const draftsRef = useRef(new Map<string, string>());
+  const onDraftChange = useCallback((id: string, text: string) => {
+    if (text === '') draftsRef.current.delete(id);
+    else draftsRef.current.set(id, text);
+  }, []);
   const shownSessionId = shownId;
   const onPending = useCallback(
     (update: PendingUpdate) => {
@@ -1109,7 +1275,7 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
       return next;
     });
   // POST /api/v0/turns/<id>/stop. The turn's end arrives through the stream
-  // (its session.closed reads the turn list again). A 409 means it had ended
+  // (its run.ended reads the turn list again). A 409 means it had ended
   // already: read the list again now. Any other refusal rejects with the
   // API's words, for the conversation to show.
   const stopTurn = dataSource.stopTurn
@@ -1220,7 +1386,6 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
     ? {
         ...(shownRow ?? shown.session),
         turnsList: turns,
-        closed: !!shownRow?.closed || closedIds.has(shown.session.id) || undefined,
         archived: (archivedOverride.get(shown.session.id) ?? !!shownRow?.archived) || undefined,
       }
     : null;
@@ -1231,6 +1396,23 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
     if (previewSession) readPreview(previewSession);
   }, [previewSession, readPreview]);
   const shownPreview = preview && preview.session === previewSession ? preview : null;
+  // The folder names of the shown session's workspace, when it has several:
+  // Review lists each folder's files under its name. Read once per workspace.
+  const shownWorkspace = sessionView?.sandbox ? sessionView.workspace : undefined;
+  const [workspaceFolders, setWorkspaceFolders] = useState<{ ws: string; names: string[] } | null>(null);
+  useEffect(() => {
+    if (!shownWorkspace || !dataSource.getWorkspace) return;
+    let live = true;
+    dataSource.getWorkspace(shownWorkspace).then(
+      (w) => live && setWorkspaceFolders({ ws: shownWorkspace, names: (w.folders ?? []).map((f) => f.name ?? '').filter((n) => n !== '') }),
+      () => undefined
+    );
+    return () => {
+      live = false;
+    };
+  }, [shownWorkspace, dataSource]);
+  const reviewFolders =
+    workspaceFolders && workspaceFolders.ws === shownWorkspace && workspaceFolders.names.length > 1 ? workspaceFolders.names : undefined;
   // The copy has more files than a checkpoint holds: its changes cannot be tracked.
   const previewTooBig = refusedTooBig(shownPreview?.error);
   const openApply = () => {
@@ -1241,21 +1423,36 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
     if (previewSession) readPreview(previewSession, true);
   };
 
-  // Ask whether the selected session is closed, each time it is read.
-  useEffect(() => {
-    if (selectedSessionId === null || !dataSource.sessionClosed) return;
-    let active = true;
-    const id = selectedSessionId;
-    dataSource
-      .sessionClosed(id)
-      .then((closed) => {
-        if (active && closed) setClosedIds((set) => (set.has(id) ? set : new Set(set).add(id)));
-      })
-      .catch((err) => console.warn(`Reading whether session ${id} is closed failed:`, err));
-    return () => {
-      active = false;
-    };
-  }, [dataSource, selectedSessionId, reloadKey]);
+  // A Review prefill for the message box: the Review button beside Apply
+  // fills it, the conversation takes it once, then it is cleared.
+  const [prefill, setPrefill] = useState<{ session: string; text: string; agent?: string } | null>(null);
+  // The harness (vendor) an agent reference belongs to: a saved agent's
+  // harness, or the reference itself when it already names a harness.
+  const harnessOfRef = (ref: string) => savedAgents?.find((a) => a.id === ref)?.harness ?? ref;
+  // Agents offered as reviewer, one of a different vendor than the agent that
+  // did the work first, which becomes the default.
+  const authorHarness = harnessOfRef(currentAgent(turns));
+  const reviewOptions = [...(savedAgents ?? [])].sort(
+    (a, b) => Number(a.harness === authorHarness) - Number(b.harness === authorHarness)
+  );
+  const defaultReviewer = reviewOptions.find((a) => a.harness !== authorHarness)?.id ?? reviewOptions[0]?.id ?? '';
+  // Fills the message box with a plain review request for the turn the apply
+  // preview names, and switches the picker beside Send to the reviewer. The
+  // person presses Send; nothing is sent here.
+  const reviewTurn = (agentId: string) => {
+    const p = shownPreview?.p;
+    if (!previewSession || !p?.turn) return;
+    const n = turns.find((t) => t.id === p.turn)?.turnNumber;
+    const what = n ? `the changes from turn ${n}` : 'these changes';
+    setPrefill({ session: previewSession, text: `Please review ${what}. List any problems, most serious first.`, agent: agentId });
+  };
+  // Fills the message box with the goal-only merge request (Merge put both
+  // sides in the files; the agent finds them), and switches the picker beside
+  // Send to the agent. The person presses Send.
+  const mergeTurn = (agentId: string, _files: string[]) => {
+    if (!previewSession) return;
+    setPrefill({ session: previewSession, text: MERGE_REQUEST, agent: agentId });
+  };
 
   // Load the events of a selected turn that has none yet. Events streamed
   // while they load join them.
@@ -1352,6 +1549,8 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
         pending={runners.pending}
         reload={runners.reload}
         actions={runnerActions}
+        workspaces={workspacesApi}
+        folders={folders}
         queue={queueView ? { turns: queueView.turns, error: queueView.error, titleOf } : undefined}
         onBack={() => goPage('cockpit')}
         onApps={openApps}
@@ -1380,7 +1579,6 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
         streamUp={dataSource.subscribe ? streamUp ?? false : undefined}
         onDisconnect={onDisconnect}
         disconnectLabel={disconnectLabel}
-        sandbox={loadRunners ? sandboxOffer(runners.runners, runners.error) : undefined}
         subscriptions={subscriptionApi}
         atSubscriptions={settingsAtSubs}
       />
@@ -1432,6 +1630,7 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
 
       <SessionsColumn
         sessions={personSessions}
+        active={active}
         live={dataSource.subscribe ? liveTurns : undefined}
         // A narrow screen shows the Sessions column alone, and every card is
         // a button that opens its conversation, the one open before included.
@@ -1497,16 +1696,20 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
           key={sessionView.id}
           session={sessionView}
           resumable={sessionView.resumable}
-          closed={sessionView.closed}
           archived={sessionView.archived}
           open={sessionView.open}
           onSend={sendMessage}
+          prefill={prefill}
+          onPrefillTaken={() => setPrefill(null)}
+          savedDraft={draftsRef.current.get(sessionView.id)}
+          onDraftChange={onDraftChange}
           queuedTurn={queuedTurn}
           keyed={!!dataSource.queuedTurn}
           pending={pendingBySession[sessionView.id] ?? NO_PENDING}
           onPending={onPending}
           onStop={stopTurn}
           stopping={stopping}
+          discardedTurns={discardedTurns}
           live={dataSource.subscribe ? liveTurns[sessionView.id] : undefined}
           selectedTurn={selectedTurn}
           onSelectTurn={clickTurn}
@@ -1517,19 +1720,7 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
           onAddAgent={canKeepAgents ? () => setAgentsDialog({}) : undefined}
           agentDot={agentDot}
           asked={askedOf(sessionView.id)}
-          onOpenSession={(id) => {
-            // A session not listed yet is opened once its row arrives, as for
-            // a session just started.
-            const s = allSessions?.find((x) => x.id === id);
-            nextSend();
-            setAwaitedTurn(null);
-            if (!s) {
-              setAwaitedSession(id);
-              return;
-            }
-            setAwaitedSession(null);
-            chooseSession(id);
-          }}
+          onOpenSession={openSession}
           onRename={renameSession}
           applyBar={
             previewTooBig
@@ -1573,15 +1764,48 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
           key={previewSession}
           preview={shownPreview?.p ?? null}
           error={shownPreview?.error}
-          apply={applyTurn}
+          apply={
+            dataSource.applyWorkspace && sessionView?.workspace
+              ? (turn: string) => dataSource.applyWorkspace!(sessionView.workspace!, turn)
+              : undefined
+          }
           readApply={
             dataSource.getTurnDiff
               ? (turn: string) => dataSource.getTurnDiff!(previewSession, turn).then((d) => d.apply)
               : undefined
           }
           onApplyEnded={() => readPreview(previewSession, true)}
-          onRefresh={dataSource.getApplyPreview ? () => readPreview(previewSession, true) : undefined}
+          onRefresh={dataSource.getWorkspaceChanges ? () => readPreview(previewSession, true) : undefined}
           onClose={closePanel}
+          review={
+            sendMessage && reviewOptions.length > 0
+              ? {
+                  options: reviewOptions.map((a) => ({ id: a.id, name: a.name })),
+                  defaultAgent: defaultReviewer,
+                  onReview: reviewTurn,
+                  onMerge: mergeTurn,
+                }
+              : undefined
+          }
+          discard={
+            // Discard drops a sandbox copy's changes; a direct session has none.
+            sessionView?.sandbox && sessionView?.workspace && dataSource.discardWorkspace
+              ? () => dataSource.discardWorkspace!(sessionView.workspace!)
+              : undefined
+          }
+          onDiscarded={(dropped) => {
+            markDiscarded(dropped);
+            readPreview(previewSession, true);
+          }}
+          update={
+            // Update merges the person's folder into a sandbox copy; a direct
+            // session has no copy to update.
+            sessionView?.sandbox && sessionView?.workspace && dataSource.updateWorkspace
+              ? (mode?: 'merge') => dataSource.updateWorkspace!(sessionView.workspace!, mode)
+              : undefined
+          }
+          lastUpdate={sessionView?.workspace ? lastUpdates[sessionView.workspace] ?? null : null}
+          folders={reviewFolders}
         />
       ) : (
       <RightPanel
@@ -1610,6 +1834,11 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
         loadSessionContext={dataSource.getSessionContext ? loadSessionContext : undefined}
         panelOpen={panelOpen}
         tooBig={previewTooBig}
+        // Streamed events bump turnRev; a fresh snapshot (the stream restarts,
+        // e.g. on returning to a hidden tab) bumps reloadKey. Either means the
+        // turn's data may have moved since the fetching tabs last read — a
+        // stream that was down could have missed its end — so fold in both.
+        rev={selectedTurn ? (turnRev[selectedTurn.id] ?? 0) + reloadKey : 0}
         tabs={panelTabs}
       />
       )}

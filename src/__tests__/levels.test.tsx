@@ -296,7 +296,7 @@ describe('the turn panel', () => {
   it('keeps its tabs, with Result first holding the final answer', async () => {
     const a = await app();
     // Only tabs that work: no Skills placeholder.
-    expect(a.tabs()).toEqual(['Result', 'Prompt', 'Events', 'Model calls', 'Tools', 'AgentBus tools']);
+    expect(a.tabs()).toEqual(['Result', 'Prompt', 'Events', 'Model calls', 'Tools']);
     // It opens on Result.
     expect(a.q('#d-tabs .tab.on')!.textContent).toBe('Result');
     expect(a.q('#d-body')!.textContent).toContain('Both files are package declarations.');
@@ -318,8 +318,6 @@ describe('the turn panel', () => {
     expect(sums[2]).toBe('10 events');
     expect(sums[3]).toMatch(/^2 calls · claude-sonnet-5 · ≥?\$\d/);
     expect(sums[4]).toBe('2 tool calls');
-    // The AgentBus tools tab is its own list: no line repeats it.
-    expect(sums[5]).toBeNull();
     // No line explains how to use a tab.
     expect(sums.join(' ')).not.toMatch(/click|Coming|the Tools tab/);
     a.r.unmount();

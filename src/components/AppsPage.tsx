@@ -234,11 +234,11 @@ export const AppsPage: React.FC<AppsPageProps> = ({
             </Notice>
           )}
           <div className="apps-actions">
+            <Button kind="secondary" disabled={busy} onClick={() => setAdding(false)}>
+              Cancel
+            </Button>
             <Button kind="primary" disabled={busy} onClick={submitAdd}>
               {busy ? 'Adding…' : 'Add app'}
-            </Button>
-            <Button kind="quiet" disabled={busy} onClick={() => setAdding(false)}>
-              Cancel
             </Button>
           </div>
         </div>

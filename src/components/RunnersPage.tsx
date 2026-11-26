@@ -1,12 +1,14 @@
 import React, { useEffect, useState } from 'react';
 import { ApiTurn } from '../data/jobs';
-import { PendingMachine, RunnerInfo, SandboxInfo } from '../types';
+import { CloseState, PendingMachine, RunnerInfo, WorkspaceRow } from '../types';
 import { formatAgo } from '../utils/format';
 import { ColHead, PageFrame } from './PageFrame';
 import { RunnersList, RunnersState } from './RunnersList';
 import { Button } from './Controls';
 import { ConfirmDialog } from './Dialog';
 import { Notice } from './Notice';
+import { useWorkspaces, WorkspacesApi, WorkspacesTable } from './Workspaces';
+import { FolderInfo } from '../data/folders';
 import { harnessName, LOADING, PRODUCT, STATE } from '../words';
 
 // What the person decides on the page: approve a waiting machine with the
@@ -37,6 +39,11 @@ interface RunnersPageProps extends RunnersState {
   queue?: { turns: ApiTurn[]; error: string | null; titleOf?: (session: string) => string | undefined };
   // Undefined: a source that cannot decide, and the page shows no buttons.
   actions?: RunnerActions;
+  // The workspaces, on the page of the machine that holds each, with Close.
+  // Undefined: a source without them, and none are shown.
+  workspaces?: WorkspacesApi;
+  // The folders the service lists, to name a workspace's folder by its ref.
+  folders?: FolderInfo[];
 }
 
 const Sep = () => <span className="sep">·</span>;
@@ -45,8 +52,9 @@ const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? o
 // The runners page (/runners), in the mockup's three columns: every machine,
 // one runner each, with the machines waiting for approval on top; the picked
 // one, with what it reported; and the queue.
-export const RunnersPage: React.FC<RunnersPageProps> = ({ runners, error, pending, reload, onBack, onApps, onRunners, onSettings, runnersOnline, version, sourceLabel, streamUp, onDisconnect, disconnectLabel, queue, actions }) => {
+export const RunnersPage: React.FC<RunnersPageProps> = ({ runners, error, pending, reload, onBack, onApps, onRunners, onSettings, runnersOnline, version, sourceLabel, streamUp, onDisconnect, disconnectLabel, queue, actions, workspaces, folders }) => {
   const [picked, setPicked] = useState<string | null>(null);
+  const ws = useWorkspaces(workspaces);
   const waiting = pending ?? [];
   // The picked one while it is listed; else the first runner, or with no
   // runner the first machine waiting. A pick that left the list on a later
@@ -55,6 +63,12 @@ export const RunnersPage: React.FC<RunnersPageProps> = ({ runners, error, pendin
   const pickedRunner = pickedPending ? undefined : runners?.find((r) => r.id === picked);
   const shownPending = pickedPending ?? (!pickedRunner && !runners?.length ? waiting[0] : undefined);
   const shown = shownPending ? undefined : (pickedRunner ?? runners?.[0]);
+  // The shown runner's open workspaces. A workspace with no machine id is on
+  // the service's own machine. The API does not say which runner that is, so
+  // the first runner listed takes them: the only one, in agentbus up.
+  const home = runners?.find((r) => r.role !== 'connector' && r.machine);
+  const wsOf = (r: RunnerInfo): WorkspaceRow[] =>
+    (ws.rows ?? []).filter((w) => (w.machine ? w.machine === r.machine : r.id === home?.id));
   const after = () => {
     setPicked(null);
     reload?.();
@@ -85,24 +99,21 @@ export const RunnersPage: React.FC<RunnersPageProps> = ({ runners, error, pendin
         shownPending ? (
           <PendingDetail key={shownPending.id} p={shownPending} actions={actions} onDone={after} />
         ) : shown ? (
-          <RunnerDetail key={shown.id} r={shown} actions={actions} onDone={after} />
+          <RunnerDetail
+            key={shown.id}
+            r={shown}
+            actions={actions}
+            onDone={after}
+            workspaces={
+              workspaces && { rows: wsOf(shown), error: ws.error, folders, close: workspaces.close, closing: ws.closing, onClosing: ws.onClosing }
+            }
+          />
         ) : (
           <ColHead title="No runners yet" />
         )
       }
       side={<Queue queue={queue} />}
     />
-  );
-};
-
-// SandboxNote says whether a machine can build a session's wall.
-const SandboxNote: React.FC<{ s?: SandboxInfo }> = ({ s }) => {
-  if (!s) return <span className="dim">not reported</span>;
-  if (s.can) return <span className="rn-chip">can build it</span>;
-  return (
-    <span className="rn-sandbox-no">
-      cannot{s.why ? <span className="dim">: {s.why}</span> : null}
-    </span>
   );
 };
 
@@ -181,12 +192,6 @@ const PendingDetail: React.FC<{ p: PendingMachine; actions?: RunnerActions; onDo
               <td>{p.os ? <span className="rn-chip">{[p.os, p.arch].filter(Boolean).join(' ')}</span> : <span className="dim">not reported</span>}</td>
             </tr>
             <tr>
-              <td>Sandbox</td>
-              <td>
-                <SandboxNote s={p.sandbox} />
-              </td>
-            </tr>
-            <tr>
               <td>Labels</td>
               <td>{p.labels.length ? p.labels.map((l) => <span key={l} className="rn-chip">{l}</span>) : <span className="dim">none</span>}</td>
             </tr>
@@ -218,11 +223,11 @@ const PendingDetail: React.FC<{ p: PendingMachine; actions?: RunnerActions; onDo
                 maxLength={16}
               />
             </label>{' '}
-            <Button kind="primary" type="submit" className="rn-approve-go" disabled={busy || !code.trim()}>
-              {busy ? 'Approving…' : 'Approve'}
-            </Button>{' '}
             <Button kind="secondary" className="rn-refuse" disabled={busy} onClick={() => act(() => actions.refuse(p.id))}>
               Refuse
+            </Button>{' '}
+            <Button kind="primary" type="submit" className="rn-approve-go" disabled={busy || !code.trim()}>
+              {busy ? 'Approving…' : 'Approve'}
             </Button>
           </form>
         )}
@@ -232,7 +237,22 @@ const PendingDetail: React.FC<{ p: PendingMachine; actions?: RunnerActions; onDo
   );
 };
 
-const RunnerDetail: React.FC<{ r: RunnerInfo; actions?: RunnerActions; onDone: () => void }> = ({ r, actions, onDone }) => {
+// What RunnerDetail shows of the runner's workspaces, from the page's one read.
+interface RunnerWorkspaces {
+  rows: WorkspaceRow[];
+  error: string | null;
+  folders?: FolderInfo[];
+  close: (workspace: string) => Promise<CloseState>;
+  closing: ReadonlySet<string>;
+  onClosing: (workspace: string) => void;
+}
+
+const RunnerDetail: React.FC<{ r: RunnerInfo; actions?: RunnerActions; onDone: () => void; workspaces?: RunnerWorkspaces }> = ({
+  r,
+  actions,
+  onDone,
+  workspaces,
+}) => {
   const connector = r.role === 'connector';
   // Remove asks first: its sessions take no more turns after it.
   const [asking, setAsking] = useState(false);
@@ -287,14 +307,6 @@ const RunnerDetail: React.FC<{ r: RunnerInfo; actions?: RunnerActions; onDone: (
               <td>OS</td>
               <td>{r.os ? chips([[r.os, r.arch].filter(Boolean).join(' ')], '') : <span className="dim">not reported yet</span>}</td>
             </tr>
-            {!connector && (
-              <tr>
-                <td>Sandbox</td>
-                <td>
-                  <SandboxNote s={r.sandbox} />
-                </td>
-              </tr>
-            )}
             <tr>
               <td>Labels</td>
               <td>{chips(r.labels, 'none')}</td>
@@ -342,6 +354,12 @@ const RunnerDetail: React.FC<{ r: RunnerInfo; actions?: RunnerActions; onDone: (
                 ))}
               </tbody>
             </table>
+          </>
+        )}
+        {workspaces && (
+          <>
+            {workspaces.error && <Notice kind="error">{workspaces.error}</Notice>}
+            <WorkspacesTable rows={workspaces.rows} folders={workspaces.folders} close={workspaces.close} closing={workspaces.closing} onClosing={workspaces.onClosing} />
           </>
         )}
         {actions && !r.online && (

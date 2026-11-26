@@ -14,9 +14,9 @@
   #app.panel #right {
     position: absolute; top: 0; right: 0; bottom: 0; z-index: 50;
     width: min(46rem, calc(100% - 4rem));
-    box-shadow: -0.875rem 0 2rem rgba(20,20,20,.14);
+    box-shadow: -0.875rem 0 2rem var(--shadow);
   }
-  #app.panel > .panel-scrim { display: block; position: absolute; inset: 0; z-index: 49; background: rgba(20,20,20,.18); }
+  #app.panel > .panel-scrim { display: block; position: absolute; inset: 0; z-index: 49; background: var(--scrim); }
 }
 
 /* Under 1200px a table in the turn panel scrolls sideways in its own box. */
@@ -41,9 +41,9 @@
   #app > #agents { display: none; }
   #app.agents-open > #agents {
     display: flex; position: absolute; top: 0; left: 0; bottom: 0; z-index: 61;
-    width: min(18rem, calc(100% - 3rem)); box-shadow: 0.875rem 0 2rem rgba(20,20,20,.18);
+    width: min(18rem, calc(100% - 3rem)); box-shadow: 0.875rem 0 2rem var(--shadow-lg);
   }
-  #app.agents-open > .agents-scrim { display: block; position: absolute; inset: 0; z-index: 60; background: rgba(20,20,20,.28); }
+  #app.agents-open > .agents-scrim { display: block; position: absolute; inset: 0; z-index: 60; background: var(--scrim); }
   .agents-menu { display: inline-flex; padding: 0; }
   #sessions .colhead { padding-left: 0.5rem; }
 
@@ -65,7 +65,7 @@
   /* The conversation and the panel use the full width. */
   .c-in { padding: 0 0.75rem; }
   #c-reply { padding: 0.5rem 0.75rem 0.75rem; }
-  #right #d-head, #right #d-body { padding-left: 0.75rem; padding-right: 0.75rem; }
+  #right #d-head, #right #d-body, #right .ap-actions { padding-left: 0.75rem; padding-right: 0.75rem; }
   #right #d-tabs { padding: 0 0.5rem; overflow-x: auto; }
   #right #d-tabs .tab { flex: none; white-space: nowrap; }
 }

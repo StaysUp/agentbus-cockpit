@@ -53,6 +53,17 @@ function sentBody(svc: { reqs: Req[] }): unknown {
   return posts[posts.length - 1]?.body;
 }
 
+// The body of the last POST /api/v0/workspaces and POST /api/v0/sessions: the
+// first two of the three calls a new session makes.
+function workspaceBody(svc: { reqs: Req[] }): unknown {
+  const posts = svc.reqs.filter((q) => q.method === 'POST' && q.path === '/api/v0/workspaces');
+  return posts[posts.length - 1]?.body;
+}
+function sessionBody(svc: { reqs: Req[] }): unknown {
+  const posts = svc.reqs.filter((q) => q.method === 'POST' && q.path === '/api/v0/sessions');
+  return posts[posts.length - 1]?.body;
+}
+
 // GET /api/v0/turns rows for one session's events, newest first: the
 // service's own rules, as the replay source applies them.
 function apiTurns(events: CockpitEvent[]) {
@@ -95,7 +106,13 @@ function fakeService(opts: {
   // under /agents change it.
   agents?: unknown[];
   saved?: Record<string, unknown>[];
+  // POST /turns for a new session's first turn (its session is 'new1').
   runs?: (body: unknown) => Response | Promise<Response>;
+  // POST /workspaces: the first of the three calls. Without it, a workspace
+  // ws_new1 is made from the body.
+  workspaces?: (body: unknown) => Response | Promise<Response>;
+  // POST /sessions: the second call. Without it, session 'new1' is made.
+  makeSession?: (body: { workspace?: string; title?: string }) => Response | Promise<Response>;
   // POST /turns with session: a session's next turn.
   messages?: (id: string, body: unknown) => Response | Promise<Response>;
   // Turns per page of GET /turns.
@@ -129,7 +146,7 @@ function fakeService(opts: {
     const body = init?.body ? JSON.parse(init.body as string) : undefined;
     reqs.push({ method, path: url.pathname, query: url.search, body });
     const p = url.pathname;
-    if (p === '/api/v0/sessions') return json({ store: 'st_1', seq, sessions: state.sessions });
+    if (p === '/api/v0/sessions' && method === 'GET') return json({ store: 'st_1', seq, sessions: state.sessions });
     if (p === '/api/v0/harnesses') return json({ harnesses: opts.agents ?? [] });
     if (p === '/api/v0/folders' && opts.folders) return json({ folders: opts.folders });
     if (p === '/api/v0/runners' && opts.runners) return json({ runners: opts.runners });
@@ -162,13 +179,27 @@ function fakeService(opts: {
     }
     const session = (body as { session?: string } | undefined)?.session;
     if (p === '/api/v0/runs') return json({ error: 'no such API path' }, 404);
-    if (p === '/api/v0/turns' && method === 'POST' && session) {
-      return opts.messages
-        ? opts.messages(session, body)
-        : json({ session: session, turn: 'Tnext', state: 'running', base_url: `${BASE}/s/${session}/t/Tnext` }, 202);
+    // A new session is three calls: POST /workspaces, POST /sessions, then
+    // POST /turns with the created session. The workspace owns the folder and
+    // the mode; the first turn of a fresh session names 'new1'.
+    if (p === '/api/v0/workspaces' && method === 'POST') {
+      if (opts.workspaces) return opts.workspaces(body);
+      const b = body as { folder?: string; folder_ref?: string; machine?: string; sandbox?: boolean };
+      return json({ workspace: 'ws_new1', folder: b.folder, folder_ref: b.folder_ref, machine: b.machine, sandbox: b.sandbox !== false }, 201);
     }
-    if (p === '/api/v0/turns' && method === 'POST')
-      return opts.runs ? opts.runs(body) : json({ session: 'new1', turn: 'Tn', state: 'running', base_url: `${BASE}/s/new1/t/Tn` }, 202);
+    if (p === '/api/v0/sessions' && method === 'POST') {
+      const b = body as { workspace?: string; title?: string };
+      return opts.makeSession ? opts.makeSession(b) : json({ session: 'new1', workspace: b.workspace, title: b.title }, 201);
+    }
+    if (p === '/api/v0/turns' && method === 'POST') {
+      // The freshly created session is 'new1'; its first turn is 'Tn'. An
+      // existing session's next turn is 'Tnext' (or the messages hook).
+      const isFirst = session === 'new1';
+      if (isFirst && opts.runs) return opts.runs(body);
+      if (!isFirst && opts.messages) return opts.messages(session!, body);
+      const turn = isFirst ? 'Tn' : 'Tnext';
+      return json({ session, turn, state: 'running', base_url: `${BASE}/s/${session}/t/${turn}` }, 202);
+    }
     if (p === '/api/v0/turns' && method === 'GET') {
       // Newest first, opts.turnPage turns a page, paged by before.
       const all = apiTurns(state.events[url.searchParams.get('session') ?? ''] ?? []).map((t) => ({ ...t, ...opts.turnFields?.[t.id] }));
@@ -321,13 +352,19 @@ describe('New session', () => {
     await setValue(dialog.querySelector('textarea[name="prompt"]'), 'read the README');
     await submitForm(dialog);
 
+    // The three calls, in order: the folder and mode on the workspace, the
+    // workspace on the session, the message on the turn. The turn carries no
+    // folder or mode.
+    expect(workspaceBody(svc)).toEqual({ folder: '/Users/ana/x', sandbox: true });
+    expect(sessionBody(svc)).toEqual({ workspace: 'ws_new1' });
     const run = svc.reqs.find((q) => q.path === '/api/v0/turns' && q.method === 'POST');
     expect(run?.method).toBe('POST');
-    expect(run?.body).toEqual({ agent: 'claude', folder: '/Users/ana/x', prompt: 'read the README' });
+    expect(run?.body).toEqual({ session: 'new1', agent: 'claude', prompt: 'read the README' });
     expect(r.container.querySelector('.new-dialog')).toBeNull();
     expect(JSON.parse(localStorage.getItem('agentbus.folders') ?? '[]')).toEqual(['/Users/ana/x']);
-    // Folders only: nothing else is kept in localStorage.
-    expect(Object.keys(localStorage)).toEqual(['agentbus.folders']);
+    // Recent folders and the remembered Sandbox choice: nothing else is kept.
+    expect(Object.keys(localStorage).sort()).toEqual(['agentbus.folders', 'agentbus.sandbox']);
+    expect(localStorage.getItem('agentbus.sandbox')).toBe('1');
 
     // The new session appears in the stream; the cockpit selects it.
     svc.state.sessions = [row('new1', { open: true, resumable: false, last: '2026-11-05T10:00:00Z' }), row('s1')];
@@ -365,7 +402,9 @@ describe('New session', () => {
     expect((dialog.querySelector('button[type="submit"]') as HTMLButtonElement).disabled).toBe(false);
     await setValue(dialog.querySelector('textarea[name="prompt"]'), 'read the README');
     await submitForm(dialog);
-    expect(sentBody(svc)).toEqual({ agent: 'claude', folder_ref: 'fld_00000000000000b2', machine: 'con_2', isolate: true, prompt: 'read the README' });
+    // A listed folder goes by its reference and machine, on the workspace.
+    expect(workspaceBody(svc)).toEqual({ folder_ref: 'fld_00000000000000b2', machine: 'con_2', sandbox: true });
+    expect(sentBody(svc)).toEqual({ session: 'new1', agent: 'claude', prompt: 'read the README' });
     expect(r.container.querySelector('.new-dialog')).toBeNull();
     // A folder by reference is not a path to remember.
     expect(JSON.parse(localStorage.getItem('agentbus.folders') ?? '[]')).toEqual(['/Users/ana/old']);
@@ -383,7 +422,8 @@ describe('New session', () => {
     expect(dialog.querySelector('.nd-recent button.on')).toBeNull();
     await setValue(dialog.querySelector('textarea[name="prompt"]'), 'x');
     await submitForm(dialog);
-    expect(sentBody(svc)).toEqual({ agent: 'claude', folder: '/Users/ana/x', prompt: 'x' });
+    expect(workspaceBody(svc)).toEqual({ folder: '/Users/ana/x', sandbox: true });
+    expect(sentBody(svc)).toEqual({ session: 'new1', agent: 'claude', prompt: 'x' });
     r.unmount();
   });
 
@@ -424,6 +464,95 @@ describe('New session', () => {
   });
 });
 
+describe('The mode selector', () => {
+  const mode = (dialog: Element, v: string) => dialog.querySelector(`[data-mode="${v}"]`) as HTMLButtonElement;
+
+  it('defaults to Copy, so the workspace is created as a sandbox', async () => {
+    const svc = fakeService({ sessions: [row('s1')], events: { s1: oneTurn('s1', 'hi') }, agents: AGENTS });
+    const r = await mount(svc);
+    await click(r.container.querySelector('#sessions button.new-session'));
+    await settle();
+    const dialog = r.container.querySelector('.new-dialog')!;
+    expect(mode(dialog, 'copy').getAttribute('aria-checked')).toBe('true');
+    expect(mode(dialog, 'direct').getAttribute('aria-checked')).toBe('false');
+    // Locked is shown but cannot be picked yet.
+    expect(mode(dialog, 'locked').disabled).toBe(true);
+    expect(mode(dialog, 'locked').getAttribute('title')).toContain('Coming later');
+    await setValue(dialog.querySelector('input[name="folder"]'), '/Users/ana/x');
+    await setValue(dialog.querySelector('textarea[name="prompt"]'), 'go');
+    await submitForm(dialog);
+    expect(workspaceBody(svc)).toEqual({ folder: '/Users/ana/x', sandbox: true });
+    r.unmount();
+  });
+
+  it('Direct creates a direct workspace and remembers the choice for next time', async () => {
+    const svc = fakeService({ sessions: [row('s1')], events: { s1: oneTurn('s1', 'hi') }, agents: AGENTS });
+    const r = await mount(svc);
+    await click(r.container.querySelector('#sessions button.new-session'));
+    await settle();
+    const dialog = r.container.querySelector('.new-dialog')!;
+    await click(mode(dialog, 'direct'));
+    expect(mode(dialog, 'direct').getAttribute('aria-checked')).toBe('true');
+    await setValue(dialog.querySelector('input[name="folder"]'), '/Users/ana/x');
+    await setValue(dialog.querySelector('textarea[name="prompt"]'), 'go');
+    await submitForm(dialog);
+    expect(workspaceBody(svc)).toEqual({ folder: '/Users/ana/x', sandbox: false });
+    expect(localStorage.getItem('agentbus.sandbox')).toBe('0');
+    r.unmount();
+  });
+
+  it('starts from the remembered choice', async () => {
+    localStorage.setItem('agentbus.sandbox', '0');
+    const svc = fakeService({ sessions: [row('s1')], events: { s1: oneTurn('s1', 'hi') }, agents: AGENTS });
+    const r = await mount(svc);
+    await click(r.container.querySelector('#sessions button.new-session'));
+    await settle();
+    expect(mode(r.container.querySelector('.new-dialog')!, 'direct').getAttribute('aria-checked')).toBe('true');
+    r.unmount();
+  });
+});
+
+describe('The Sandbox mark', () => {
+  it('a sandbox session carries the Sandbox shield in its row; a direct one does not', async () => {
+    const svc = fakeService({
+      sessions: [row('box', { sandbox: true }), row('plain', { sandbox: false, last: '2026-11-05T09:01:00Z' })],
+      events: { box: oneTurn('box', 'hi'), plain: oneTurn('plain', 'hi') },
+      agents: AGENTS,
+    });
+    const r = await mount(svc);
+    const rowOf = (id: string) => Array.from(r.container.querySelectorAll('#sessions .sess')).find((b) => rowSession(b) === id)!;
+    expect(rowOf('box').querySelector('.s-sandbox[aria-label="Sandbox"]')).not.toBeNull();
+    expect(rowOf('plain').querySelector('.s-sandbox')).toBeNull();
+    r.unmount();
+  });
+});
+
+describe('The Discarded mark', () => {
+  const marks = (r: { container: HTMLElement }) =>
+    Array.from(r.container.querySelectorAll('#convo .tb-discarded')).map((e) => e.textContent);
+
+  it('marks a turn the record says a discard dropped', async () => {
+    const svc = fakeService({
+      sessions: [row('s1', { resumable: true })],
+      events: { s1: oneTurn('s1', 'first') },
+      turnFields: { 'T1-s1': { discarded: true } },
+    });
+    const r = await mount(svc);
+    expect(marks(r)).toEqual(['Discarded']);
+    r.unmount();
+  });
+
+  it('marks a turn when a workspace.discarded event names it, live', async () => {
+    const svc = fakeService({ sessions: [row('s1', { resumable: true })], events: { s1: oneTurn('s1', 'first') } });
+    const r = await mount(svc);
+    expect(marks(r)).toEqual([]);
+    await svc.push(ev({ session: 's1', kind: 'workspace.discarded', discarded: { dropped_turns: ['T1-s1'] } }));
+    await settle();
+    expect(marks(r)).toEqual(['Discarded']);
+    r.unmount();
+  });
+});
+
 describe('The started turn', () => {
   // POST /turns names the turn it starts; the cockpit selects that turn,
   // not just its session, once the turn is on screen.
@@ -440,7 +569,7 @@ describe('The started turn', () => {
     await submitForm(dialog);
 
     svc.state.sessions = [row('new1', { open: true, last: '2026-11-05T10:00:00Z' }), row('s1')];
-    await svc.push(ev({ session: 'new1', kind: 'session.opened', hold: 'h1', turn: 'Tn', agent: 'claude', folder: '/Users/ana/x' }));
+    await svc.push(ev({ session: 'new1', kind: 'run.started', hold: 'h1', turn: 'Tn', agent: 'claude', folder: '/Users/ana/x' }));
     await svc.push(ev({ session: 'new1', kind: 'turn.started', turn: 'Tn', text: 'read the README' }));
     await settle();
     expect(r.container.querySelector('#sessions .sess.on code')?.textContent).toBe('new1');
@@ -462,7 +591,7 @@ describe('The started turn', () => {
     await setValue(dialog.querySelector('textarea[name="prompt"]'), 'read the README');
     await submitForm(dialog);
     svc.state.sessions = [row('new1', { open: true, last: '2026-11-05T10:00:00Z' }), row('s1')];
-    await svc.push(ev({ session: 'new1', kind: 'session.opened', hold: 'h1', turn: 'Tn', agent: 'claude', folder: '/Users/ana/x' }));
+    await svc.push(ev({ session: 'new1', kind: 'run.started', hold: 'h1', turn: 'Tn', agent: 'claude', folder: '/Users/ana/x' }));
     await svc.push(ev({ session: 'new1', kind: 'turn.started', turn: 'Tn', text: 'read the README' }));
     await settle();
     expect(shownSession(r.container)).toBe('new1');
@@ -570,7 +699,7 @@ describe('The started turn', () => {
       await act(async () => reply!(json({ session: 'new1', turn: 'Tn', state: 'running', base_url: `${BASE}/s/new1/t/Tn` }, 202)));
       await settle();
       svc.state.sessions = [row('new1', { open: true, last: '2026-11-05T10:00:00Z' }), ...svc.state.sessions];
-      await svc.push(ev({ session: 'new1', kind: 'session.opened', hold: 'h1', turn: 'Tn', agent: 'claude', folder: '/Users/ana/x' }));
+      await svc.push(ev({ session: 'new1', kind: 'run.started', hold: 'h1', turn: 'Tn', agent: 'claude', folder: '/Users/ana/x' }));
       await svc.push(ev({ session: 'new1', kind: 'turn.started', turn: 'Tn', text: 'go' }));
       await settle();
       expect(r.container.querySelector('#sessions .sess.on code')?.textContent).toBe(want);
@@ -584,13 +713,13 @@ describe('The started turn', () => {
     const r = await mount(svc);
     await setValue(r.container.querySelector('#c-reply textarea'), 'go');
     await submitForm(r.container.querySelector('#c-reply form'));
-    await svc.push(ev({ session: 's1', kind: 'session.opened', hold: 'h2', turn: 'Tnext' }));
+    await svc.push(ev({ session: 's1', kind: 'run.started', hold: 'h2', turn: 'Tnext' }));
     await svc.push(ev({ session: 's1', kind: 'turn.started', turn: 'Tnext', text: 'go', idempotency_key: sentKey(svc) }));
     await settle();
     // A running turn never blocks the box: a message would queue behind it.
     expect((r.container.querySelector('#c-reply textarea') as HTMLTextAreaElement).disabled).toBe(false);
     // The agent exits 1 before any model call: the turn is over.
-    await svc.push(ev({ session: 's1', kind: 'session.closed', hold: 'h2', turn: 'Tnext', exit_code: 1 }));
+    await svc.push(ev({ session: 's1', kind: 'run.ended', hold: 'h2', turn: 'Tnext', exit_code: 1 }));
     await settle();
     const states = Array.from(r.container.querySelectorAll('#convo .tb')).map((t) => t.querySelector('.tb-state')?.textContent ?? '');
     expect(states).toEqual(['', 'failed']);
@@ -617,18 +746,21 @@ describe('New session: name, no first message, folders', () => {
     await setValue(dialog.querySelector('textarea[name="prompt"]'), 'read the README');
     await submitForm(dialog);
     await settle();
-    expect(sentBody(svc)).toEqual({ agent: 'claude', folder: '/Users/ana/x', prompt: 'read the README' });
-    expect(patches(svc).map((q) => [q.path, q.body])).toEqual([['/api/v0/sessions/new1', { title: 'Login fix' }]]);
+    // The name goes on the session (POST /sessions), its own noun; no PATCH.
+    expect(sentBody(svc)).toEqual({ session: 'new1', agent: 'claude', prompt: 'read the README' });
+    expect(sessionBody(svc)).toEqual({ workspace: 'ws_new1', title: 'Login fix' });
+    expect(patches(svc)).toEqual([]);
     r.unmount();
   });
 
-  it('with no name, nothing renames the session', async () => {
+  it('with no name, the session is created with no title', async () => {
     const svc = fakeService({ sessions: [row('s1')], events: { s1: oneTurn('s1', 'hi') }, agents: AGENTS });
     const { r, dialog } = await openDialog(svc);
     await setValue(dialog.querySelector('input[name="folder"]'), '/Users/ana/x');
     await setValue(dialog.querySelector('textarea[name="prompt"]'), 'read the README');
     await submitForm(dialog);
     await settle();
+    expect(sessionBody(svc)).toEqual({ workspace: 'ws_new1' });
     expect(patches(svc)).toEqual([]);
     r.unmount();
   });
@@ -656,12 +788,14 @@ describe('New session: name, no first message, folders', () => {
     await submitForm(r.container.querySelector('#c-reply form'));
     await settle();
     expect(sentBody(svc)).toEqual({
+      session: 'new1',
       agent: 'claude',
-      folder: '/Users/ana/x',
       prompt: 'read the README',
       idempotency_key: expect.stringMatching(/^cockpit-msg-/),
     });
-    expect(patches(svc).map((q) => [q.path, q.body])).toEqual([['/api/v0/sessions/new1', { title: 'Login fix' }]]);
+    // The name is on the session; the one key covers all three calls.
+    expect(sessionBody(svc)).toEqual({ workspace: 'ws_new1', title: 'Login fix', idempotency_key: expect.stringMatching(/^cockpit-msg-/) });
+    expect(patches(svc)).toEqual([]);
     expect(r.container.querySelector('.tb.pending .bubble')?.textContent).toBe('read the README');
     expect(JSON.parse(localStorage.getItem('agentbus.folders') ?? '[]')).toEqual(['/Users/ana/x']);
 
@@ -679,6 +813,180 @@ describe('New session: name, no first message, folders', () => {
     await settle();
     expect(r.container.querySelector('#sessions .sess.on code')?.textContent).toBe('new1');
     expect(r.container.querySelector('.tb .bubble')?.textContent).toBe('read the README');
+    r.unmount();
+  });
+
+  const workspacePosts = (svc: { reqs: Req[] }) => svc.reqs.filter((q) => q.method === 'POST' && q.path === '/api/v0/workspaces');
+
+  it('a bad folder for an empty-draft session is refused at the form: the dialog stays with the input and the refusal, and nothing is created', async () => {
+    const svc = fakeService({
+      sessions: [row('s1')],
+      events: { s1: oneTurn('s1', 'hi') },
+      agents: AGENTS,
+      // The folder is checked when the workspace is created, which now happens
+      // while the form is still open.
+      workspaces: () => json({ error: 'folder must be an absolute path to an existing directory, at most 4096 bytes' }, 400),
+    });
+    const { r, dialog } = await openDialog(svc);
+    await setValue(dialog.querySelector('input[name="folder"]'), '/config/Sites/temp');
+    await setValue(dialog.querySelector('input[name="name"]'), 'Fix login');
+    // No first message: a session opened empty. The workspace is still made now.
+    await submitForm(dialog);
+    await settle();
+
+    // The dialog stays open with the folder and name kept and the refusal in
+    // plain words. No draft conversation and no session were made.
+    const back = r.container.querySelector('.new-dialog')!;
+    expect(back).not.toBeNull();
+    expect((back.querySelector('input[name="folder"]') as HTMLInputElement).value).toBe('/config/Sites/temp');
+    expect((back.querySelector('input[name="name"]') as HTMLInputElement).value).toBe('Fix login');
+    expect(back.querySelector('.form-error')?.textContent).toBe('That folder does not exist.');
+    expect(workspacePosts(svc)).toHaveLength(1);
+    expect(sessionBody(svc)).toBeUndefined();
+    expect(posts(svc)).toEqual([]);
+    // No message card anywhere: the failure never reached a conversation.
+    expect(r.container.querySelector('.tb.pending')).toBeNull();
+    r.unmount();
+  });
+
+  it('an empty-draft session makes its workspace up front; the first message adds the session and turn to it', async () => {
+    const svc = fakeService({ sessions: [row('s1')], events: { s1: oneTurn('s1', 'hi') }, agents: AGENTS });
+    const { r, dialog } = await openDialog(svc);
+    await setValue(dialog.querySelector('input[name="folder"]'), '/Users/ana/x');
+    await setValue(dialog.querySelector('input[name="name"]'), 'Fix login');
+    await submitForm(dialog);
+    await settle();
+    // The workspace was made as the draft opened (the folder checked then), and
+    // the folder is remembered. No session or turn yet.
+    expect(r.container.querySelector('.new-dialog')).toBeNull();
+    expect(workspaceBody(svc)).toEqual({ folder: '/Users/ana/x', sandbox: true });
+    expect(workspacePosts(svc)).toHaveLength(1);
+    expect(sessionBody(svc)).toBeUndefined();
+    expect(posts(svc)).toEqual([]);
+    expect(r.container.querySelector('#c-head .colhead-title')?.textContent).toBe('Fix login');
+    expect(JSON.parse(localStorage.getItem('agentbus.folders') ?? '[]')).toEqual(['/Users/ana/x']);
+
+    // The first message adds the session and turn to the workspace already
+    // made; it is not re-created.
+    await setValue(r.container.querySelector('#c-reply textarea'), 'read the README');
+    await submitForm(r.container.querySelector('#c-reply form'));
+    await settle();
+    expect(workspacePosts(svc)).toHaveLength(1);
+    expect(sessionBody(svc)).toEqual({ workspace: 'ws_new1', title: 'Fix login', idempotency_key: expect.stringMatching(/^cockpit-msg-/) });
+    expect(sentBody(svc)).toEqual({ session: 'new1', agent: 'claude', prompt: 'read the README', idempotency_key: expect.stringMatching(/^cockpit-msg-/) });
+    r.unmount();
+  });
+
+  it("a draft's first message refused at the turn stays a failed card and does not disturb a newer draft", async () => {
+    let failTurn: ((r: Response) => void) | null = null;
+    const svc = fakeService({
+      sessions: [row('s1')],
+      events: { s1: oneTurn('s1', 'hi') },
+      agents: AGENTS,
+      // The workspace and session succeed; the first turn is held, then refused
+      // (an agent problem, not the folder).
+      runs: () => new Promise<Response>((resolve) => (failTurn = resolve)),
+    });
+    const { r, dialog } = await openDialog(svc);
+    await setValue(dialog.querySelector('input[name="folder"]'), '/Users/ana/x');
+    await submitForm(dialog);
+    await settle();
+    await setValue(r.container.querySelector('#c-reply textarea'), 'first in A');
+    await submitForm(r.container.querySelector('#c-reply form'));
+    await settle();
+    // Open a second empty draft while the first turn is still in flight.
+    await click(r.container.querySelector('#sessions button.new-session'));
+    await settle();
+    const d2 = r.container.querySelector('.new-dialog')!;
+    await setValue(d2.querySelector('input[name="folder"]'), '/Users/ana/y');
+    await submitForm(d2);
+    await settle();
+    expect(r.container.querySelector('.new-dialog')).toBeNull();
+
+    // The first turn is refused now. The form does not reopen, and the second
+    // draft and its box are untouched.
+    await act(async () => failTurn!(json({ error: 'no saved agent named claude' }, 400)));
+    await settle();
+    expect(r.container.querySelector('.new-dialog')).toBeNull();
+    expect(r.container.querySelector('#c-head .colhead-title')?.textContent).toBe('New session');
+    expect((r.container.querySelector('#c-reply textarea') as HTMLTextAreaElement).disabled).toBe(false);
+    r.unmount();
+  });
+
+  it("a draft's first turn refused keeps a second pending message rather than losing it", async () => {
+    let failTurn: ((r: Response) => void) | null = null;
+    const svc = fakeService({
+      sessions: [row('s1')],
+      events: { s1: oneTurn('s1', 'hi') },
+      agents: AGENTS,
+      runs: () => new Promise<Response>((resolve) => (failTurn = resolve)),
+    });
+    const { r, dialog } = await openDialog(svc);
+    await setValue(dialog.querySelector('input[name="folder"]'), '/Users/ana/x');
+    await submitForm(dialog);
+    await settle();
+    // Two messages before the first turn resolves: the second rides on it.
+    await setValue(r.container.querySelector('#c-reply textarea'), 'first');
+    await submitForm(r.container.querySelector('#c-reply form'));
+    await settle();
+    await setValue(r.container.querySelector('#c-reply textarea'), 'second');
+    await submitForm(r.container.querySelector('#c-reply form'));
+    await settle();
+
+    // The first turn is refused. Both messages stay as failed cards, each
+    // recoverable with Edit; nothing is torn down, so no input is lost.
+    await act(async () => failTurn!(json({ error: 'no saved agent named claude' }, 400)));
+    await settle();
+    expect(r.container.querySelector('.new-dialog')).toBeNull();
+    const bubbles = Array.from(r.container.querySelectorAll('.tb.pending.failed .bubble')).map((b) => b.textContent);
+    expect(bubbles.sort()).toEqual(['first', 'second']);
+    r.unmount();
+  });
+
+  it('a refused second empty-draft folder does not strand the first draft\'s awaited turn', async () => {
+    let releaseTurn: ((r: Response) => void) | null = null;
+    let badFolder = false;
+    const svc = fakeService({
+      sessions: [row('s1')],
+      events: { s1: oneTurn('s1', 'hi') },
+      agents: AGENTS,
+      // The first draft's turn is held in flight; the second draft's workspace
+      // is refused while it is still pending.
+      runs: () => new Promise<Response>((resolve) => (releaseTurn = resolve)),
+      workspaces: (body) => {
+        if (badFolder) return json({ error: 'folder must be an absolute path to an existing directory, at most 4096 bytes' }, 400);
+        const b = body as { folder?: string; folder_ref?: string; machine?: string; sandbox?: boolean };
+        return json({ workspace: 'ws_new1', folder: b.folder, folder_ref: b.folder_ref, machine: b.machine, sandbox: b.sandbox !== false }, 201);
+      },
+    });
+    const { r, dialog } = await openDialog(svc);
+    await setValue(dialog.querySelector('input[name="folder"]'), '/Users/ana/x');
+    await submitForm(dialog);
+    await settle();
+    // First draft's first message: its turn hangs, so its awaited-turn is still
+    // pending.
+    await setValue(r.container.querySelector('#c-reply textarea'), 'go');
+    await submitForm(r.container.querySelector('#c-reply form'));
+    await settle();
+    // A second empty session with a bad folder is refused at its workspace call.
+    badFolder = true;
+    await click(r.container.querySelector('#sessions button.new-session'));
+    await settle();
+    const d2 = r.container.querySelector('.new-dialog')!;
+    await setValue(d2.querySelector('input[name="folder"]'), '/bad');
+    await submitForm(d2);
+    await settle();
+    expect(d2.querySelector('.form-error')?.textContent).toBe('That folder does not exist.');
+
+    // The first draft's turn now completes and its session streams in: it must
+    // still be selected, not stranded by the refused second draft.
+    await act(async () => releaseTurn!(json({ session: 'new1', turn: 'Tn', state: 'running', base_url: `${BASE}/s/new1/t/Tn` }, 202)));
+    await settle();
+    svc.state.sessions = [row('new1', { open: true, last: '2026-11-05T10:00:00Z' }), row('s1')];
+    await svc.push(ev({ session: 'new1', kind: 'session.registered', agent: 'claude', folder: '/Users/ana/x' }));
+    await svc.push(ev({ session: 'new1', kind: 'turn.started', turn: 'Tn', text: 'go' }));
+    await settle();
+    expect(r.container.querySelector('#sessions .sess.on code')?.textContent).toBe('new1');
     r.unmount();
   });
 
@@ -719,7 +1027,8 @@ describe('New session: name, no first message, folders', () => {
       events: { s1: oneTurn('s1', 'hi') },
       agents: AGENTS,
       folders,
-      runs: () => json({ error: answers.shift() }, 400),
+      // The folder is checked when the workspace is created, the first call.
+      workspaces: () => json({ error: answers.shift() }, 400),
     });
     const { r, dialog } = await openDialog(svc);
     await setValue(dialog.querySelector('input[name="folder"]'), '/config/Sites/');
@@ -803,58 +1112,6 @@ describe('The prompt box', () => {
     r.unmount();
   });
 
-  it('sets aside a closed session: hidden by default, shown with a lock under Show archived, box disabled', async () => {
-    const svc = fakeService({ sessions: [row('s1', { resumable: true, closed: '2026-11-11T09:00:00Z' })], events: { s1: oneTurn('s1', 'first') } });
-    const r = await mount(svc);
-    // A closed session is set aside (treated like archived): hidden from the
-    // default list. Show archived reveals it with the same lock.
-    expect(r.container.querySelector('#sessions [data-session="s1"]')).toBeNull();
-    await click(r.container.querySelector('#sessions .show-archived'));
-    const row1 = r.container.querySelector('#sessions [data-session="s1"]');
-    expect(row1).not.toBeNull();
-    expect(r.container.querySelector('#sessions [data-session="s1"] .s-lock')).not.toBeNull();
-    // Opening it: the header marks it closed and its box is disabled.
-    await click(row1);
-    await settle();
-    expect((r.container.querySelector('#c-reply textarea') as HTMLTextAreaElement).disabled).toBe(true);
-    expect(r.container.querySelector('#c-reply .reply-why')?.textContent).toBe('This session is closed. Start a new one.');
-    expect(r.container.querySelector('#c-head .c-closed')?.textContent?.trim()).toBe('closed');
-    r.unmount();
-  });
-
-  it('marks a session closed when only GET /sessions/<id> says so, on its copy, and sets it aside', async () => {
-    const svc = fakeService({
-      sessions: [row('s1', { resumable: true })],
-      events: { s1: oneTurn('s1', 'first') },
-      oneSession: (id) => json({ store: 'st_1', seq: 1, session: { ...row(id), copy: { runner: 'run_1', kind: 'copy', name: id, closed: '2026-11-11T09:00:00Z' } } }),
-    });
-    const r = await mount(svc);
-    // s1 is shown and selected; the convo reads GET /sessions/s1, finds its
-    // copy closed, and disables the box and marks the header.
-    expect(svc.reqs.some((q) => q.method === 'GET' && q.path === '/api/v0/sessions/s1')).toBe(true);
-    expect((r.container.querySelector('#c-reply textarea') as HTMLTextAreaElement).disabled).toBe(true);
-    expect(r.container.querySelector('#c-reply .reply-why')?.textContent).toBe('This session is closed. Start a new one.');
-    expect(r.container.querySelector('#c-head .c-closed')?.textContent?.trim()).toBe('closed');
-    // Now that it is known closed it is set aside: gone from the default list,
-    // shown with a lock under Show archived.
-    expect(r.container.querySelector('#sessions [data-session="s1"]')).toBeNull();
-    await click(r.container.querySelector('#sessions .show-archived'));
-    expect(r.container.querySelector('#sessions [data-session="s1"] .s-lock')).not.toBeNull();
-    r.unmount();
-  });
-
-  it('keeps Send for a session whose copy is not closed', async () => {
-    const svc = fakeService({
-      sessions: [row('s1', { resumable: true })],
-      events: { s1: oneTurn('s1', 'first') },
-      oneSession: (id) => json({ store: 'st_1', seq: 1, session: { ...row(id), copy: { runner: 'run_1', kind: 'copy', name: id } } }),
-    });
-    const r = await mount(svc);
-    expect((r.container.querySelector('#c-reply textarea') as HTMLTextAreaElement).disabled).toBe(false);
-    expect(r.container.querySelector('#c-head .c-closed')).toBeNull();
-    r.unmount();
-  });
-
   it("shows a failed turn's reason on its state label, with no error box", async () => {
     const svc = fakeService({
       sessions: [row('s1', { resumable: true })],
@@ -890,16 +1147,16 @@ describe('The prompt box', () => {
     r.unmount();
   });
 
-  // A turn whose reply is stored but whose session.closed is not: the service
+  // A turn whose reply is stored but whose run.ended is not: the service
   // holds it open for its last writes, so Send must wait.
   const closing = (session: string) => [
-    ev({ session, kind: 'session.opened', turn: `T1-${session}`, hold: 'h1' }),
+    ev({ session, kind: 'run.started', turn: `T1-${session}`, hold: 'h1' }),
     ...oneTurn(session, 'first').slice(0, 3).map((e) => ({ ...e, session, turn: `T1-${session}` })),
   ];
   const sendBtn = (r: { container: HTMLElement }) => r.container.querySelector('#c-reply button.go') as HTMLButtonElement;
   const box = (r: { container: HTMLElement }) => r.container.querySelector('#c-reply textarea') as HTMLTextAreaElement;
 
-  it('between the reply and session.closed a message queues; after it, Send', async () => {
+  it('between the reply and run.ended a message queues; after it, Send', async () => {
     const svc = fakeService({ sessions: [row('s1', { resumable: true, open: true })], events: { s1: closing('s1') } });
     const r = await mount(svc);
     // The reply is on screen; the turn is not closed.
@@ -911,9 +1168,9 @@ describe('The prompt box', () => {
     expect(r.container.querySelector('#c-reply .reply-why')).toBeNull();
     await setValue(box(r), '');
 
-    // session.closed arrives: the row is no longer open, the turn is finished.
+    // run.ended arrives: the row is no longer open, the turn is finished.
     svc.state.sessions = [row('s1', { resumable: true, open: false })];
-    await svc.push(ev({ session: 's1', kind: 'session.closed', turn: 'T1-s1', hold: 'h1', exit_code: 0 }));
+    await svc.push(ev({ session: 's1', kind: 'run.ended', turn: 'T1-s1', hold: 'h1', exit_code: 0 }));
     await settle();
     expect(box(r).disabled).toBe(false);
     expect(sendBtn(r).textContent).toBe('Send');
@@ -1045,6 +1302,61 @@ describe('The prompt box', () => {
     await click(r.container.querySelector('#sessions [data-session="s1"]'));
     await settle();
     expect(r.container.querySelector('.tb.pending.queued .bubble')?.textContent).toBe('wait for me');
+    r.unmount();
+  });
+
+  it('a message queued behind nothing waits like any message, and names the runner only after a few seconds', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const svc = fakeService({
+      sessions: [row('s1', { resumable: true })],
+      events: { s1: oneTurn('s1', 'first') },
+      messages: (id) => json({ session: id, turn: 't_q', state: 'queued' }, 202),
+    });
+    const r = await mount(svc);
+    await setValue(box(r), 'go');
+    await submitForm(r.container.querySelector('#c-reply form'));
+    await settle();
+    const state = () => r.container.querySelector('.tb.pending .tb-state')?.textContent;
+    // The same line as a message the service took at once.
+    expect(state()).toBe('waiting for the agent');
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+    });
+    expect(state()).toBe('waiting for the agent');
+    // Still queued a few seconds on: no runner has taken it.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3500);
+    });
+    expect(state()).toBe('queued · waiting for a runner');
+    r.unmount();
+  });
+
+  it('what was typed stays in its own session’s box across a switch and back', async () => {
+    const svc = fakeService({
+      sessions: [row('s1', { resumable: true }), row('s2', { resumable: true })],
+      events: { s1: oneTurn('s1', 'first'), s2: oneTurn('s2', 'other') },
+      messages: (id) => json({ session: id, turn: 't_n', state: 'running' }, 202),
+    });
+    const r = await mount(svc);
+    await setValue(box(r), 'half a thought');
+    await click(r.container.querySelector('#sessions [data-session="s2"]'));
+    await settle();
+    expect(box(r).value).toBe('');
+    await setValue(box(r), 'for two');
+    await click(r.container.querySelector('#sessions [data-session="s1"]'));
+    await settle();
+    expect(box(r).value).toBe('half a thought');
+    await click(r.container.querySelector('#sessions [data-session="s2"]'));
+    await settle();
+    expect(box(r).value).toBe('for two');
+    // A sent message leaves the box, and does not come back to it.
+    await submitForm(r.container.querySelector('#c-reply form'));
+    await settle();
+    await click(r.container.querySelector('#sessions [data-session="s1"]'));
+    await settle();
+    await click(r.container.querySelector('#sessions [data-session="s2"]'));
+    await settle();
+    expect(box(r).value).toBe('');
     r.unmount();
   });
 
@@ -1905,10 +2217,30 @@ describe('New session: the machine, then a folder on it', () => {
     // The recents shown are the new machine's.
     await setValue(dialog.querySelector('textarea[name="prompt"]'), 'x');
     await submitForm(dialog);
-    expect(sentBody(svc)).toEqual({ agent: 'claude', folder_ref: 'fld_00000000000000c1', machine: 'con_c', isolate: true, prompt: 'x' });
+    expect(workspaceBody(svc)).toEqual({ folder_ref: 'fld_00000000000000c1', machine: 'con_c', sandbox: true });
     // Remembered by reference, so it is offered first next time; never as a path.
     expect(JSON.parse(localStorage.getItem('agentbus.folderRefs') ?? '[]')).toEqual(['fld_00000000000000c1']);
     expect(localStorage.getItem('agentbus.folders.con_c')).toBeNull();
+    r.unmount();
+  });
+
+  it('with a folder in another row, a listed folder on another machine cannot be picked', async () => {
+    const svc = fakeService({ sessions: [row('s1')], events: { s1: oneTurn('s1', 'hi') }, agents: AGENTS, folders: FOLDERS, runners: MACHINES });
+    const { r, dialog } = await openDialog(svc);
+    const button = (name: string) =>
+      Array.from(dialog.querySelectorAll('.nd-recent button')).find((b) => b.querySelector('code')?.textContent === name) as HTMLButtonElement;
+    await click(button('app'));
+    await click(dialog.querySelector('button.nd-add-folder') as HTMLButtonElement);
+    // The second row's picks: infra is on con_c, the first row's folder on con_a.
+    expect(button('infra').disabled).toBe(true);
+    expect(button('infra').title).toContain("a session's folders are on one machine");
+    expect(button('app').disabled).toBe(false);
+    expect(selectIn(dialog, 'machine')!.value).toBe('con_a');
+    // With app's row removed, no other row has a folder: infra can be picked and takes its machine.
+    await click(dialog.querySelector('button[aria-label="Remove folder 1"]') as HTMLButtonElement);
+    expect(button('infra').disabled).toBe(false);
+    await click(button('infra'));
+    expect(selectIn(dialog, 'machine')!.value).toBe('con_c');
     r.unmount();
   });
 
@@ -1940,7 +2272,9 @@ describe('New session: the machine, then a folder on it', () => {
     await setValue(dialog.querySelector('input[name="folder"]'), '/work/new');
     await setValue(dialog.querySelector('textarea[name="prompt"]'), 'x');
     await submitForm(dialog);
-    expect(sentBody(svc)).toEqual({ agent: 'claude', folder: '/work/new', machine: 'con_c', prompt: 'x' });
+    // The folder and the machine go on the workspace; the turn names only the session.
+    expect(workspaceBody(svc)).toEqual({ folder: '/work/new', machine: 'con_c', sandbox: true });
+    expect(sentBody(svc)).toEqual({ session: 'new1', agent: 'claude', prompt: 'x' });
     expect(JSON.parse(localStorage.getItem('agentbus.folders.con_c') ?? '[]')).toEqual(['/work/new']);
     expect(localStorage.getItem('agentbus.folders')).toBeNull();
     expect(localStorage.getItem('agentbus.machine')).toBe('con_c');
@@ -1975,7 +2309,8 @@ describe('New session: the machine, then a folder on it', () => {
       events: { s1: oneTurn('s1', 'hi') },
       agents: AGENTS,
       runners: MACHINES,
-      runs: () => json({ error: 'machine con_a is offline; start agentbus runner there, or name another' }, 503),
+      // The machine is checked when the workspace is created, the first call.
+      workspaces: () => json({ error: 'machine con_a is offline; start agentbus runner there, or name another' }, 503),
     });
     const { r, dialog } = await openDialog(svc);
     await setValue(dialog.querySelector('input[name="folder"]'), '/x');
@@ -1983,6 +2318,202 @@ describe('New session: the machine, then a folder on it', () => {
     await submitForm(dialog);
     await settle();
     expect(dialog.querySelector('.form-error')?.textContent).toBe('That machine is offline. Run agentbus runner on it, or pick another machine.');
+    r.unmount();
+  });
+});
+
+describe('Several folders', () => {
+  const mode = (dialog: Element, v: string) => dialog.querySelector(`[data-mode="${v}"]`) as HTMLButtonElement;
+
+  it('+ Add folder takes a second folder, sent as folders on one machine; Direct waits for one folder', async () => {
+    const folders = [
+      { ref: 'fld_00000000000000a1', name: 'framework', machine: 'con_1', runner: 'run_1' },
+      { ref: 'fld_00000000000000b2', name: 'cockpit', machine: 'con_1', runner: 'run_1' },
+    ];
+    const svc = fakeService({ sessions: [row('s1')], events: { s1: oneTurn('s1', 'hi') }, agents: AGENTS, folders });
+    const r = await mount(svc);
+    await click(r.container.querySelector('#sessions button.new-session'));
+    await settle();
+    const dialog = r.container.querySelector('.new-dialog')!;
+    const picks = () => Array.from(dialog.querySelectorAll('.nd-recent button')) as HTMLButtonElement[];
+    await click(picks()[0]);
+    await click(dialog.querySelector('button.nd-add-folder') as HTMLButtonElement);
+    expect(dialog.querySelector('input[name="folder-2"]')).not.toBeNull();
+    expect(mode(dialog, 'direct').disabled).toBe(true);
+    // An empty second row stops Start and says so.
+    await click(dialog.querySelector('button[type="submit"]') as HTMLButtonElement);
+    expect(dialog.querySelector('.nd-missing')?.textContent).toBe('Pick a folder for each row, or remove it.');
+    // The new row has focus and the picks: a pick fills it.
+    await click(picks()[1]);
+    expect((dialog.querySelector('input[name="folder"]') as HTMLInputElement).value).toBe('framework');
+    expect((dialog.querySelector('input[name="folder-2"]') as HTMLInputElement).value).toBe('cockpit');
+    await setValue(dialog.querySelector('textarea[name="prompt"]'), 'go');
+    await submitForm(dialog);
+    expect(workspaceBody(svc)).toEqual({
+      folders: [{ folder_ref: 'fld_00000000000000a1' }, { folder_ref: 'fld_00000000000000b2' }],
+      machine: 'con_1',
+      sandbox: true,
+    });
+    r.unmount();
+  });
+
+  it('Remove takes a folder back out, and one folder is sent as before', async () => {
+    const svc = fakeService({ sessions: [row('s1')], events: { s1: oneTurn('s1', 'hi') }, agents: AGENTS });
+    const r = await mount(svc);
+    await click(r.container.querySelector('#sessions button.new-session'));
+    await settle();
+    const dialog = r.container.querySelector('.new-dialog')!;
+    await setValue(dialog.querySelector('input[name="folder"]'), '/Users/ana/x');
+    await click(dialog.querySelector('button.nd-add-folder') as HTMLButtonElement);
+    await setValue(dialog.querySelector('input[name="folder-2"]'), '/Users/ana/y');
+    await click(dialog.querySelector('button[aria-label="Remove folder 2"]') as HTMLButtonElement);
+    expect(dialog.querySelector('input[name="folder-2"]')).toBeNull();
+    expect(mode(dialog, 'direct').disabled).toBe(false);
+    await setValue(dialog.querySelector('textarea[name="prompt"]'), 'go');
+    await submitForm(dialog);
+    expect(workspaceBody(svc)).toEqual({ folder: '/Users/ana/x', sandbox: true });
+    r.unmount();
+  });
+
+  it('the same folder in two rows, or folders of two machines, start nothing and say why', async () => {
+    const folders = [
+      { ref: 'fld_00000000000000a1', name: 'framework', machine: 'con_1', runner: 'run_1' },
+      { ref: 'fld_00000000000000c3', name: 'other', machine: 'con_2', runner: 'run_2' },
+    ];
+    const svc = fakeService({ sessions: [row('s1')], events: { s1: oneTurn('s1', 'hi') }, agents: AGENTS, folders });
+    const r = await mount(svc);
+    await click(r.container.querySelector('#sessions button.new-session'));
+    await settle();
+    const dialog = r.container.querySelector('.new-dialog')!;
+    const picks = () => Array.from(dialog.querySelectorAll('.nd-recent button')) as HTMLButtonElement[];
+    const posts = () => svc.reqs.filter((q) => q.method === 'POST' && q.path === '/api/v0/workspaces').length;
+    await click(picks()[0]);
+    await click(dialog.querySelector('button.nd-add-folder') as HTMLButtonElement);
+    await click(picks()[0]);
+    // Refused in place, before Start: the second row says so and is marked.
+    expect(dialog.querySelector('.nd-dup')?.textContent).toBe('This folder is already in the list.');
+    expect((dialog.querySelector('input[name="folder-2"]') as HTMLInputElement).getAttribute('aria-invalid')).toBe('true');
+    expect((dialog.querySelector('input[name="folder"]') as HTMLInputElement).getAttribute('aria-invalid')).toBeNull();
+    await click(dialog.querySelector('button[type="submit"]') as HTMLButtonElement);
+    expect(posts()).toBe(0);
+    await click(picks()[1]);
+    expect(dialog.querySelector('.nd-dup')).toBeNull();
+    await click(dialog.querySelector('button[type="submit"]') as HTMLButtonElement);
+    expect(dialog.querySelector('.nd-missing')?.textContent).toBe('All folders of a session are on one machine.');
+    expect(posts()).toBe(0);
+    expect(dialog.querySelector('button[aria-label="Remove folder 2"]')).not.toBeNull();
+    r.unmount();
+  });
+
+  it('two typed paths that clean the same are one folder; a listed folder in a later row names the machine', async () => {
+    const folders = [{ ref: 'fld_00000000000000c3', name: 'other', machine: 'con_2', runner: 'run_2' }];
+    const svc = fakeService({ sessions: [row('s1')], events: { s1: oneTurn('s1', 'hi') }, agents: AGENTS, folders });
+    const r = await mount(svc);
+    await click(r.container.querySelector('#sessions button.new-session'));
+    await settle();
+    const dialog = r.container.querySelector('.new-dialog')!;
+    await setValue(dialog.querySelector('input[name="folder"]'), '/work/project');
+    await click(dialog.querySelector('button.nd-add-folder') as HTMLButtonElement);
+    await setValue(dialog.querySelector('input[name="folder-2"]'), '/work/./project/');
+    expect(dialog.querySelector('.nd-dup')?.textContent).toBe('This folder is already in the list.');
+    await act(async () => (dialog.querySelector('input[name="folder-2"]') as HTMLInputElement).focus());
+    await click(dialog.querySelector('.nd-recent button') as HTMLButtonElement);
+    await setValue(dialog.querySelector('textarea[name="prompt"]'), 'go');
+    await submitForm(dialog);
+    expect(workspaceBody(svc)).toEqual({
+      folders: [{ folder: '/work/project' }, { folder_ref: 'fld_00000000000000c3' }],
+      machine: 'con_2',
+      sandbox: true,
+    });
+    r.unmount();
+  });
+
+  it('one Folders label; the picks sit under the focused row only and fill it', async () => {
+    const folders = ['one', 'two', 'three'].map((n, i) => ({ ref: `fld_000000000000000${i + 1}`, name: n, machine: 'con_1', runner: 'run_1' }));
+    const svc = fakeService({ sessions: [row('s1')], events: { s1: oneTurn('s1', 'hi') }, agents: AGENTS, folders });
+    const r = await mount(svc);
+    await click(r.container.querySelector('#sessions button.new-session'));
+    await settle();
+    const dialog = r.container.querySelector('.new-dialog')!;
+    const picks = () => Array.from(dialog.querySelectorAll('.nd-recent button')) as HTMLButtonElement[];
+    const rows = () => Array.from(dialog.querySelectorAll('input[name^="folder"]')).map((e) => (e as HTMLInputElement).value);
+    // The list follows the row with focus: it is the next sibling of that row.
+    const listAfter = (name: string) => dialog.querySelector(`input[name="${name}"]`)!.closest('.nd-frow')!.nextElementSibling?.classList.contains('nd-recent');
+    // One folder: the one label, and a listed folder shows by its name.
+    expect(dialog.querySelector('#nd-folders-label')?.textContent).toBe('Folder');
+    await click(picks()[0]);
+    expect(rows()).toEqual(['one']);
+    await click(dialog.querySelector('button.nd-add-folder') as HTMLButtonElement);
+    await click(dialog.querySelector('button.nd-add-folder') as HTMLButtonElement);
+    expect(dialog.querySelector('#nd-folders-label')?.textContent).toBe('Folders');
+    expect(dialog.textContent).not.toMatch(/Folder \d/);
+    // One list, under the row added last (it has focus).
+    expect(dialog.querySelectorAll('.nd-recent').length).toBe(1);
+    expect(listAfter('folder-3')).toBe(true);
+    await click(picks()[2]);
+    expect(rows()).toEqual(['one', '', 'three']);
+    // Focus on row 2 moves the list there, and a pick fills row 2.
+    await act(async () => (dialog.querySelector('input[name="folder-2"]') as HTMLInputElement).focus());
+    expect(dialog.querySelectorAll('.nd-recent').length).toBe(1);
+    expect(listAfter('folder-2')).toBe(true);
+    expect(picks().filter((b) => b.classList.contains('on'))).toEqual([]);
+    await click(picks()[1]);
+    expect(rows()).toEqual(['one', 'two', 'three']);
+    r.unmount();
+  });
+
+  it('a remove icon on every row only when there are two or more', async () => {
+    const svc = fakeService({ sessions: [row('s1')], events: { s1: oneTurn('s1', 'hi') }, agents: AGENTS });
+    const r = await mount(svc);
+    await click(r.container.querySelector('#sessions button.new-session'));
+    await settle();
+    const dialog = r.container.querySelector('.new-dialog')!;
+    const removes = () => Array.from(dialog.querySelectorAll('button.nd-remove')).map((b) => b.getAttribute('aria-label'));
+    expect(removes()).toEqual([]);
+    await click(dialog.querySelector('button.nd-add-folder') as HTMLButtonElement);
+    expect(removes()).toEqual(['Remove folder 1', 'Remove folder 2']);
+    await setValue(dialog.querySelector('input[name="folder-2"]'), '/Users/ana/y');
+    // The first row can go too; the other row is left, with no icon.
+    await click(dialog.querySelector('button[aria-label="Remove folder 1"]') as HTMLButtonElement);
+    expect(removes()).toEqual([]);
+    expect((dialog.querySelector('input[name="folder"]') as HTMLInputElement).value).toBe('/Users/ana/y');
+    expect(document.activeElement).toBe(dialog.querySelector('input[name="folder"]'));
+    r.unmount();
+  });
+
+  it('the picks show each folder once: one recent path in two spellings, and a recent path of a listed folder', async () => {
+    localStorage.setItem('agentbus.folders', JSON.stringify(['/Users/ana/Sites/app', '/Users/ana/x', '/Users/ana/x/', '/Users/ana/y']));
+    const folders = [{ ref: 'fld_00000000000000a1', name: 'app' }];
+    const svc = fakeService({ sessions: [row('s1')], events: { s1: oneTurn('s1', 'hi') }, agents: AGENTS, folders });
+    const r = await mount(svc);
+    await click(r.container.querySelector('#sessions button.new-session'));
+    await settle();
+    const dialog = r.container.querySelector('.new-dialog')!;
+    expect(Array.from(dialog.querySelectorAll('.nd-recent button')).map((b) => b.textContent)).toEqual(['app', '/Users/ana/x', '/Users/ana/y']);
+    r.unmount();
+  });
+
+  it('focus stays in the dialog when a row is added or removed', async () => {
+    const svc = fakeService({ sessions: [row('s1')], events: { s1: oneTurn('s1', 'hi') }, agents: AGENTS });
+    const r = await mount(svc);
+    await click(r.container.querySelector('#sessions button.new-session'));
+    await settle();
+    const dialog = r.container.querySelector('.new-dialog')!;
+    await click(dialog.querySelector('button.nd-add-folder') as HTMLButtonElement);
+    expect(document.activeElement).toBe(dialog.querySelector('input[name="folder-2"]'));
+    await click(dialog.querySelector('button[aria-label="Remove folder 2"]') as HTMLButtonElement);
+    expect(document.activeElement).toBe(dialog.querySelector('input[name="folder"]'));
+    r.unmount();
+  });
+
+  it('Direct shows no + Add folder', async () => {
+    const svc = fakeService({ sessions: [row('s1')], events: { s1: oneTurn('s1', 'hi') }, agents: AGENTS });
+    const r = await mount(svc);
+    await click(r.container.querySelector('#sessions button.new-session'));
+    await settle();
+    const dialog = r.container.querySelector('.new-dialog')!;
+    await click(mode(dialog, 'direct'));
+    expect(dialog.querySelector('button.nd-add-folder')).toBeNull();
     r.unmount();
   });
 });

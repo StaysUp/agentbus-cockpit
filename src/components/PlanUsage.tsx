@@ -46,6 +46,20 @@ export function when(d: Date, now: Date): string {
   return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
 }
 
+// isReset says the reading's window has reset since it was read: its reset
+// time, which the vendor sent with it, has passed. What was used then no
+// longer counts; what was used since is not known until the next model reply
+// on the subscription brings a new reading.
+export function isReset(p: PlanReading, now: Date): boolean {
+  return !!p.resets_at && new Date(p.resets_at).getTime() <= now.getTime();
+}
+
+// leftNow is what is left of the window as far as is known now: all of it
+// once the window has reset, else the reading's own figure.
+export function leftNow(p: PlanReading, now: Date): number {
+  return isReset(p, now) ? 100 : percentLeft(p);
+}
+
 // stale says the reading may no longer hold: its window reset since, or it
 // is older than a tenth of its window (an hour when the length is unknown).
 // No model call on the subscription since then would have updated it.
@@ -57,6 +71,9 @@ export function stale(p: PlanReading, now: Date): boolean {
 
 // planLine is the line under the bar.
 export function planLine(p: PlanReading, now: Date): string {
+  if (isReset(p, now)) {
+    return `${windowLabel(p)} · reset at ${when(new Date(p.resets_at!), now)} · use since then shows after the next turn`;
+  }
   const parts = [windowLabel(p), `${percentLeft(p)}% left`];
   if (p.resets_at && new Date(p.resets_at).getTime() > now.getTime()) parts.push(`resets ${when(new Date(p.resets_at), now)}`);
   if (stale(p, now)) parts.push(`as of ${when(new Date(p.read_at), now)}`);
@@ -76,6 +93,7 @@ export function shortLabel(p: PlanReading): string {
 // "5h · 62% left · 14:20", the time being when it resets. The full words,
 // "as of" included, are its tooltip (planLine).
 export function shortLine(p: PlanReading, now: Date): string {
+  if (isReset(p, now)) return `${shortLabel(p)} · reset at ${when(new Date(p.resets_at!), now)}`;
   const parts = [shortLabel(p), `${percentLeft(p)}% left`];
   if (p.resets_at && new Date(p.resets_at).getTime() > now.getTime()) parts.push(when(new Date(p.resets_at), now));
   return parts.join(' · ');
@@ -85,11 +103,12 @@ export const PlanUsage: React.FC<{ usage: PlanReading[] | undefined; now?: Date 
   if (!usage || usage.length === 0) return null;
   const shortest = usage[0];
   const longest = usage[usage.length - 1];
-  const left = percentLeft(longest);
+  const left = leftNow(longest, now);
   const words = planLine(longest, now);
-  // The bar's colour is the tightest limit: red at 5% left or less in any
-  // window, yellow at 20% or less.
-  const least = Math.min(...usage.map(percentLeft));
+  // The bar's colour is the tightest limit as it stands now: red at 5% left
+  // or less in any window, yellow at 20% or less. A window that has reset
+  // since its reading counts as full.
+  const least = Math.min(...usage.map((p) => leftNow(p, now)));
   const tone = least <= 5 ? ' out' : least <= 20 ? ' low' : '';
   return (
     <>

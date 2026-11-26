@@ -131,23 +131,27 @@ export const Dialog: React.FC<DialogProps> = ({ title, label, onClose, busy = fa
   );
 };
 
-// The dialog's row of actions: its own buttons, then Cancel. cancel={false}
-// leaves Cancel out; a string names it (only for a dialog whose work is
-// done, where nothing is left to cancel).
+// The dialog's row of actions, at the right: Cancel first, then the dialog's
+// own buttons, so the main action is always the last one on the right.
+// cancel={false} leaves Cancel out; a string names it (only for a dialog whose
+// work is done, where it is the one action left, so it goes last).
 export const DialogActions: React.FC<{ children?: React.ReactNode; cancel?: string | false; cancelFocus?: boolean }> = ({
   children,
   cancel,
   cancelFocus,
 }) => {
   const { close, busy } = useContext(Ctx);
+  const cancelButton =
+    cancel === false ? null : (
+      <Button kind="secondary" className="dlg-cancel" onClick={close} disabled={busy} data-autofocus={cancelFocus || undefined}>
+        {cancel ?? CANCEL}
+      </Button>
+    );
   return (
     <div className="nd-actions">
+      {typeof cancel !== 'string' && cancelButton}
       {children}
-      {cancel !== false && (
-        <Button kind="secondary" className="dlg-cancel" onClick={close} disabled={busy} data-autofocus={cancelFocus || undefined}>
-          {cancel ?? CANCEL}
-        </Button>
-      )}
+      {typeof cancel === 'string' && cancelButton}
     </div>
   );
 };

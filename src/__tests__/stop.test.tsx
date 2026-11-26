@@ -34,7 +34,7 @@ function row(id: string, fields: Record<string, unknown> = {}) {
 // A turn a run started: its agent is running and has asked the model once.
 function runningTurn(session: string, agent = 'codex'): CockpitEvent[] {
   return [
-    ev({ session, kind: 'session.opened', turn: 'T1', hold: 'h1' }),
+    ev({ session, kind: 'run.started', turn: 'T1', hold: 'h1' }),
     ev({ session, kind: 'turn.started', turn: 'T1', text: 'sleep 120', agent, folder: '/w' }),
     ev({ session, kind: 'model.requested', turn: 'T1', exchange: 'x1' }),
   ];
@@ -152,7 +152,7 @@ describe('The Stop button', () => {
 
     // The turn ends on its own: Send comes back.
     svc.state.sessions = [row('s1', { open: false })];
-    await svc.push(ev({ session: 's1', kind: 'session.closed', turn: 'T1', hold: 'h1', exit_code: 0 }));
+    await svc.push(ev({ session: 's1', kind: 'run.ended', turn: 'T1', hold: 'h1', exit_code: 0 }));
     await settle();
     expect(goBtn(r).textContent).toBe('Send');
     expect(r.container.querySelector('#c-reply button.stop')).toBeNull();
@@ -204,7 +204,7 @@ describe('The Stop button', () => {
     await click(goBtn(r));
     await settle();
     svc.state.sessions = [row('s1', { open: false })];
-    await svc.push(ev({ session: 's1', kind: 'session.closed', turn: 'T1', hold: 'h1', exit_code: 143, stopped: true }));
+    await svc.push(ev({ session: 's1', kind: 'run.ended', turn: 'T1', hold: 'h1', exit_code: 143, stopped: true }));
     await settle();
     const state = footState(r)!;
     expect(state.textContent).toBe('stopped');
@@ -224,7 +224,7 @@ describe('The Stop button', () => {
     // The turn ends at the service before the list shows it.
     svc.state.sessions = [row('s1', { open: false })];
     svc.state.events.s1.push({
-      ...ev({ session: 's1', kind: 'session.closed', turn: 'T1', hold: 'h1', exit_code: 0 }),
+      ...ev({ session: 's1', kind: 'run.ended', turn: 'T1', hold: 'h1', exit_code: 0 }),
       seq: 99,
     });
     const listReads = () => svc.reqs.filter((q) => q.method === 'GET' && q.path === '/api/v0/turns').length;
@@ -265,8 +265,8 @@ describe('The Stop button', () => {
     r.unmount();
   });
 
-  it('a recorded session.closed with stopped reads as stopped', () => {
-    const events = [...runningTurn('s1'), ev({ session: 's1', kind: 'session.closed', turn: 'T1', hold: 'h1', exit_code: 143, stopped: true })];
+  it('a recorded run.ended with stopped reads as stopped', () => {
+    const events = [...runningTurn('s1'), ev({ session: 's1', kind: 'run.ended', turn: 'T1', hold: 'h1', exit_code: 143, stopped: true })];
     const [turn] = buildTurns('s1', events);
     expect(turn.state).toBe('stopped');
     expect(turn.stopped).toBe(true);

@@ -337,10 +337,10 @@ function toolLine(card: ToolCard): string {
 // A turn's live status at `now` (ms, on the events' clock), from its events.
 //
 // The rules (CLIENT_API "Turns", made finer):
-// - A run's turn (it has session.opened) ends at its session.closed: stopped
+// - A run's turn (it has run.started) ends at its run.ended: stopped
 //   when it says so, finished on exit code 0 with no error, else failed. Any
 //   other turn ends at its turn.completed.
-// - A run's turn with turn.completed and no session.closed yet is finishing,
+// - A run's turn with turn.completed and no run.ended yet is finishing,
 //   and so is one whose last reply asked for no tool (that reply is its answer).
 // - Otherwise the open step is the status: an open model call (no reply yet)
 //   or open tool calls (no result yet); the later one wins.
@@ -362,8 +362,8 @@ export function liveStatus(rawEvents: CockpitEvent[], now: number, agent?: strin
     lastDeltaId: lastPriced?.id,
   };
 
-  const opened = events.some((e) => e.kind === 'session.opened');
-  const closed = events.find((e) => e.kind === 'session.closed');
+  const opened = events.some((e) => e.kind === 'run.started');
+  const closed = events.find((e) => e.kind === 'run.ended');
   const completed = events.filter((e) => e.kind === 'turn.completed').pop();
   const modelCalls = pairModelCalls(events);
 
@@ -397,7 +397,15 @@ export function liveStatus(rawEvents: CockpitEvent[], now: number, agent?: strin
     elapsedMs,
   });
 
-  if (completed) return open('finishing', STATE.finishing, ms(completed.time));
+  // Finishing says what the turn still waits on, never a bare "finishing":
+  // a command the agent left running in the background (Claude Code's Bash
+  // with run_in_background keeps its process alive until it ends), else the
+  // agent's own exit.
+  const background = events.filter((e) => e.kind === 'tool.requested' && input(e).run_in_background === true).pop();
+  const finishing = background
+    ? `Waiting on a background command · ${shortCommand(str(input(background).command) ?? '', folderOf(start)) || 'running'}`
+    : `Waiting for ${name ? harnessName(name) : 'the agent'} to exit`;
+  if (completed) return open('finishing', finishing, ms(completed.time));
   // The last reply asked for no tool and did not fail: it is the turn's
   // answer, and the agent is ending (turn.completed comes with it, or soon).
   const lastCall = modelCalls[modelCalls.length - 1];
@@ -407,7 +415,7 @@ export function liveStatus(rawEvents: CockpitEvent[], now: number, agent?: strin
     !callFailed(lastReply) &&
     !events.some((e) => e.kind === 'tool.requested' && (lastCall.requested.exchange ? e.exchange === lastCall.requested.exchange : ms(e.time) >= ms(lastReply.time)))
   ) {
-    return open('finishing', STATE.finishing, ms(lastReply.time));
+    return open('finishing', finishing, ms(lastReply.time));
   }
 
   // The open model call: the last request with no reply.
@@ -470,9 +478,22 @@ export function resetClock(): void {
   clockSkew = null;
 }
 
+// A steady local clock (ms), for timing an interval on this page: how long a
+// message has stayed queued, say. It never moves when the events' clock
+// learns the service's offset, nor when the system clock is set.
+export function steadyNow(): number {
+  return typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now();
+}
+
+// The service answers queued at once, even when a runner takes the turn a
+// moment later. Work queued behind nothing looks like any work waiting for its
+// agent, and says it waits for a runner only once it has stayed queued this
+// long, timed on steadyNow.
+export const RUNNER_WAIT_MS = 5000;
+
 // The latest turn of each session, with its events, as the stream brings
 // them. The session cards read their status from it. A new turn's
-// session.opened or turn.started starts its entry over; an event of an older
+// run.started or turn.started starts its entry over; an event of an older
 // turn is left out. `backfill` is true when an entry starts from an event
 // other than those two: the turn began before the cockpit saw it, so its
 // earlier events must be read once.
@@ -489,7 +510,7 @@ export function addLiveEvent(cur: LiveTurns, e: CockpitEvent): { next: LiveTurns
     if (held.events.some((x) => x.id === e.id)) return { next: cur, backfill: false };
     return { next: { ...cur, [e.session]: { turn: e.turn, events: [...held.events, e] } }, backfill: false };
   }
-  const starts = e.kind === 'session.opened' || e.kind === 'turn.started';
+  const starts = e.kind === 'run.started' || e.kind === 'turn.started';
   if (held && !starts) return { next: cur, backfill: false };
   return { next: { ...cur, [e.session]: { turn: e.turn, events: [e] } }, backfill: !starts };
 }

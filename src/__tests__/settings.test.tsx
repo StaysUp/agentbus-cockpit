@@ -5,8 +5,7 @@ import { App } from '../App';
 import { ReplayDataSource } from '../data/ReplayDataSource';
 import { SETTINGS_CONTROLS, SettingsPage, shortWhen } from '../components/SettingsPage';
 import { LiveDataSource } from '../data/LiveDataSource';
-import { addFound, changeOf, flatPolicy, homeFilesOf, isEmpty, lines, nestPolicy, Policy, sandboxOffer, SettingsApi, SettingsInfo } from '../data/settings';
-import { RunnerInfo } from '../types';
+import { addFound, changeOf, flatPolicy, homeFilesOf, isEmpty, lines, nestPolicy, Policy, SettingsApi, SettingsInfo } from '../data/settings';
 import { click, ev, flush, jsonl, panelOpen, render, unmountAll } from './helpers';
 
 // The policy as GET /api/v0/settings/permissions sends it on 0.6's
@@ -16,13 +15,10 @@ function policy(): Policy {
     allow: [],
     ask: [],
     forbid: ['git push'],
-    unlisted: 'ask',
     isolation: 'auto',
     home_files: [],
     limits: { max_depth: 2, max_jobs_per_turn: 10, max_jobs_per_tree: 30, max_cost_usd_per_tree: 0 },
     agent_api: { apply: false },
-    network: { contain: 'off', allow: [] },
-    sandbox: { mode: 'off' },
   };
 }
 
@@ -48,8 +44,6 @@ function button(c: HTMLElement, text: string): HTMLButtonElement | undefined {
 // old separate back link.
 const cockpitLink = (c: HTMLElement): HTMLElement | undefined =>
   [...c.querySelectorAll('.side-link')].find((el) => el.textContent?.trim() === 'Cockpit') as HTMLElement | undefined;
-
-const sw = (c: HTMLElement, key: string) => c.querySelector(`button[name="${key}"]`) as HTMLButtonElement;
 
 // A settings API in memory, with versions as ETags, that refuses a stale one
 // with 412 as the service does. A PATCH writes only the keys it is sent.
@@ -92,13 +86,13 @@ afterEach(() => {
 describe('a change of the policy', () => {
   it('holds only the keys whose value differs, nested as a policy', () => {
     const read = policy();
-    const draft = { ...policy(), unlisted: 'refuse', limits: { ...read.limits as object, max_depth: 3 }, forbid: ['git push'] };
-    expect(changeOf(read, draft)).toEqual({ unlisted: 'refuse', limits: { max_depth: 3 } });
+    const draft = { ...policy(), isolation: 'copy', limits: { ...read.limits as object, max_depth: 3 }, forbid: ['git push'] };
+    expect(changeOf(read, draft)).toEqual({ isolation: 'copy', limits: { max_depth: 3 } });
     expect(isEmpty(changeOf(read, policy()))).toBe(true);
     // A list counts as one value: any change sends the whole list.
     expect(changeOf(read, { ...policy(), forbid: ['git push', 'rm'] })).toEqual({ forbid: ['git push', 'rm'] });
     // A key left out of the draft is not a change.
-    expect(changeOf(read, { unlisted: 'ask' })).toEqual({});
+    expect(changeOf(read, { isolation: 'auto' })).toEqual({});
   });
 
   it('reads and writes dotted keys', () => {
@@ -132,9 +126,9 @@ describe('the settings routes', () => {
     const src = new LiveDataSource({ baseUrl: 'http://127.0.0.1:8787', token: 'tok' });
     const got = await src.getPolicy();
     expect(got.etag).toBe('"v1"');
-    await src.patchPolicy({ unlisted: 'refuse' }, got.etag);
-    expect(seen[1]).toEqual({ method: 'PATCH', ifMatch: '"v1"', body: { unlisted: 'refuse' } });
-    await expect(src.patchPolicy({ unlisted: 'refuse' }, '"v0"')).rejects.toMatchObject({ status: 412 });
+    await src.patchPolicy({ forbid: ['git push'] }, got.etag);
+    expect(seen[1]).toEqual({ method: 'PATCH', ifMatch: '"v1"', body: { forbid: ['git push'] } });
+    await expect(src.patchPolicy({ forbid: ['git push'] }, '"v0"')).rejects.toMatchObject({ status: 412 });
     expect((await src.getInstructions()).value).toBe('hi');
     // No ETag is an error, never a write that overwrites whatever is there.
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(policy()), { status: 200 })));
@@ -258,37 +252,39 @@ describe('the Settings page', () => {
     const { container } = await render(<SettingsPage api={api} onBack={() => {}} />);
     await flush();
     const parts = [...container.querySelectorAll('.pg-list [data-part]')].map((x) => x.getAttribute('data-part'));
-    // Workspace is gone (empty after its settings retired); every other
-    // section keeps its pre-B17 place and content.
-    expect(parts).toEqual(['permissions', 'config', 'isolation', 'limits', 'instructions', 'advanced']);
+    // Workspace is gone (empty after its settings retired), and Isolation with
+    // it: the sandbox and network settings were retired, so there is no group
+    // for them. Every other section keeps its place and content.
+    expect(parts).toEqual(['permissions', 'config', 'limits', 'instructions', 'advanced']);
     // Each group by its short name and one-line subtitle.
     const heads = [...container.querySelectorAll('.pg-list [data-part]')].map((x) => [x.querySelector('.pr-n')!.textContent, x.querySelector('.pr-m2')!.textContent]);
-    expect(heads.slice(0, 4)).toEqual([
+    expect(heads.slice(0, 3)).toEqual([
       ['Permissions', 'What agents may do through AgentBus'],
       ['Config', 'Settings, skills and MCP servers each session gets'],
-      ['Isolation', 'Sandbox and network'],
       ['Limits', 'How much agents may ask for'],
     ]);
     // No OS differences anywhere on the page.
-    for (const g of ['permissions', 'config', 'isolation', 'limits']) {
+    for (const g of ['permissions', 'config', 'limits']) {
       await pick(container, `[data-part="${g}"]`);
       expect(container.textContent).not.toMatch(/macOS|Linux|Mac\b/);
     }
+    // No sandbox or network control remains.
+    expect(container.querySelector('[data-part="isolation"]')).toBeNull();
+    expect(container.querySelector('[data-key="sandbox.mode"]')).toBeNull();
+    expect(container.querySelector('[data-key="network.contain"]')).toBeNull();
     expect(container.querySelector('[data-part="grants"]')).toBeNull();
     expect(container.textContent).not.toContain('Grants');
     expect(container.querySelector('[data-part="workspace"]')).toBeNull();
     // Every key of the policy has a control, and each control a key. The
     // permissions rules split into a Commands box and a Tools box per list,
     // but both halves write the one stored list, so the policy key counts once.
-    // isolation is kept, but only in Advanced (his call, 0.5.7): every
-    // conversation works in a copy. (Read-only turns, and the message-box
-    // toggle for them, retired in 0.6: B12; edit retired in B16.)
+    // isolation (the backend) is kept, but only in Advanced (his call, 0.5.7):
+    // every conversation works in a copy.
     const advancedOnly = ['isolation'];
     expect([...SETTINGS_CONTROLS].sort()).toEqual(Object.keys(flatPolicy(policy())).filter((k) => !advancedOnly.includes(k)).sort());
     const groups: Record<string, string[]> = {
-      permissions: ['agent_api.apply', 'allow', 'ask', 'forbid', 'allow.tool', 'ask.tool', 'forbid.tool', 'unlisted'],
+      permissions: ['agent_api.apply', 'allow', 'ask', 'forbid', 'allow.tool', 'ask.tool', 'forbid.tool'],
       config: ['home_files'],
-      isolation: ['sandbox.mode', 'network.contain', 'network.allow'],
       limits: ['limits.max_depth', 'limits.max_jobs_per_turn', 'limits.max_jobs_per_tree', 'limits.max_cost_usd_per_tree'],
     };
     for (const [g, keys] of Object.entries(groups)) {
@@ -305,9 +301,6 @@ describe('the Settings page', () => {
     await pick(container, '[data-part="permissions"]');
     expect([...container.querySelectorAll('.pg-main .pg-ctl-h')].map((x) => x.textContent)).toEqual(['Commands', 'Tools']);
     expect((container.querySelector('textarea[name="forbid"]') as HTMLTextAreaElement).value).toBe('git push');
-    await pick(container, '[data-part="isolation"]');
-    expect([...container.querySelectorAll('.pg-main .pg-ctl-h')].map((x) => x.textContent)).toEqual(['Network']);
-    expect(container.textContent).toContain('A wall around each session: its folder, its home, and the network only through AgentBus.');
     await pick(container, '[data-part="limits"]');
     expect((container.querySelector('input[name="limits.max_depth"]') as HTMLInputElement).value).toBe('2');
   });
@@ -379,13 +372,6 @@ describe('the Settings page', () => {
     await flush();
     expect(api.patchPolicy.mock.calls[1]).toEqual([{ limits: { max_cost_usd_per_tree: 2.5 } }, '"4"']);
 
-    await pick(container, '[data-part="isolation"]');
-    await click(sw(container, 'network.contain'));
-    await setValue(container.querySelector('textarea[name="network.allow"]'), 'github.com\n\nregistry.npmjs.org');
-    await click(button(container, 'Save isolation'));
-    await flush();
-    expect(api.patchPolicy.mock.calls[2][0]).toEqual({ network: { contain: 'on', allow: ['github.com', 'registry.npmjs.org'] } });
-
     // Advanced too: the JSON is whole, the save is only what changed in it.
     await pick(container, '[data-part="advanced"]');
     const area = container.querySelector('textarea[name="policy"]') as HTMLTextAreaElement;
@@ -395,7 +381,7 @@ describe('the Settings page', () => {
     await setValue(area, JSON.stringify(edited));
     await click(button(container, 'Save policy'));
     await flush();
-    expect(api.patchPolicy.mock.calls[3][0]).toEqual({ forbid: ['rm'], isolation: 'git' });
+    expect(api.patchPolicy.mock.calls[2][0]).toEqual({ forbid: ['rm'], isolation: 'git' });
     // Never once a full copy: no call held a key the person did not change.
     for (const [change] of api.patchPolicy.mock.calls) {
       expect(Object.keys(flatPolicy(change)).length).toBeLessThanOrEqual(2);
@@ -434,7 +420,7 @@ describe('the Settings page', () => {
     await click(button(container, 'Save config'));
     await flush();
     expect(api.patchPolicy.mock.calls[0]).toEqual([{ home_files: ['~/.aws/config', '~/.gitconfig'] }, '"3"']);
-    expect(state.policy).toMatchObject({ forbid: ['git push'], sandbox: { mode: 'off' }, home_files: ['~/.aws/config', '~/.gitconfig'] });
+    expect(state.policy).toMatchObject({ forbid: ['git push'], home_files: ['~/.aws/config', '~/.gitconfig'] });
     expect(container.textContent).toContain('Saved.');
     expect(container.querySelector('[data-part="config"]')!.textContent).not.toContain('Unsaved');
   });
@@ -480,8 +466,8 @@ describe('the Settings page', () => {
     await flush();
     await pick(container, '[data-part="instructions"]');
     await setValue(container.querySelector('textarea[name="instructions"]'), 'Draft, not saved.');
-    await pick(container, '[data-part="isolation"]');
-    await setValue(container.querySelector('textarea[name="network.allow"]'), 'github.com');
+    await pick(container, '[data-part="config"]');
+    await setValue(container.querySelector('textarea[name="home_files"]'), '~/.aws/config');
     await pick(container, '[data-part="permissions"]');
     await setValue(container.querySelector('textarea[name="forbid"]'), 'git push\nrm');
     await click(button(container, 'Save permissions'));
@@ -490,9 +476,9 @@ describe('the Settings page', () => {
     await pick(container, '[data-part="instructions"]');
     expect((container.querySelector('textarea[name="instructions"]') as HTMLTextAreaElement).value).toBe('Draft, not saved.');
     expect(api.getInstructions).toHaveBeenCalledTimes(1);
-    await pick(container, '[data-part="isolation"]');
-    expect((container.querySelector('textarea[name="network.allow"]') as HTMLTextAreaElement).value).toBe('github.com');
-    expect(state.policy.network?.allow).toEqual([]);
+    await pick(container, '[data-part="config"]');
+    expect((container.querySelector('textarea[name="home_files"]') as HTMLTextAreaElement).value).toBe('~/.aws/config');
+    expect(state.policy.home_files).toEqual([]);
     // The page read the state again: the header shows when the settings changed.
     expect(container.textContent).toContain('Last changed');
   });
@@ -505,17 +491,17 @@ describe('the Settings page', () => {
     await pick(container, '[data-part="advanced"]');
     await setValue(container.querySelector('textarea[name="policy"]'), JSON.stringify({ ...policy(), forbid: ['git push', 'rm'] }));
     await pick(container, '[data-part="permissions"]');
-    await click(button(container, 'Refuse'));
+    await setValue(container.querySelector('textarea[name="ask"]'), 'git pull');
     await click(button(container, 'Save permissions'));
     await flush();
-    expect(state.policy.unlisted).toBe('refuse');
+    expect(state.policy.ask).toEqual(['git pull']);
     await pick(container, '[data-part="advanced"]');
     expect((container.querySelector('textarea[name="policy"]') as HTMLTextAreaElement).value).toContain('"rm"');
     await click(button(container, 'Save policy'));
     await flush();
-    // Only what was edited in Advanced: the unlisted choice saved before stays.
+    // Only what was edited in Advanced: the ask list saved before stays.
     expect(api.patchPolicy).toHaveBeenLastCalledWith({ forbid: ['git push', 'rm'] }, expect.any(String));
-    expect(state.policy.unlisted).toBe('refuse');
+    expect(state.policy.ask).toEqual(['git pull']);
     expect(state.policy.forbid).toEqual(['git push', 'rm']);
     // A group draft, then an Advanced save of another key in that group.
     await pick(container, '[data-part="permissions"]');
@@ -902,89 +888,3 @@ describe('the Settings page in the app', () => {
   });
 });
 
-// One machine as GET /api/v0/runners lists it.
-function machine(name: string, fields: Partial<RunnerInfo> = {}): RunnerInfo {
-  return { id: `r_${name}`, name, role: 'runner', online: true, last_seen: '2026-11-12T10:00:00Z', labels: [], harnesses: [], ...fields };
-}
-
-describe('the sandbox switch offers only what the machines can build', () => {
-  it('reads the offer from the online machines\' own reports', () => {
-    expect(sandboxOffer([machine('mac', { sandbox: { can: true } })])).toEqual({ can: true, machines: ['mac'] });
-    // One online machine that can is enough; an offline one that can is not.
-    expect(sandboxOffer([machine('vm', { sandbox: { can: false, why: 'AppArmor refuses user namespaces' } }), machine('mac', { sandbox: { can: true } })]).can).toBe(true);
-    expect(sandboxOffer([machine('mac', { online: false, sandbox: { can: true } })])).toEqual({ can: false, why: 'No machine is online to build it.' });
-    // A connector from before 0.5 runs no session.
-    expect(sandboxOffer([machine('old', { role: 'connector', sandbox: { can: true } })]).can).toBe(false);
-    expect(sandboxOffer([])).toEqual({ can: false, why: 'No machine is online to build it.' });
-    // Each online machine's reason, or that it has not reported one.
-    expect(sandboxOffer([machine('up', { sandbox: { can: false, why: 'the session has no home of its own on this runner' } }), machine('new')])).toEqual({
-      can: false,
-      why: 'No online machine can build it. up: the session has no home of its own on this runner; new: it has not reported whether it can.',
-    });
-    // Before the first read, and when the read failed.
-    expect(sandboxOffer(undefined)).toEqual({ can: false, why: 'Reading which machines can build it…' });
-    expect(sandboxOffer(undefined, 'agentbus answered 500')).toEqual({ can: false, why: 'The machines could not be read: agentbus answered 500' });
-    expect(sandboxOffer(null)).toEqual({ can: false, why: 'This AgentBus does not list its machines, so none reports it can.' });
-    // A read that fails after one that worked keeps the machines it read.
-    expect(sandboxOffer([machine('mac', { sandbox: { can: true } })], 'agentbus answered 500').can).toBe(true);
-  });
-
-  const openSandbox = async (sandbox: ReturnType<typeof sandboxOffer>, mode = 'off') => {
-    const f = fakeApi();
-    f.state.policy.sandbox = { mode };
-    const r = await render(<SettingsPage api={f.api} onBack={() => {}} sandbox={sandbox} />);
-    await flush();
-    await flush();
-    await pick(r.container, '[data-part="isolation"]');
-    return { r, f, sw: () => r.container.querySelector('button[name="sandbox.mode"]') as HTMLButtonElement };
-  };
-
-  it('is disabled, with the reason, when no online machine can build it', async () => {
-    const { r, sw } = await openSandbox({ can: false, why: 'No online machine can build it. up: the session has no home of its own on this runner.' });
-    expect(sw().disabled).toBe(true);
-    expect(r.container.querySelector('[data-sandbox-why]')?.textContent).toBe(
-      'Not offered. No online machine can build it. up: the session has no home of its own on this runner.'
-    );
-    await click(sw());
-    expect(sw().getAttribute('aria-checked')).toBe('false');
-  });
-
-  it('is enabled when at least one online machine can, and names them', async () => {
-    const { r, sw } = await openSandbox({ can: true, machines: ['mac', 'vm'] });
-    expect(sw().disabled).toBe(false);
-    expect(r.container.querySelector('[data-sandbox-why]')).toBeNull();
-    expect(r.container.textContent).toContain('Experimental');
-    await click(sw());
-    expect(sw().getAttribute('aria-checked')).toBe('true');
-  });
-
-  it('still turns off a sandbox that is on when no machine can build it, and says its turns are refused', async () => {
-    const { r, sw } = await openSandbox({ can: false, why: 'No machine is online to build it.' }, 'on');
-    expect(sw().disabled).toBe(false);
-    expect(r.container.querySelector('[data-sandbox-why]')?.textContent).toBe(
-      'On, but no machine can build it now, so its turns are refused. No machine is online to build it.'
-    );
-    await click(sw());
-    expect(sw().getAttribute('aria-checked')).toBe('false');
-    // Once off, it is not offered again.
-    expect(sw().disabled).toBe(true);
-  });
-
-  it('in the app, reads the offer from GET /api/v0/runners', async () => {
-    window.history.replaceState(null, '', '/settings');
-    try {
-      const replay = new ReplayDataSource(jsonl([ev({ seq: 1, session: 'st', kind: 'session.registered', agent: 'claude', folder: '/w' })]));
-      const src = Object.assign(replay, fakeApi().api, {
-        listRunners: vi.fn(async () => [machine('up', { sandbox: { can: false, why: 'the session has no home of its own on this runner' } })]),
-      });
-      const r = await render(<App dataSource={src} />);
-      await flush();
-      await flush();
-      await pick(r.container, '[data-part="isolation"]');
-      expect((r.container.querySelector('button[name="sandbox.mode"]') as HTMLButtonElement).disabled).toBe(true);
-      expect(r.container.querySelector('[data-sandbox-why]')?.textContent).toContain('up: the session has no home of its own on this runner');
-    } finally {
-      window.history.replaceState(null, '', '/');
-    }
-  });
-});

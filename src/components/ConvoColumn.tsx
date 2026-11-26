@@ -1,5 +1,5 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { liveStatus, LiveTurn } from '../data/liveStatus';
+import { liveStatus, LiveTurn, RUNNER_WAIT_MS, steadyNow } from '../data/liveStatus';
 import { harnessName, turnNotes } from '../data/turns';
 import { Level, QueuedTurn, SavedAgent, SessionDetail, ShellRun, Started, Turn } from '../types';
 import { useNow } from '../utils/useNow';
@@ -8,8 +8,9 @@ import { formatCost, formatTokens, stateLabel, turnStateClass } from '../utils/f
 import { Cost } from './Cost';
 import { folderLabel, sessionFolderRef, useFolders } from '../data/folders';
 import { LiveLine } from './LiveLine';
+import { AskedWork, askedLine, askedReview, queuedWaitMs } from '../data/askedWork';
 import { PencilIcon, TitleEdit } from './TitleEdit';
-import { LockIcon } from './Icons';
+import { SessionStatus } from './Icons';
 import { ShellEntry } from './ShellEntry';
 import { Button, Select } from './Controls';
 import { Notice } from './Notice';
@@ -35,8 +36,6 @@ interface ConvoColumnProps {
   // whether a run still holds the session open.
   resumable?: boolean;
   open?: boolean;
-  // The session was closed: it takes no more turns.
-  closed?: boolean;
   // Given only when the source can continue sessions. Rejects with the API's
   // message. agent is the saved agent picked beside Send, when it is not the
   // agent of the session's latest turn: the turn runs on it. key is the
@@ -68,24 +67,32 @@ interface ConvoColumnProps {
   onStop?: (turn: Turn) => Promise<void>;
   // The turns the person asked to stop that have not ended yet.
   stopping?: ReadonlySet<string>;
+  // Turns whose file changes a Discard dropped: each carries a small
+  // "Discarded" mark. The record's own turn.discarded is folded in with this.
+  discardedTurns?: ReadonlySet<string>;
   // Given only by a source that streams: the session's latest turn with its
   // events. A running turn then shows one live status line where its reply
   // will be. Recorded data has none, and its turns show as they are.
   live?: LiveTurn;
   // A prompt to put in the message box. It replaces the draft once, and is
   // then handed back with onPrefillTaken. The person edits it and presses
-  // Send; nothing is sent by itself.
-  prefill?: { session: string; text: string } | null;
+  // Send; nothing is sent by itself. agent, when given, also switches the
+  // picker beside Send to that agent (the Review button names a reviewer).
+  prefill?: { session: string; text: string; agent?: string } | null;
   onPrefillTaken?: () => void;
-  // Opens another session, for the links of a delivered result (to the
-  // session that did the work) and of an asked turn (to the session that
-  // asked). Without it the links are not shown.
+  // What the person had typed in this session's box when they last left it,
+  // kept by the caller so it outlives a switch to another session and back.
+  // onDraftChange hands back each change. Absent: kept here only.
+  savedDraft?: string;
+  onDraftChange?: (sessionId: string, text: string) => void;
+  // The work this session asked another agent for (ask_agent, review_turn)
+  // that is queued or running. An asked session is one-off and stays off the
+  // sessions list. Each shows one status line at the foot of the
+  // conversation, gone when the work ends.
+  asked?: AskedWork[];
+  // Opens another session: the one asked work runs in, from its running line
+  // and from the turn that delivered its result. Without it, no link shows.
   onOpenSession?: (sessionId: string) => void;
-  // The sessions this one asked for (ask_agent), newest first: shown as links
-  // under the header so an asked session -- which is kept off the sessions
-  // list -- is reachable while it runs, before its result comes back. Needs
-  // onOpenSession to open them.
-  asked?: { id: string; title?: string }[];
   // Given when the source can name sessions: a new title for this one.
   // Rejects with the API's words.
   onRename?: (sessionId: string, title: string) => Promise<void>;
@@ -152,9 +159,31 @@ export function agentNameOf(id: string | undefined, agents?: SavedAgent[]): stri
   return agents?.find((a) => a.id === id)?.name ?? harnessName(id);
 }
 
+// A link to another session: the one asked work ran in, or the one that
+// asked. Its text is the line it stands in for. Its click opens that session
+// only, not the turn it sits in.
+const OpenSessionLink: React.FC<{ session: string; onOpen: (id: string) => void; children: React.ReactNode }> = ({
+  session,
+  onOpen,
+  children,
+}) => (
+  <Button
+    kind="link"
+    className="origin-link"
+    data-session-link={session}
+    onClick={(e) => {
+      e.stopPropagation();
+      onOpen(session);
+    }}
+  >
+    {children}
+  </Button>
+);
+
 // The line above a turn's message when the person did not type it: a
-// delivered result names the agent that did the work and links to its
-// session; an asked turn links to the session that asked.
+// delivered result names the agent that did the work, and is a link to the
+// session it ran in, which is off the sessions list; an asked turn says so,
+// and is a link back to the session that asked.
 const OriginLine: React.FC<{ turn: Turn; agents?: SavedAgent[]; onOpenSession?: (id: string) => void }> = ({
   turn,
   agents,
@@ -162,37 +191,35 @@ const OriginLine: React.FC<{ turn: Turn; agents?: SavedAgent[]; onOpenSession?: 
 }) => {
   const o = turn.origin;
   if (!o) return null;
-  const link = (label: string) =>
-    o.session && onOpenSession ? (
+  const label =
+    o.kind === 'result' ? (
       <>
-        {' · '}
-        <Button
-          kind="link"
-          className="origin-link"
-          onClick={(e) => {
-            e.stopPropagation();
-            onOpenSession(o.session!);
-          }}
-        >
-          {label}
-        </Button>
-      </>
-    ) : null;
-  if (o.kind === 'result') {
-    return (
-      <div className="m-origin">
         {'Result from '}
         <b>{agentNameOf(o.agent, agents)}</b>, sent by {PRODUCT}
-        {link(`open its ${SESSION}`)}
-      </div>
+      </>
+    ) : (
+      'Asked by another agent'
     );
-  }
   return (
     <div className="m-origin">
-      Asked by another agent{link(`open its ${SESSION}`)}
+      {o.session && onOpenSession ? (
+        <OpenSessionLink session={o.session} onOpen={onOpenSession}>
+          {label}
+        </OpenSessionLink>
+      ) : (
+        label
+      )}
     </div>
   );
 };
+
+// True when the page has text selected inside el: the click that ended a drag
+// across a reply, say.
+export function selectsText(el: Element): boolean {
+  const sel = typeof window !== 'undefined' ? window.getSelection() : null;
+  if (!sel || sel.isCollapsed || sel.toString().trim() === '') return false;
+  return (!!sel.anchorNode && el.contains(sel.anchorNode)) || (!!sel.focusNode && el.contains(sel.focusNode));
+}
 
 // The saved agent a session's next message goes to by default: the one that
 // ran its latest turn. A turn started by harness name alone names the
@@ -214,6 +241,8 @@ export interface Pending {
   turnsAtSend: number;
   state: 'sending' | 'queued' | 'accepted' | 'failed';
   ahead?: number;
+  // When the service answered queued, on the steady local clock (steadyNow).
+  queuedAt?: number;
   // The turn's id, once the service answered.
   turn?: string;
   // Why it failed, in the API's words.
@@ -227,6 +256,10 @@ export type PendingUpdate = (list: Pending[]) => Pending[];
 
 // How often a queued message's turn is read.
 export const QUEUED_POLL_MS = 3000;
+
+// How long a message queued behind nothing waits before it says it waits for
+// a runner (see liveStatus).
+export { RUNNER_WAIT_MS };
 
 // A key for one message: its turn carries it, so the message is matched to
 // the turn that runs it.
@@ -259,19 +292,21 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
   agentName,
   resumable,
   open,
-  closed,
   onSend,
   onStop,
   stopping,
+  discardedTurns,
   live,
   prefill,
   onPrefillTaken,
+  savedDraft,
+  onDraftChange,
   agents,
   onAddAgent,
   agentDot,
   defaultAgent,
-  onOpenSession,
   asked,
+  onOpenSession,
   queuedTurn,
   keyed,
   pending: keptPending,
@@ -290,7 +325,11 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
   const folders = useFolders();
   const sessionFolder = folderLabel(session.folder, sessionFolderRef(session), folders);
   const turnFolder = (t: Turn) => folderLabel(t.folder, t.folderRef, folders);
-  const [draft, setDraft] = useState('');
+  const [draft, setDraft] = useState(savedDraft ?? '');
+  useEffect(() => {
+    onDraftChange?.(session.id, draft);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draft]);
   // The header's name is being edited.
   const [renaming, setRenaming] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -338,7 +377,6 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
   // Each turn's block, by turn id, so a turn that just ended can be brought to
   // the top of the view.
   const turnEls = useRef(new Map<string, HTMLDivElement>());
-
   const scrollToEnd = () => {
     const el = msgsRef.current;
     if (!el) return;
@@ -412,14 +450,16 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
     ro.observe(el);
     return () => ro.disconnect();
   }, [draft]);
+  // The agent picked beside Send; null follows the session's latest turn.
+  const [picked, setPicked] = useState<string | null>(null);
   useEffect(() => {
     if (!prefill || prefill.session !== session.id) return;
     setDraft(prefill.text);
+    // A Review prefill also names the reviewer: switch the picker to it.
+    if (prefill.agent !== undefined) setPicked(prefill.agent);
     onPrefillTaken?.();
     inputRef.current?.focus();
   }, [prefill, session.id]);
-  // The agent picked beside Send; null follows the session's latest turn.
-  const [picked, setPicked] = useState<string | null>(null);
   // Messages sent that are not yet turns on screen, oldest first.
   const [localPending, setLocalPending] = useState<Pending[]>([]);
   const pending = keptPending ?? localPending;
@@ -446,11 +486,13 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
   const liveEventsOf = (turn: Turn) =>
     live === undefined || turn.state !== 'running' ? undefined : turn.detail?.events ?? (live?.turn === turn.id ? live.events : undefined);
   const anyRunning = live !== undefined && session.turnsList.some((t) => t.state === 'running');
-  const now = useNow(anyRunning);
+  const now = useNow(
+    anyRunning || (asked ?? []).length > 0 || pending.some((p) => p.state === 'queued' && !p.ahead)
+  );
 
   const lastTurn = session.turnsList[turnCount - 1];
   const lastState = lastTurn?.state;
-  // The reply is in but the service has not stored session.closed yet (it
+  // The reply is in but the service has not stored run.ended yet (it
   // holds the turn open for its last writes). Send waits for that close. With
   // the turn's events, its status says so (a reply beside a tool call is not
   // the last one); without them, any reply counts.
@@ -511,7 +553,7 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
   // never blocks Send. Only a session the service cannot continue does.
   const active = pending.filter((p) => p.state !== 'failed').length;
   const turnRunning = active > 0 || lastState === 'running' || !!open;
-  const why = closed ? `This ${SESSION} is closed. Start a new one.` : !turnRunning && !resumable ? cannotContinue(session.turnsList) : null;
+  const why = !turnRunning && !resumable ? cannotContinue(session.turnsList) : null;
   const canSend = !!onSend && why === null;
   // While the last turn runs, Send turns into Stop. Only a turn a run started
   // (it names its agent) can be stopped: the service refuses any other. A
@@ -584,7 +626,7 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
     const set = (patch: Partial<Pending>) => setPending((list) => list.map((x) => (x.key === p.key ? { ...x, ...patch } : x)));
     try {
       const started = await onSend!(p.prompt, p.agent, p.key);
-      if (started && started.state === 'queued') set({ state: 'queued', ahead: started.ahead, turn: started.turn });
+      if (started && started.state === 'queued') set({ state: 'queued', ahead: started.ahead, turn: started.turn, queuedAt: steadyNow() });
       else set({ state: 'accepted', turn: started ? started.turn : undefined });
     } catch (err) {
       set({ state: 'failed', error: refusalText((err as Error).message, p.agent, nextName) });
@@ -653,7 +695,9 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
               : p.state === 'queued'
                 ? p.ahead
                   ? `${STATE.queued} · runs after ${p.ahead === 1 ? 'the running turn' : `${p.ahead} turns`}`
-                  : `${STATE.queued} · waiting for a runner`
+                  : p.queuedAt !== undefined && steadyNow() - p.queuedAt < RUNNER_WAIT_MS
+                    ? `${STATE.waiting} for the agent`
+                    : `${STATE.queued} · waiting for a runner`
                 : `${STATE.waiting} for the agent`}
           </span>
         </div>
@@ -666,6 +710,17 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
 
   // Each "!" command goes after the turn that started before it.
   const placed = commandsAfter(session.turnsList, commands ?? []);
+
+  // One line per piece of asked work, at the foot of the conversation where
+  // the agent's own status shows: queued, then running, gone when it ends.
+  // "review" only when the asking turn's tool call was review_turn.
+  const askerRunning = session.turnsList.some((t) => t.state === 'running');
+  const askedLines = (asked ?? []).map((w) => {
+    const by = w.by ? session.turnsList.find((t) => t.id === w.by) : undefined;
+    const events = by ? by.detail?.events ?? (live?.turn === by.id ? live.events : undefined) : undefined;
+    const waited = w.state === 'queued' ? queuedWaitMs(w.id) : undefined;
+    return { w, line: askedLine(w, agentNameOf(w.agent, agents), askedReview(events, w.id), askerRunning, now, waited) };
+  });
 
   // The chat is prompts and replies, under one header line per turn. A turn's
   // calls and how it continued are in the panel, so opening a turn never
@@ -691,12 +746,15 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
             >
               {session.title}
             </div>
+            {/* The same status slot as the list card: Sandbox shield, and a
+                lock when archived. */}
+            <SessionStatus sandbox={!!session.sandbox} lock={archived ? 'Archived' : null} />
             {onRename && (
               <button type="button" className="c-rename" aria-label="Rename" title="Rename" onClick={() => setRenaming(true)}>
                 <PencilIcon />
               </button>
             )}
-            {(onExport || onArchiveSession || closed) && (
+            {(onExport || onArchiveSession) && (
               <div className="c-acts">
                 {(exportError || archiveError) && (
                   <span className="c-act-error" role="alert" title={exportError || archiveError || ''}>
@@ -728,31 +786,11 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
                     {archived ? 'Unarchive' : 'Archive'}
                   </Button>
                 )}
-                {closed && (
-                  // A state, not an action: an old closed session (close is
-                  // retired) still shows the lock and the word.
-                  <span className="c-closed" title={`This ${SESSION} is closed`}>
-                    <LockIcon /> closed
-                  </span>
-                )}
               </div>
             )}
           </>
         )}
       </header>
-      {asked && asked.length > 0 && onOpenSession && (
-        <div id="c-asked" className="c-asked" role="note">
-          Asked:{' '}
-          {asked.map((c, i) => (
-            <React.Fragment key={c.id}>
-              {i > 0 ? ', ' : ''}
-              <Button kind="link" className="origin-link" onClick={() => onOpenSession(c.id)}>
-                {c.title || c.id}
-              </Button>
-            </React.Fragment>
-          ))}
-        </div>
-      )}
       <div id="c-msgs" ref={msgsRef} onScroll={onMsgsScroll}>
         <div className="c-in" ref={contentRef}>
           {placed.get(-1)?.map((r) => <ShellEntry key={r.id} run={r} />)}
@@ -813,7 +851,13 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
                     if (el) turnEls.current.set(turn.id, el);
                     else turnEls.current.delete(turn.id);
                   }}
-                  onClick={() => onSelectTurn(turn)}
+                  onClick={(e) => {
+                    // A click that ends a text selection in this turn is the
+                    // person copying, not opening the turn. So is the second
+                    // or third click of a double or triple click.
+                    if (e.detail > 1 || selectsText(e.currentTarget)) return;
+                    onSelectTurn(turn);
+                  }}
                 >
                   <div className="tb-h">
                     <b>Turn {turn.turnNumber}</b>
@@ -866,13 +910,23 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
                   ))}
 
                   <div className="tb-foot">
-                    {(turn.state !== 'finished' || turn.stopped) && !(showLive && !stopping?.has(turn.id)) && (
+                    {replyIn && !stopping?.has(turn.id) && status?.running && status.state === 'finishing' ? (
+                      // The reply is in and the turn waits on something (a
+                      // background command, the agent's exit): the same line
+                      // the session card shows, in full, with its time.
+                      <LiveLine status={status} className="tb-live" />
+                    ) : (turn.state !== 'finished' || turn.stopped) && !(showLive && !stopping?.has(turn.id)) && (
                       <span
                         className={`tb-state ${turnStateClass(turn)}`}
                         title={turn.state === 'failed' && turn.error ? turn.error : undefined}
                       >
                         {turn.state === 'running' && stopping?.has(turn.id) ? STATE.stopping : replyIn ? STATE.finishing : stateLabel(turn)}
                         {turn.state === 'failed' && !turn.stopped && turn.error ? ` · ${turn.error}` : ''}
+                      </span>
+                    )}
+                    {(turn.discarded || discardedTurns?.has(turn.id)) && (
+                      <span className="tb-discarded" title="A Discard dropped this turn's changes">
+                        Discarded
                       </span>
                     )}
                     <span className="tb-stat">
@@ -897,6 +951,22 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
             );
           })}
           {pending.filter((p) => !(p.state === 'failed' && p.turnsAtSend < turnCount)).map(pendingRow)}
+          {askedLines.map(({ w, line }) => (
+            <div key={w.id} className="m-live m-asked" role="status" data-asked={w.id} data-state={w.state}>
+              <span className={`live-line ${w.state === 'running' ? 'run' : 'dim'}`}>
+                {w.state === 'running' ? <i className="spin run-spin" aria-hidden /> : null}
+                <span className="live-text">
+                  {w.state === 'running' && onOpenSession ? (
+                    <OpenSessionLink session={w.id} onOpen={onOpenSession}>
+                      {line}
+                    </OpenSessionLink>
+                  ) : (
+                    line
+                  )}
+                </span>
+              </span>
+            </div>
+          ))}
         </div>
       </div>
 
@@ -922,12 +992,12 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
             </Button>
           </div>
         )}
-        <form className={`box${showPick ? ' with-pick' : ''}${closed ? ' closed' : ''}`} onSubmit={send}>
+        <form className={`box${showPick ? ' with-pick' : ''}`} onSubmit={send}>
           <textarea
             id="input"
             ref={inputRef}
             rows={1}
-            placeholder={closed ? '' : `Message ${nextName || agentName || 'the agent'}…`}
+            placeholder={`Message ${nextName || agentName || 'the agent'}…`}
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => {

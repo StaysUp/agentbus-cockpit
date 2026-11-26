@@ -25,8 +25,6 @@ import { formatElapsed, liveStatus } from '../data/liveStatus';
 import { useNow } from '../utils/useNow';
 import { SessionPanel } from './SessionPanel';
 import { folderLabel, useFolders } from '../data/folders';
-import { turnToolbox } from '../data/toolbox';
-import { McpTab } from './McpTab';
 import { TurnChangesTab } from './Changes';
 import { ContextView } from './ContextView';
 import { SessionContext, TurnChangesPage, TurnContext, TurnDiff } from '../types';
@@ -72,6 +70,11 @@ interface RightPanelProps {
   loadSessionContext?: (sessionId: string, before?: number) => Promise<SessionContext>;
   // Whether the right panel is open; the Context tab re-reads when it reopens.
   panelOpen?: boolean;
+  // The shown turn's data revision: it bumps when the turn gets a streamed
+  // event that changes what its fetching tabs (Changes, Context) would read
+  // (the turn ended, its changes were recorded, an apply or a discard). Those
+  // tabs re-read on a change, so they follow the turn's live events, no timer.
+  rev?: number;
   // The session's apply preview said its copy is too big to track: a turn's
   // cut changes say so instead of a count.
   tooBig?: boolean;
@@ -81,7 +84,11 @@ interface RightPanelProps {
   tabs?: PanelTabs;
 }
 
-type TabKey = 'result' | 'changes' | 'events' | 'model' | 'context' | 'tools' | 'prompt' | 'mcp';
+type TabKey = 'result' | 'changes' | 'events' | 'model' | 'context' | 'tools' | 'prompt';
+
+// The Changes tab of a Direct session's turn: its changes went into the folder
+// as they were made, and AgentBus keeps no record of them.
+export const DIRECT_CHANGES = 'Direct: this turn changed your folder itself. AgentBus keeps no record of its changes.';
 
 // Follows the selected level: the session, one turn, or one model call. The
 // turn and call tabs are kept here, so stepping down and back keeps them.
@@ -181,6 +188,7 @@ const TurnPanel: React.FC<TurnPanelProps> = ({
   loadSessionContext,
   panelOpen,
   tooBig,
+  rev,
 }) => {
   // A running turn's status from its events, read each second while it runs.
   const running = !!live && turn?.state === 'running' && !!turn.detail;
@@ -252,9 +260,6 @@ const TurnPanel: React.FC<TurnPanelProps> = ({
 
   // How the turn continued, from its turn.started: the chat no longer shows it.
   const continued = continuedLine(turn.detail, session?.turnsList ?? []);
-
-  // The turn's MCP tools, from its record: the header's line and the MCP tab.
-  const box = turn.detail ? turnToolbox(turn.detail) : null;
 
   const hasContext = !!loadTurnContext && !!loadSessionContext;
   let baseTabs = loadDiff ? TURN_TABS : TURN_TABS.filter(([k]) => k !== 'changes');
@@ -571,9 +576,18 @@ const TurnPanel: React.FC<TurnPanelProps> = ({
       <div id="d-body">
         {tab !== 'changes' && tab !== 'context' && <TabSum tab={tab} turn={turn} detail={detail} />}
 
-        {tab === 'changes' && loadDiff && (
+        {/* A Direct session works in the folder itself, and AgentBus keeps no
+            record of what its turns change (0.6.5), so the tab says so plainly
+            in place of a file list. */}
+        {tab === 'changes' && loadDiff && session?.sandbox === false && (
+          <div className="turn-changes">
+            <div className="tab-sum">{DIRECT_CHANGES}</div>
+          </div>
+        )}
+        {tab === 'changes' && loadDiff && session?.sandbox !== false && (
           <TurnChangesTab
             turnId={turn.id}
+            rev={rev}
             loadDiff={() => loadDiff(turn.sessionId, turn.id)}
             loadChanges={loadChanges ? (before?: number) => loadChanges(turn.sessionId, turn.id, before) : undefined}
             tooBig={tooBig}
@@ -726,8 +740,9 @@ const TurnPanel: React.FC<TurnPanelProps> = ({
             turn={turn.id}
             loadTurn={loadTurnContext}
             loadSession={loadSessionContext}
-            // running re-reads once when the turn ends.
-            running={!!live && turn.state === 'running'}
+            // rev bumps when the turn's data changes (its end, among others),
+            // so a settled turn is current without a Refresh.
+            rev={rev}
           />
         )}
 
@@ -742,8 +757,6 @@ const TurnPanel: React.FC<TurnPanelProps> = ({
             renderDetail={(e) => renderEventExpandedDetail(e, false)}
           />
         )}
-
-        {tab === 'mcp' && <McpTab box={box} running={!!live && turn.state === 'running'} />}
 
         {tab === 'prompt' && (
           <div>
@@ -798,7 +811,6 @@ const TURN_TABS: [TabKey, string][] = [
   ['model', 'Model calls'],
   ['context', 'Context'],
   ['tools', 'Tools'],
-  ['mcp', 'AgentBus tools'],
 ];
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
@@ -839,8 +851,6 @@ export const TabSum: React.FC<{ tab: TabKey; turn: Turn; detail: TurnDetail }> =
       if (failed) facts.push(<span className="bad">{failed} failed</span>);
       break;
     }
-    // The AgentBus tools tab is its own list: a line would only repeat it.
-    case 'mcp':
     case 'changes':
       return null;
   }

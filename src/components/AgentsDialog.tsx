@@ -72,9 +72,9 @@ function autoName(f: FormState, harnesses: Harness[]): string {
 // startModel is a new agent's model on acc: none on a subscription, so the
 // harness uses its own default (a fixed name can be one the account
 // refuses, as gpt-5.5 on a ChatGPT sign-in); the first offered on
-// OpenRouter, which needs one.
+// OpenRouter or a provider such as xAI, which need one.
 function startModel(acc: AccessOption | undefined): string {
-  if (!acc || acc.kind !== "openrouter") return "";
+  if (!acc || acc.kind === "subscription" || acc.kind === "api") return "";
   return acc.models[0] ?? "";
 }
 
@@ -121,7 +121,7 @@ function sourceText(source: string, label: string, keyName?: string): string {
     case "runner":
       return `${label}'s own list, after its last turn`;
     case "fixed":
-      return `${label}'s aliases, always the newest of each`;
+      return keyName ? `the models ${PRODUCT} suggests; any other id works too` : `${label}'s aliases, always the newest of each`;
   }
   return "the service";
 }
@@ -278,7 +278,9 @@ export const AgentsDialog: React.FC<AgentsDialogProps> = ({
     if (m.label) modelLabels[m.id] = m.label;
   }
   const openRouter = form?.access === "openrouter";
-  const apiKey = form?.access === "api";
+  // A key set in Settings that the access uses: the vendor's (access "api")
+  // or a provider's, such as xAI's (access "xai"). The service names it.
+  const apiKey = form?.access === "api" || (!openRouter && !!access?.key_name);
 
   // While a save is in flight nothing closes: its answer would land on
   // whatever came next.
@@ -362,7 +364,9 @@ export const AgentsDialog: React.FC<AgentsDialogProps> = ({
                     placeholder={
                       access.kind === "openrouter"
                         ? "an OpenRouter model id"
-                        : `empty: ${hName}'s default`
+                        : access.kind !== "api" && access.key_name
+                          ? "a model id"
+                          : `empty: ${hName}'s default`
                     }
                     suggestions={offered}
                     labels={modelLabels}

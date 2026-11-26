@@ -24,6 +24,7 @@ export const vendorKeys: Record<string, { label: string; placeholder: string; ha
   anthropic: { label: 'Anthropic API key', placeholder: 'sk-ant-…', harness: 'claude' },
   openai: { label: 'OpenAI API key', placeholder: 'sk-…', harness: 'codex' },
   gemini: { label: 'Gemini API key', placeholder: 'AIza…', harness: 'agy' },
+  xai: { label: 'xAI API key', placeholder: 'xai-…', harness: 'opencode' },
 };
 
 type KeyState = { set: boolean; set_at?: string };

@@ -34,7 +34,7 @@ describe('replay pairing and grouping (CLIENT_API "Turns")', () => {
   it('#5 groups by event.turn: a late reply for turn A stays in A', async () => {
     const events = [
       ev({ kind: 'session.registered', session: 's5', agent: 'claude', folder: '/w' }),
-      ev({ kind: 'session.opened', session: 's5', hold: 'h1' }),
+      ev({ kind: 'run.started', session: 's5', hold: 'h1' }),
       ev({ kind: 'turn.started', session: 's5', turn: 'A', exchange: 'xa', text: 'first' }),
       ev({ kind: 'model.requested', session: 's5', turn: 'A', exchange: 'xa' }),
       ev({ kind: 'turn.started', session: 's5', turn: 'B', exchange: 'xb', text: 'second' }),
@@ -42,7 +42,7 @@ describe('replay pairing and grouping (CLIENT_API "Turns")', () => {
       ev({ kind: 'model.responded', session: 's5', turn: 'A', exchange: 'xa', status: 200, text: 'reply A' }),
       ev({ kind: 'turn.completed', session: 's5', turn: 'A', exchange: 'xa', outcome: 'finished' }),
       ev({ kind: 'events.dropped', session: 's5', sessions: ['s5'], dropped: 1 }),
-      ev({ kind: 'session.closed', session: 's5', hold: 'h1' }),
+      ev({ kind: 'run.ended', session: 's5', hold: 'h1' }),
     ];
     const src = new ReplayDataSource(jsonl(events));
     const detail = (await openSession(src, 's5'))!;
@@ -60,13 +60,13 @@ describe('replay pairing and grouping (CLIENT_API "Turns")', () => {
   it('#5 session.* and events.dropped never create turns in a file without turn', async () => {
     const events = [
       ev({ kind: 'session.registered', session: 's6', agent: 'claude', folder: '/w' }),
-      ev({ kind: 'session.opened', session: 's6', hold: 'h1' }),
+      ev({ kind: 'run.started', session: 's6', hold: 'h1' }),
       ev({ kind: 'turn.started', session: 's6', exchange: 'x1', text: 'only' }),
       ev({ kind: 'model.requested', session: 's6', exchange: 'x1' }),
       ev({ kind: 'model.responded', session: 's6', exchange: 'x1', status: 200, text: 'ok' }),
       ev({ kind: 'turn.completed', session: 's6', exchange: 'x1', outcome: 'finished' }),
       ev({ kind: 'events.dropped', session: 's6', all_sessions: true, dropped: 3 }),
-      ev({ kind: 'session.closed', session: 's6', hold: 'h1' }),
+      ev({ kind: 'run.ended', session: 's6', hold: 'h1' }),
     ];
     const src = new ReplayDataSource(jsonl(events));
     const detail = (await openSession(src, 's6'))!;
@@ -87,14 +87,14 @@ describe('replay pairing and grouping (CLIENT_API "Turns")', () => {
     expect(s.folder).toBe('/Users/ana/Sites/x');
   });
 
-  it('reads agent and folder from the latest run turn or session.opened, as GET /sessions does', async () => {
+  it('reads agent and folder from the latest run turn or run.started, as GET /sessions does', async () => {
     const events = [
-      // A run's child: session.opened names the agent and folder before any turn.
-      ev({ kind: 'session.opened', session: 's8', hold: 'h1', agent: 'codex', folder: '/a' }),
+      // A run's child: run.started names the agent and folder before any turn.
+      ev({ kind: 'run.started', session: 's8', hold: 'h1', agent: 'codex', folder: '/a' }),
       ev({ kind: 'turn.started', session: 's8', turn: 'T1', exchange: 'x1', text: 'one', agent: 'codex', folder: '/a' }),
-      ev({ kind: 'session.closed', session: 's8', hold: 'h1' }),
+      ev({ kind: 'run.ended', session: 's8', hold: 'h1' }),
       // A later turn of the session in another folder: the latest wins.
-      ev({ kind: 'session.opened', session: 's8', hold: 'h2', agent: 'claude', folder: '/b' }),
+      ev({ kind: 'run.started', session: 's8', hold: 'h2', agent: 'claude', folder: '/b' }),
       ev({ kind: 'turn.started', session: 's8', turn: 'T2', exchange: 'x2', text: 'two', agent: 'claude', folder: '/b' }),
       // A turn.started without them (pointed at the gateway by hand) changes nothing.
       ev({ kind: 'turn.started', session: 's8', turn: 'T3', exchange: 'x3', text: 'three' }),

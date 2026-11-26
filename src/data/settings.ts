@@ -1,5 +1,3 @@
-import type { RunnerInfo } from '../types';
-
 // The settings routes (/api/v0/settings), as the Settings page reads them:
 // the settings' state, the policy, and the instructions. Every write sends back the ETag its read got, so a change
 // made elsewhere in between is refused (412) rather than undone.
@@ -23,8 +21,6 @@ export interface SettingsInfo {
 // filled. A nested key is a table, such as limits.max_depth.
 export interface Policy {
   agent_api?: { apply?: boolean; [k: string]: unknown };
-  network?: { contain?: string; allow?: string[] };
-  sandbox?: { mode?: string; [k: string]: unknown };
   home_files?: string[];
   [k: string]: unknown;
 }
@@ -78,7 +74,7 @@ export function changeOf(read: Policy, draft: Policy): Policy {
 export const isEmpty = (p: Policy) => Object.keys(p).length === 0;
 
 // homeFilesOf is the files from the person's home copied into each
-// conversation's own home (home_files), sandbox on or off.
+// conversation's own home (home_files).
 export function homeFilesOf(p: Policy): string[] {
   return [...(p.home_files ?? [])];
 }
@@ -139,31 +135,4 @@ export interface SettingsApi {
   // machine (GET /api/v0/folders/{ref}/home-files). Absent: a source
   // without the route.
   findConfig?(): Promise<ConfigFound>;
-}
-
-// Whether this setup can honour the sandbox setting, from the one source
-// that knows: each machine's own report in GET /api/v0/runners
-// (sandbox.can, and sandbox.why when it cannot). It can when at least one
-// online machine that runs sessions reports it can; why says why not, in a
-// plain sentence. runners is undefined before the first read and null when
-// the source lists no machines.
-export interface SandboxOffer {
-  can: boolean;
-  why?: string;
-  // The online machines that can, by name.
-  machines?: string[];
-}
-
-export function sandboxOffer(runners: RunnerInfo[] | null | undefined, error?: string | null): SandboxOffer {
-  if (runners === undefined) {
-    return { can: false, why: error ? `The machines could not be read: ${error}` : 'Reading which machines can build it…' };
-  }
-  if (runners === null) return { can: false, why: 'This AgentBus does not list its machines, so none reports it can.' };
-  // A connector from before 0.5 takes no work, so it runs no session.
-  const online = runners.filter((r) => r.online && r.role !== 'connector');
-  const can = online.filter((r) => r.sandbox?.can);
-  if (can.length > 0) return { can: true, machines: can.map((r) => r.name) };
-  if (online.length === 0) return { can: false, why: 'No machine is online to build it.' };
-  const each = online.map((r) => `${r.name}: ${r.sandbox ? (r.sandbox.why ?? 'it cannot') : 'it has not reported whether it can'}`);
-  return { can: false, why: `No online machine can build it. ${each.join('; ')}.` };
 }

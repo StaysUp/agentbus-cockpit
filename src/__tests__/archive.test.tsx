@@ -52,7 +52,6 @@ describe('Archive', () => {
     // The convo stays usable (archive is only a view): the button now unarchives.
     expect(archiveBtn(r)!.textContent).toBe('Unarchive');
     expect((r.container.querySelector('#input') as HTMLTextAreaElement).disabled).toBe(inputDisabledBefore);
-    expect(r.container.querySelector('#c-head .c-closed')).toBeNull();
     // Unarchive sends archived:false.
     await click(archiveBtn(r)!);
     await flush();

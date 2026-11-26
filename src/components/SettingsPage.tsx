@@ -7,7 +7,6 @@ import {
   lines,
   nestPolicy,
   Policy,
-  SandboxOffer,
   SettingsApi,
   SettingsInfo,
   Versioned,
@@ -23,9 +22,13 @@ import { Loading, Notice } from "./Notice";
 import { KEPT, LOADING, PRODUCT } from "../words";
 
 // The Settings page (/settings): AgentBus's settings, one global set for every machine.
-// Every setting of the policy is a plain control, in groups (Permissions, Isolation, Config, Limits); then the instructions every turn gets, the subscriptions, and the whole policy as JSON (Advanced). Each
+// Every setting of the policy is a plain control, in groups (Permissions, Config, Limits); then the instructions every turn gets, the subscriptions, and the whole policy as JSON (Advanced). Each
 // part saves on its own, with the version it read; a change made elsewhere in between is refused, and the page
 // reads everything again.
+//
+// The sandbox and network settings were retired (every conversation works in a
+// copy now; a session's mode is Direct, Copy or Locked), so there is no
+// Isolation group. The isolation backend key stays in Advanced.
 //
 // A save sends only the keys the person changed (PATCH), never a full copy with the defaults filled in: a copy
 // would keep every default at today's value after a later build changes it.
@@ -45,9 +48,6 @@ interface SettingsPageProps {
   streamUp?: boolean;
   onDisconnect?: () => void;
   disconnectLabel?: string;
-  // Whether this setup can honour the sandbox switch, from the machines'
-  // own reports (sandboxOffer). Absent: the switch is offered as it is.
-  sandbox?: SandboxOffer;
   // The subscriptions control keeps, which every turn uses. Absent: a
   // service that keeps none, and no Subscriptions part.
   subscriptions?: SubscriptionApi;
@@ -92,7 +92,7 @@ const TOOL = "tool:";
 const pkey = (c: Control): string => c.policyKey ?? c.key;
 const isTool = (s: string): boolean => s.startsWith(TOOL);
 
-type GroupId = "permissions" | "isolation" | "config" | "limits";
+type GroupId = "permissions" | "config" | "limits";
 type Part = GroupId | "instructions" | "subscriptions" | "advanced";
 
 interface Group {
@@ -119,19 +119,17 @@ const GROUPS: Group[] = [
         line: "Commands that wait for you, one per line." },
       { key: "forbid", policyKey: "forbid", of: "cmd", name: "Refuse", kind: { t: "list", placeholder: "git push", mono: true },
         line: "Commands they may never run, one per line." },
-      { key: "allow.tool", policyKey: "allow", of: "tool", name: "Allow", head: "Tools", kind: { t: "list", placeholder: "read_file", mono: true },
+      { key: "allow.tool", policyKey: "allow", of: "tool", name: "Allow", head: "Tools", kind: { t: "list", placeholder: "tool:*", mono: true },
         line: "Tools agents may use without asking, one per line." },
-      { key: "ask.tool", policyKey: "ask", of: "tool", name: "Ask", kind: { t: "list", placeholder: "write_file", mono: true },
+      { key: "ask.tool", policyKey: "ask", of: "tool", name: "Ask", kind: { t: "list", placeholder: "ask_agent", mono: true },
         line: "Tools that wait for you, one per line." },
-      { key: "forbid.tool", policyKey: "forbid", of: "tool", name: "Refuse", kind: { t: "list", placeholder: "run_command", mono: true },
+      { key: "forbid.tool", policyKey: "forbid", of: "tool", name: "Refuse", kind: { t: "list", placeholder: "subagent", mono: true },
         line: "Tools they may never use, one per line." },
-      { key: "unlisted", name: "Anything else", kind: { t: "seg", options: [["ask", "Ask"], ["refuse", "Refuse"]] },
-        line: "A command or tool on none of the lists: Ask holds it for you here, Refuse turns it down." },
     ],
     side: [
       "Agents may always read, list agents, start, review, stop and rename work within the request they belong to.",
       "The limits cap how much they ask for.",
-      "AgentBus decides every command and tool: Refuse wins, then Ask, then Allow, then Anything else for what is left.",
+      "AgentBus decides every command and tool: Refuse wins, then Ask, then Allow. By default Allow holds * (every command) and tool:* (every tool), so a command or tool on none of the lists is held for you.",
       "On a held command or tool, Allow once lets it run that turn only; Always allow adds it to the allow list.",
     ],
   },
@@ -145,26 +143,9 @@ const GROUPS: Group[] = [
     ],
     side: [
       "Use my config adds the usual config files found on the folder's machine. Look them over, then save.",
-      "Copied at the start of each turn, with the sandbox on or off.",
-      "Hooks with absolute paths into your real home do not work under the sandbox.",
+      "Copied into each session's home at the start of each turn.",
       "MCP servers in your config load on every turn, reviews included. What a server does is outside AgentBus's record.",
       "The browser cannot run in AgentBus sessions.",
-    ],
-  },
-  {
-    id: "isolation",
-    name: "Isolation",
-    sub: "Sandbox and network",
-    controls: [
-      { key: "sandbox.mode", name: "Sandbox", kind: { t: "onoff" },
-        line: "A wall around each session: its folder, its home, and the network only through AgentBus." },
-      { key: "network.contain", name: "Contain", head: "Network", kind: { t: "onoff" },
-        line: "Agents reach only their runner, AgentBus and the hosts below." },
-      { key: "network.allow", name: "Allow hosts", kind: { t: "list", placeholder: "github.com", mono: true },
-        line: "Hosts a contained agent may reach, one per line. *.example.com takes every name under it." },
-    ],
-    side: [
-      "A machine that cannot build the sandbox refuses the turn, and says why.",
     ],
   },
   {
@@ -253,7 +234,7 @@ function valueOf(c: Control, d: string | boolean): { v: unknown } | { error: str
 const json = (p: Policy) => JSON.stringify(p, null, 2);
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
-export const SettingsPage: React.FC<SettingsPageProps> = ({ api, onBack, onApps, onRunners, onSettings, runnersOnline, version, sourceLabel, streamUp, onDisconnect, disconnectLabel, sandbox, subscriptions, atSubscriptions }) => {
+export const SettingsPage: React.FC<SettingsPageProps> = ({ api, onBack, onApps, onRunners, onSettings, runnersOnline, version, sourceLabel, streamUp, onDisconnect, disconnectLabel, subscriptions, atSubscriptions }) => {
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   // The drafts, reset from what was read.
@@ -549,11 +530,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ api, onBack, onApps,
     switch (c.kind.t) {
       case "switch":
       case "onoff": {
-        const isSandbox = c.key === "sandbox.mode";
-        // The sandbox is offered only when an online machine can build it.
-        // One that is on can always be turned off.
-        const off = isSandbox && !!sandbox && !sandbox.can && d !== true;
-        input = <Switch name={c.key} label={d === true ? "On" : "Off"} on={d === true} disabled={off} onChange={(v) => set(c.key, v)} />;
+        input = <Switch name={c.key} label={d === true ? "On" : "Off"} on={d === true} onChange={(v) => set(c.key, v)} />;
         break;
       }
       case "seg":
@@ -632,15 +609,6 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ api, onBack, onApps,
           <Notice kind="error" inline>
             {error}
           </Notice>
-        )}
-        {c.key === "sandbox.mode" && sandbox && !sandbox.can && (
-          <p className="pg-why" data-sandbox-why>
-            {d === true ? "On, but no machine can build it now, so its turns are refused. " : "Not offered. "}
-            {sandbox.why}
-          </p>
-        )}
-        {c.key === "sandbox.mode" && sandbox?.can && sandbox.machines && (
-          <p className="nd-note">Experimental</p>
         )}
       </div>
       </React.Fragment>

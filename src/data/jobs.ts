@@ -41,6 +41,8 @@ export interface ApiTurn {
   // For a queued turn: how many of its session's turns are before it.
   ahead?: number;
   stopped?: boolean;
+  // True when a Discard dropped this turn's file changes, from the record.
+  discarded?: boolean;
   unsettled?: boolean;
   error?: string;
   outcome?: string;

@@ -2,7 +2,7 @@
 import { act, useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { ConvoColumn } from '../components/ConvoColumn';
-import { RightPanel } from '../components/RightPanel';
+import { DIRECT_CHANGES, RightPanel } from '../components/RightPanel';
 import { SessionsColumn } from '../components/SessionsColumn';
 import { formatAgo } from '../utils/format';
 import { ReplayDataSource } from '../data/ReplayDataSource';
@@ -111,6 +111,30 @@ describe('RightPanel ledger rows', () => {
   });
 });
 
+describe('Changes tab', () => {
+  // 0.6.5: a Direct session keeps no record of its turns' changes, so the tab
+  // says so plainly and reads no diff; a sandbox session still reads it.
+  it('a Direct session says its changes went into the folder, with no file list', async () => {
+    const session = await sessionFrom(toolSession(), 'c1');
+    for (const sandbox of [false, true]) {
+      const loadDiff = vi.fn(async () => ({ files: null }) as never);
+      const r = await render(
+        <RightPanel turn={session.turnsList[0]} totalTurns={1} session={{ ...session, sandbox }} loadDiff={loadDiff} />
+      );
+      await click(Array.from(r.container.querySelectorAll('#d-tabs .tab')).find((b) => b.textContent === 'Changes'));
+      const text = r.container.querySelector('#d-body')!.textContent;
+      if (sandbox) {
+        expect(loadDiff).toHaveBeenCalled();
+        expect(text).not.toContain(DIRECT_CHANGES);
+      } else {
+        expect(loadDiff).not.toHaveBeenCalled();
+        expect(text).toContain(DIRECT_CHANGES);
+      }
+      r.unmount();
+    }
+  });
+});
+
 describe('ConvoColumn', () => {
   it('#2 matches tool results by tool_id and shows failed, ok or no result in the Tools tab', async () => {
     const session = await sessionFrom(toolSession(), 'c1');
@@ -145,14 +169,14 @@ describe('ConvoColumn', () => {
       ev({ kind: 'model.requested', session: 'st', turn: 'R', exchange: 'xr' }),
       ev({ kind: 'model.responded', session: 'st', turn: 'R', exchange: 'xr', status: 200, stop_reason: 'tool_use' }),
       // A run whose agent exited 1: failed.
-      ev({ kind: 'session.opened', session: 'st', turn: 'F', hold: 'h1' }),
+      ev({ kind: 'run.started', session: 'st', turn: 'F', hold: 'h1' }),
       ev({ kind: 'turn.started', session: 'st', turn: 'F', exchange: 'xf', text: 'two' }),
-      ev({ kind: 'session.closed', session: 'st', turn: 'F', hold: 'h1', exit_code: 1 }),
+      ev({ kind: 'run.ended', session: 'st', turn: 'F', hold: 'h1', exit_code: 1 }),
       // A run whose agent exited 0: finished, shown by its outcome.
-      ev({ kind: 'session.opened', session: 'st', turn: 'D', hold: 'h2' }),
+      ev({ kind: 'run.started', session: 'st', turn: 'D', hold: 'h2' }),
       ev({ kind: 'turn.started', session: 'st', turn: 'D', exchange: 'xd', text: 'three' }),
       ev({ kind: 'turn.completed', session: 'st', turn: 'D', exchange: 'xd', outcome: 'max_tokens' }),
-      ev({ kind: 'session.closed', session: 'st', turn: 'D', hold: 'h2', exit_code: 0 }),
+      ev({ kind: 'run.ended', session: 'st', turn: 'D', hold: 'h2', exit_code: 0 }),
     ];
     const s = await sessionFrom(events, 'st');
     expect(s.turnsList.map((t) => t.state)).toEqual(['running', 'failed', 'finished']);

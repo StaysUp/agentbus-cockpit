@@ -144,3 +144,14 @@ describe('an opened table row', () => {
     expect(tsx['../components/RightPanel.tsx'].match(/className="ev-in"/g)).toHaveLength(2);
   });
 });
+
+describe('the apply panel', () => {
+  it('keeps its bar at the foot, outside the scroll, so no file row shows below it', () => {
+    const all = rules(css);
+    const bar = all.find(([sel]) => sel === '.apply-panel .ap-actions')?.[1] ?? '';
+    expect(bar).toMatch(/flex:\s*none/);
+    expect(bar).not.toMatch(/sticky/);
+    // #d-body is the one area that scrolls, as in every other panel.
+    expect(all.find(([sel]) => sel === '#d-body')?.[1]).toMatch(/overflow-y:\s*auto/);
+  });
+});

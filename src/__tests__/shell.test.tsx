@@ -41,11 +41,11 @@ const row = {
 // One finished turn.
 function finishedTurn(): CockpitEvent[] {
   return [
-    ev({ kind: 'session.opened', turn: 'T1', hold: 'h1' }),
+    ev({ kind: 'run.started', turn: 'T1', hold: 'h1' }),
     ev({ kind: 'turn.started', turn: 'T1', text: 'hello', agent: 'claude', folder: '/w' }),
     ev({ kind: 'model.requested', turn: 'T1', exchange: 'x1' }),
     ev({ kind: 'model.responded', turn: 'T1', exchange: 'x1', status: 200, text: 'hi there' }),
-    ev({ kind: 'session.closed', turn: 'T1', hold: 'h1', exit_code: 0 }),
+    ev({ kind: 'run.ended', turn: 'T1', hold: 'h1', exit_code: 0 }),
   ];
 }
 

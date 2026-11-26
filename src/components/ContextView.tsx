@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { LOADING } from '../words';
 import { formatCount } from '../utils/format';
 import { ContextMeter } from './ContextMeter';
@@ -17,9 +17,11 @@ interface Props {
   turn: string;
   loadTurn: (session: string, turn: string) => Promise<TurnContext>;
   loadSession: (session: string, before?: number) => Promise<SessionContext>;
-  // True while the selected turn is still running: the view re-reads once when
-  // the turn ends, so a settled turn is current without a Refresh.
-  running?: boolean;
+  // Bumps when the turn's data changes (a streamed turn.changed, its end, an
+  // apply or a discard): the view reads again, keeping what it shows until the
+  // new read lands, so a settled turn is current without a Refresh and without
+  // a flash of Loading. Left out: read once.
+  rev?: number;
 }
 
 // Follows a session's context pages (the server pages them; newest first) to
@@ -115,16 +117,16 @@ const Growth: React.FC<{ sc: SessionContext; turn: string }> = ({ sc, turn }) =>
   );
 };
 
-export const ContextView: React.FC<Props> = ({ session, turn, loadTurn, loadSession, running }) => {
+export const ContextView: React.FC<Props> = ({ session, turn, loadTurn, loadSession, rev }) => {
   const [tc, setTc] = useState<TurnContext | undefined>();
   const [sc, setSc] = useState<SessionContext | undefined>();
   const [error, setError] = useState<string | undefined>();
   const [loading, setLoading] = useState(true);
-  // The tab reads when it opens (and on a new turn/session), and once more when
-  // the turn finishes. Each read guards its own writes with a per-effect `live`
-  // flag (not a shared ref), which React StrictMode's double mount handles — so
-  // a stale read can never overwrite a newer one.
-  const [nonce, setNonce] = useState(0);
+  // The tab reads when it opens (and on a new turn/session), and again when the
+  // turn's data changes (rev). What it shows is kept until the new read lands.
+  // Each read guards its own writes with a per-effect `live` flag (not a shared
+  // ref), which React StrictMode's double mount handles — so a stale read can
+  // never overwrite a newer one.
   useEffect(() => {
     let live = true;
     setLoading(true);
@@ -142,14 +144,7 @@ export const ContextView: React.FC<Props> = ({ session, turn, loadTurn, loadSess
     return () => {
       live = false;
     };
-  }, [session, turn, loadTurn, loadSession, nonce]);
-
-  // The selected turn ending reads once more.
-  const wasRunning = useRef(running);
-  useEffect(() => {
-    if (wasRunning.current && !running) setNonce((n) => n + 1);
-    wasRunning.current = running;
-  }, [running]);
+  }, [session, turn, loadTurn, loadSession, rev]);
 
   if (loading && !tc) return <p className="dim">{LOADING}</p>;
   if (error) return <p className="bad">{error}</p>;

@@ -108,8 +108,8 @@ describe('apply up to a turn', () => {
     let reply: Response = json(refused, 409);
     vi.stubGlobal('fetch', async () => reply);
     const src = new LiveDataSource({ baseUrl: BASE, token: 't' });
-    expect(await src.applyTurn('T2')).toEqual(refused);
+    expect(await src.applyWorkspace('ws_1', 'T2')).toEqual(refused);
     reply = json({ error: 'an apply of an earlier turn of this session has not ended; ask again once it has' }, 409);
-    await expect(src.applyTurn('T2')).rejects.toThrow('an apply of an earlier turn of this session has not ended');
+    await expect(src.applyWorkspace('ws_1', 'T2')).rejects.toThrow('an apply of an earlier turn of this session has not ended');
   });
 });

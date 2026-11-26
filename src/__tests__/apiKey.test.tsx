@@ -17,7 +17,7 @@ function fakeApi() {
   const kept: Record<string, string> = {};
   const list = async (): Promise<SubscriptionList> => ({
     subscriptions: [],
-    api_keys: Object.fromEntries(['anthropic', 'gemini', 'openai', 'openrouter'].map((n) => [n, kept[n] ? { set: true, set_at: '2026-11-13T10:00:00Z' } : { set: false }])),
+    api_keys: Object.fromEntries(['anthropic', 'gemini', 'openai', 'openrouter', 'xai'].map((n) => [n, kept[n] ? { set: true, set_at: '2026-11-13T10:00:00Z' } : { set: false }])),
   });
   const api: SubscriptionApi = {
     list: vi.fn(list),
@@ -191,5 +191,40 @@ describe('LiveDataSource and the vendor keys', () => {
     expect(seen[1]).toMatchObject({ method: 'DELETE', url: `${BASE}/api/v0/subscriptions/anthropic/key` });
     expect(seen.every((s) => !s.url.includes(FAKE_ANTH))).toBe(true);
     expect(list?.api_keys).toEqual({ anthropic: { set: true, set_at: '2026-11-13T10:00:00Z' }, openai: { set: false } });
+  });
+});
+
+describe('The provider agent form', () => {
+  const harnesses: Harness[] = [
+    {
+      name: 'opencode',
+      label: 'OpenCode',
+      found: true,
+      runners: [],
+      access: [
+        { kind: 'openrouter', label: 'OpenRouter key', models: ['deepseek/deepseek-v4.1-flash'], any_model: true, key_env: 'OPENROUTER_API_KEY' },
+        { kind: 'xai', label: 'xAI key', models: ['grok-4.7', 'grok-4.6'], any_model: true, key_name: 'xai' },
+      ],
+    } as Harness,
+  ];
+
+  it('shows the xAI key row, starts with its first model, and saves access xai', async () => {
+    const f = fakeApi();
+    const createAgent = vi.fn(async () => ({}) as never);
+    const { container } = await render(
+      <AgentsDialog loadHarnesses={async () => harnesses} createAgent={createAgent} updateAgent={vi.fn()} onClose={() => undefined} subscriptions={f.api} />,
+    );
+    await flush();
+    await click(container.querySelector('[data-access="xai"]'));
+    await flush();
+    expect(container.querySelector('.key-row[data-harness="xai"]')).not.toBeNull();
+    expect(container.textContent).toContain('xAI API key');
+    expect(container.textContent).toContain('AgentBus adds your xAI API key');
+    expect((container.querySelector('input[name="model"]') as HTMLInputElement).value).toBe('grok-4.7');
+    await act(async () => {
+      (container.querySelector('form.agent-form') as HTMLFormElement).requestSubmit();
+    });
+    await flush();
+    expect(createAgent).toHaveBeenCalledWith(expect.objectContaining({ harness: 'opencode', access: 'xai', model: 'grok-4.7' }));
   });
 });
