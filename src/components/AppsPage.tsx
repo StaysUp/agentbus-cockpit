@@ -26,6 +26,7 @@ interface AppsPageProps {
   api: AppsApi;
   onBack: () => void;
   // The foot nav targets, passed to PageFrame. The Apps row is left out here.
+  onGuide?: () => void;
   onRunners?: () => void;
   onSettings?: () => void;
   runnersOnline?: number;
@@ -55,6 +56,7 @@ const SKELETON = `{
 export const AppsPage: React.FC<AppsPageProps> = ({
   api,
   onBack,
+  onGuide,
   onRunners,
   onSettings,
   runnersOnline,
@@ -319,6 +321,7 @@ export const AppsPage: React.FC<AppsPageProps> = ({
         title="Apps"
         current="apps"
         onBack={onBack}
+        onGuide={onGuide}
         onRunners={onRunners}
         onSettings={onSettings}
         runnersOnline={runnersOnline}

@@ -4,6 +4,7 @@ import { AgentsColumn } from './components/AgentsColumn';
 import { agentNameOf, ConvoColumn, currentAgent, Pending, PendingUpdate } from './components/ConvoColumn';
 import { ApprovalsPanel } from './components/ApprovalsPanel';
 import { AgentsDialog } from './components/AgentsDialog';
+import { GuidePage } from './components/GuidePage';
 import { SettingsPage } from './components/SettingsPage';
 import { AppsPage, AppsApi } from './components/AppsPage';
 import { RunnersPage } from './components/RunnersPage';
@@ -23,6 +24,7 @@ import { RightPanel, usePanelTabs } from './components/RightPanel';
 import { recordFileName, saveRecord } from './data/exportRecord';
 import { SessionsColumn } from './components/SessionsColumn';
 import { FolderInfo, FoldersContext, rememberFolder, rememberMachine } from './data/folders';
+import { guideFacts } from './data/guide';
 import { ReplayDataSource } from './data/ReplayDataSource';
 import { applyList, countedIn, isNewerList, ListCursor, StreamedCost, streamedCost } from './data/sessionList';
 import { addLiveEvent, LiveTurns, mergeLive, noteEventTime } from './data/liveStatus';
@@ -56,6 +58,9 @@ import {
 // Runners needs the runners route, Settings every settings route. A source
 // without them shows the cockpit at that address instead.
 function ownPageShown(page: string, d: DataSource): boolean {
+  // The guide needs no data of its own: it reads the agents, subscriptions
+  // and sessions the cockpit already reads.
+  if (page === 'guide') return true;
   if (page === 'apps') return !!(d.listApps && d.getApp && d.addApp && d.removeApp);
   if (page === 'runners') return !!(d.readRunners || d.listRunners);
   if (page === 'settings') return !!(d.getSettings && d.getPolicy && d.patchPolicy && d.getInstructions && d.putInstructions);
@@ -910,7 +915,7 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
     };
   }, [dataSource, sessionCount, picking]);
   useEffect(() => {
-    if (!dataSource.listAgents || agentsDialog !== null || page !== 'cockpit') return;
+    if (!dataSource.listAgents || agentsDialog !== null || (page !== 'cockpit' && page !== 'guide')) return;
     let active = true;
     dataSource.listAgents().then(
       (list) => active && setSavedAgents(list),
@@ -925,7 +930,7 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
   // agent's turn ends (the stream calls readSubsRef), for how much of its
   // plan is left, and once a minute in case no turn tells.
   useEffect(() => {
-    if (!dataSource.listSubscriptions || agentsDialog !== null || page !== 'cockpit') return;
+    if (!dataSource.listSubscriptions || agentsDialog !== null || (page !== 'cockpit' && page !== 'guide')) return;
     let active = true;
     const read = () =>
       dataSource.listSubscriptions!().then(
@@ -1529,6 +1534,7 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
       <AppsPage
         api={appsApi!}
         onBack={() => goPage('cockpit')}
+        onGuide={() => goPage('guide')}
         onRunners={loadRunners ? () => goPage('runners') : undefined}
         onSettings={settingsApi ? openSettings : undefined}
         runnersOnline={runnersOnline}
@@ -1552,6 +1558,7 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
         folders={folders}
         queue={queueView ? { turns: queueView.turns, error: queueView.error, titleOf } : undefined}
         onBack={() => goPage('cockpit')}
+        onGuide={() => goPage('guide')}
         onApps={openApps}
         onRunners={loadRunners ? () => goPage('runners') : undefined}
         onSettings={settingsApi ? openSettings : undefined}
@@ -1569,6 +1576,7 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
       <SettingsPage
         api={settingsApi!}
         onBack={() => goPage('cockpit')}
+        onGuide={() => goPage('guide')}
         onApps={openApps}
         onRunners={loadRunners ? () => goPage('runners') : undefined}
         onSettings={settingsApi ? openSettings : undefined}
@@ -1589,6 +1597,48 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
       <div id="app" className="app-loading">
         <Loading />
       </div>
+    );
+  }
+
+  // The setup guide reads what the cockpit already holds. Its actions are the
+  // cockpit's own: the agent form, Settings, and New session, so the guide
+  // never repeats a form or a route.
+  const guide = guideFacts({ connected: true, agents: savedAgents, subscriptions: subs, sessions: personSessions });
+  const guideActions = {
+    addAgent: canKeepAgents
+      ? () => {
+          setAgentsDialog({});
+          goPage('cockpit');
+        }
+      : undefined,
+    connect: openSignIn,
+    settings: settingsApi ? openSettings : undefined,
+    startSession:
+      canStart && (!canKeepAgents || (savedAgents?.length ?? 0) > 0)
+        ? () => {
+            setNewSession({ agent: savedAgents?.find((a) => a.id === selectedAgentId)?.id ?? savedAgents?.[0]?.id });
+            goPage('cockpit');
+          }
+        : undefined,
+    cockpit: () => goPage('cockpit'),
+  };
+
+  if (pageShown && page === 'guide') {
+    return (
+      <GuidePage
+        facts={guide}
+        actions={guideActions}
+        onBack={() => goPage('cockpit')}
+        onApps={openApps}
+        onRunners={loadRunners ? () => goPage('runners') : undefined}
+        onSettings={settingsApi ? openSettings : undefined}
+        runnersOnline={runnersOnline}
+        version={version ? versionLabel(version) : undefined}
+        sourceLabel={sourceLabel}
+        streamUp={dataSource.subscribe ? streamUp ?? false : undefined}
+        onDisconnect={onDisconnect}
+        disconnectLabel={disconnectLabel}
+      />
     );
   }
 
@@ -1618,6 +1668,7 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
         onAddAgent={canKeepAgents ? () => setAgentsDialog({}) : undefined}
         onEditAgent={canKeepAgents && dataSource.updateAgent ? (a) => setAgentsDialog({ edit: a }) : undefined}
         onRemoveAgent={canKeepAgents && dataSource.removeAgent ? removeAgent : undefined}
+        onGuide={() => goPage('guide')}
         onRunners={loadRunners ? () => goPage('runners') : undefined}
         runnersOnline={runnersOnline}
         version={version ? versionLabel(version) : undefined}

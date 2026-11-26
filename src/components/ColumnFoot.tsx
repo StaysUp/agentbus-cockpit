@@ -10,6 +10,7 @@ interface ColumnFootProps {
   // The nav targets: the cockpit (the way back from a page) and the sibling
   // pages, each absent when the source does not have it.
   onCockpit?: () => void;
+  onGuide?: () => void;
   onApps?: () => void;
   onRunners?: () => void;
   onSettings?: () => void;
@@ -31,6 +32,7 @@ interface ColumnFootProps {
 export const ColumnFoot: React.FC<ColumnFootProps> = ({
   current,
   onCockpit,
+  onGuide,
   onApps,
   onRunners,
   onSettings,
@@ -45,6 +47,7 @@ export const ColumnFoot: React.FC<ColumnFootProps> = ({
     <FootNav
       current={current}
       onCockpit={onCockpit}
+      onGuide={onGuide}
       onApps={onApps}
       onRunners={onRunners}
       onSettings={onSettings}
