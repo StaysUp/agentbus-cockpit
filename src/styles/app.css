@@ -897,7 +897,7 @@ tr.ev-open > td { background: var(--soft); border-bottom: 1px solid var(--line);
 .gd-n.done { border-color: var(--green); color: var(--green); }
 .gd-row.on .gd-n { border-color: var(--accent); color: var(--accent); }
 .gd-t { flex: 1; min-width: 0; }
-.gd-opt { margin-left: auto; padding-left: 0.35rem; font-size: var(--fs-xs); font-weight: 500; color: var(--ink3); }
+.gd-opt { margin-left: 0.35rem; font-size: var(--fs-xs); font-weight: 500; color: var(--ink3); white-space: nowrap; }
 .gd-term { margin: 0.2rem 0 1rem; }
 .gd-note { margin: 0; font-size: var(--fs-s); line-height: 1.45; color: var(--ink3); }
 .gd-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem; margin-top: 1rem; }

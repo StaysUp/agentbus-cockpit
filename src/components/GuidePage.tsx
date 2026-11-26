@@ -108,9 +108,11 @@ export const GuidePage: React.FC<GuidePageProps> = ({
                       {s.done ? <Check size={14} strokeWidth={2.8} aria-hidden="true" /> : s.n}
                     </span>
                     <span className="gd-t">{s.title}</span>
+                  </span>
+                  <span className="pl-n">
+                    {s.line}
                     {s.optional && <span className="gd-opt">Optional</span>}
                   </span>
-                  <span className="pl-n">{s.line}</span>
                 </button>
               );
             })}

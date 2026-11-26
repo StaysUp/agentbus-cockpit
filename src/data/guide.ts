@@ -54,8 +54,8 @@ export function guideSteps(f: GuideFacts): GuideStep[] {
     {
       id: 'sign-in',
       n: 3,
-      title: 'Connect a subscription or key',
-      line: 'The sign-ins and keys live in Settings.',
+      title: 'Connect a sign-in',
+      line: 'A subscription or a key, set in Settings.',
       done: f.signIn,
     },
     {
