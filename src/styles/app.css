@@ -907,6 +907,19 @@ tr.ev-open > td { background: var(--soft); border-bottom: 1px solid var(--line);
 .gd-facts { margin-top: 0.9rem; }
 .gd-addr { overflow-wrap: anywhere; }
 
+/* The way back after a step sent the person elsewhere: a quiet pill at the
+   foot of the window, above the page but under the dialogs and the panel. */
+.guide-return { position: fixed; right: 1.5rem; bottom: 1.5rem; z-index: 45; display: flex; align-items: center; gap: 0.15rem; padding: 0.2rem 0.25rem 0.2rem 0.2rem; border: 1px solid var(--line2); border-radius: 999px; background: var(--panel); box-shadow: 0 0.75rem 2rem -1rem var(--shadow-lg); }
+.gr-open { display: inline-flex; align-items: center; gap: 0.45rem; padding: 0.4rem 0.6rem; border-radius: 999px; color: var(--ink); font-size: var(--fs-m); font-weight: 600; }
+.gr-open:hover { background: var(--hover); }
+.gr-open svg { color: var(--ink3); }
+.gr-p { font-size: var(--fs-s); color: var(--ink3); font-weight: 500; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.gr-x { display: inline-flex; align-items: center; justify-content: center; width: 1.75rem; height: 1.75rem; border-radius: 50%; color: var(--ink3); }
+.gr-x:hover { background: var(--hover); color: var(--ink); }
+@media (max-width: 900px) {
+  .guide-return { right: 0.75rem; bottom: 5.25rem; }
+}
+
 /* The Apps page: a list of apps, each with its effect; the picked one's facts
    in the middle and its full definition on the right. */
 .apps-list { display: flex; flex-direction: column; gap: 0.4rem; }

@@ -5,6 +5,8 @@ import { agentNameOf, ConvoColumn, currentAgent, Pending, PendingUpdate } from '
 import { ApprovalsPanel } from './components/ApprovalsPanel';
 import { AgentsDialog } from './components/AgentsDialog';
 import { GuidePage } from './components/GuidePage';
+import { GuidePrompt } from './components/GuidePrompt';
+import { GuideReturn } from './components/GuideReturn';
 import { SettingsPage } from './components/SettingsPage';
 import { AppsPage, AppsApi } from './components/AppsPage';
 import { RunnersPage } from './components/RunnersPage';
@@ -24,7 +26,8 @@ import { RightPanel, usePanelTabs } from './components/RightPanel';
 import { recordFileName, saveRecord } from './data/exportRecord';
 import { SessionsColumn } from './components/SessionsColumn';
 import { FolderInfo, FoldersContext, rememberFolder, rememberMachine } from './data/folders';
-import { guideFacts } from './data/guide';
+import { guideFacts, guideProgress, guideSteps } from './data/guide';
+import { answerGuidePrompt, guidePromptAnswered } from './data/guidePrompt';
 import { ReplayDataSource } from './data/ReplayDataSource';
 import { applyList, countedIn, isNewerList, ListCursor, StreamedCost, streamedCost } from './data/sessionList';
 import { addLiveEvent, LiveTurns, mergeLive, noteEventTime } from './data/liveStatus';
@@ -274,8 +277,15 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
 
   // The agents form: closed (null), or open for a new agent or on one to edit.
   const [agentsDialog, setAgentsDialog] = useState<{ edit?: SavedAgent } | null>(null);
-  // The page on screen: the cockpit, /runners or /settings.
+  // The page on screen: the cockpit, /guide, /runners or /settings.
   const [page, goPage] = usePage();
+  // The first-visit question about the guide, and whether a step sent the
+  // person somewhere else and the way back should stay on screen.
+  const [guidePrompt, setGuidePrompt] = useState(() => !guidePromptAnswered());
+  const [fromGuide, setFromGuide] = useState(false);
+  useEffect(() => {
+    if (page === 'guide') setFromGuide(false);
+  }, [page]);
   // The saved agents: the rows of the Agents column, the picker beside Send
   // and each turn's agent name. Read at the start, whenever the agents form
   // closes, after a remove (agentsKey), and on coming back to the cockpit.
@@ -1527,68 +1537,139 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
+  // The first-visit question about the guide, and the way back after a step
+  // sent the person somewhere else. Both are views over what the cockpit
+  // already knows; neither is stored on control.
+  const answerGuide = (start: boolean) => {
+    answerGuidePrompt();
+    setGuidePrompt(false);
+    if (start) goPage('guide');
+  };
+  const guide = guideFacts({ connected: true, agents: savedAgents, subscriptions: subs, sessions: personSessions });
+  const guideProgressNow = guideProgress(guideSteps(guide));
+  const guideActions = {
+    addAgent: canKeepAgents
+      ? () => {
+          setFromGuide(true);
+          setAgentsDialog({});
+          goPage('cockpit');
+        }
+      : undefined,
+    connect: openSignIn
+      ? () => {
+          setFromGuide(true);
+          openSignIn();
+        }
+      : undefined,
+    settings: settingsApi
+      ? () => {
+          setFromGuide(true);
+          openSettings();
+        }
+      : undefined,
+    startSession:
+      canStart && (!canKeepAgents || (savedAgents?.length ?? 0) > 0)
+        ? () => {
+            setFromGuide(true);
+            setNewSession({ agent: savedAgents?.find((a) => a.id === selectedAgentId)?.id ?? savedAgents?.[0]?.id });
+            goPage('cockpit');
+          }
+        : undefined,
+    cockpit: () => {
+      setFromGuide(true);
+      goPage('cockpit');
+    },
+  };
+  // A first visit is a data folder with no agents and no sessions, on a
+  // service that can save them. Either answer is kept in this browser.
+  const showGuidePrompt =
+    guidePrompt &&
+    page === 'cockpit' &&
+    canKeepAgents &&
+    savedAgents?.length === 0 &&
+    personSessions.length === 0 &&
+    agentsDialog === null &&
+    newSession === null;
+  const guideReturn = fromGuide ? (
+    <GuideReturn
+      done={guideProgressNow.done}
+      total={guideProgressNow.total}
+      onOpen={() => goPage('guide')}
+      onDismiss={() => setFromGuide(false)}
+    />
+  ) : null;
+
   // The pages of their own, each at its address. A source without the
   // page's routes shows the cockpit.
   if (pageShown && page === 'apps') {
     return (
-      <AppsPage
-        api={appsApi!}
-        onBack={() => goPage('cockpit')}
-        onGuide={() => goPage('guide')}
-        onRunners={loadRunners ? () => goPage('runners') : undefined}
-        onSettings={settingsApi ? openSettings : undefined}
-        runnersOnline={runnersOnline}
-        version={version ? versionLabel(version) : undefined}
-        sourceLabel={sourceLabel}
-        streamUp={dataSource.subscribe ? streamUp ?? false : undefined}
-        onDisconnect={onDisconnect}
-        disconnectLabel={disconnectLabel}
-      />
+      <>
+        <AppsPage
+          api={appsApi!}
+          onBack={() => goPage('cockpit')}
+          onGuide={() => goPage('guide')}
+          onRunners={loadRunners ? () => goPage('runners') : undefined}
+          onSettings={settingsApi ? openSettings : undefined}
+          runnersOnline={runnersOnline}
+          version={version ? versionLabel(version) : undefined}
+          sourceLabel={sourceLabel}
+          streamUp={dataSource.subscribe ? streamUp ?? false : undefined}
+          onDisconnect={onDisconnect}
+          disconnectLabel={disconnectLabel}
+        />
+        {guideReturn}
+      </>
     );
   }
   if (pageShown && page === 'runners') {
     return (
-      <RunnersPage
-        runners={runners.runners}
-        error={runners.error}
-        pending={runners.pending}
-        reload={runners.reload}
-        actions={runnerActions}
-        workspaces={workspacesApi}
-        folders={folders}
-        queue={queueView ? { turns: queueView.turns, error: queueView.error, titleOf } : undefined}
-        onBack={() => goPage('cockpit')}
-        onGuide={() => goPage('guide')}
-        onApps={openApps}
-        onRunners={loadRunners ? () => goPage('runners') : undefined}
-        onSettings={settingsApi ? openSettings : undefined}
-        runnersOnline={runnersOnline}
-        version={version ? versionLabel(version) : undefined}
-        sourceLabel={sourceLabel}
-        streamUp={dataSource.subscribe ? streamUp ?? false : undefined}
-        onDisconnect={onDisconnect}
-        disconnectLabel={disconnectLabel}
-      />
+      <>
+        <RunnersPage
+          runners={runners.runners}
+          error={runners.error}
+          pending={runners.pending}
+          reload={runners.reload}
+          actions={runnerActions}
+          workspaces={workspacesApi}
+          folders={folders}
+          queue={queueView ? { turns: queueView.turns, error: queueView.error, titleOf } : undefined}
+          onBack={() => goPage('cockpit')}
+          onGuide={() => goPage('guide')}
+          onApps={openApps}
+          onRunners={loadRunners ? () => goPage('runners') : undefined}
+          onSettings={settingsApi ? openSettings : undefined}
+          runnersOnline={runnersOnline}
+          version={version ? versionLabel(version) : undefined}
+          sourceLabel={sourceLabel}
+          streamUp={dataSource.subscribe ? streamUp ?? false : undefined}
+          onDisconnect={onDisconnect}
+          disconnectLabel={disconnectLabel}
+        />
+        {guideReturn}
+      </>
     );
   }
   if (pageShown && page === 'settings') {
     return (
-      <SettingsPage
-        api={settingsApi!}
-        onBack={() => goPage('cockpit')}
-        onGuide={() => goPage('guide')}
-        onApps={openApps}
-        onRunners={loadRunners ? () => goPage('runners') : undefined}
-        onSettings={settingsApi ? openSettings : undefined}
-        runnersOnline={runnersOnline}
-        version={version ? versionLabel(version) : undefined}
-        sourceLabel={sourceLabel}
-        streamUp={dataSource.subscribe ? streamUp ?? false : undefined}
-        onDisconnect={onDisconnect}
-        disconnectLabel={disconnectLabel}
-        subscriptions={subscriptionApi}
-        atSubscriptions={settingsAtSubs}
-      />
+      <>
+        <SettingsPage
+          api={settingsApi!}
+          onBack={() => goPage('cockpit')}
+          onGuide={() => goPage('guide')}
+          onApps={openApps}
+          onRunners={loadRunners ? () => goPage('runners') : undefined}
+          onSettings={settingsApi ? openSettings : undefined}
+          runnersOnline={runnersOnline}
+          version={version ? versionLabel(version) : undefined}
+          sourceLabel={sourceLabel}
+          streamUp={dataSource.subscribe ? streamUp ?? false : undefined}
+          onDisconnect={onDisconnect}
+          disconnectLabel={disconnectLabel}
+          subscriptions={subscriptionApi}
+          atSubscriptions={settingsAtSubs}
+        />
+        {guideReturn}
+      </>
     );
   }
 
@@ -1599,29 +1680,6 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
       </div>
     );
   }
-
-  // The setup guide reads what the cockpit already holds. Its actions are the
-  // cockpit's own: the agent form, Settings, and New session, so the guide
-  // never repeats a form or a route.
-  const guide = guideFacts({ connected: true, agents: savedAgents, subscriptions: subs, sessions: personSessions });
-  const guideActions = {
-    addAgent: canKeepAgents
-      ? () => {
-          setAgentsDialog({});
-          goPage('cockpit');
-        }
-      : undefined,
-    connect: openSignIn,
-    settings: settingsApi ? openSettings : undefined,
-    startSession:
-      canStart && (!canKeepAgents || (savedAgents?.length ?? 0) > 0)
-        ? () => {
-            setNewSession({ agent: savedAgents?.find((a) => a.id === selectedAgentId)?.id ?? savedAgents?.[0]?.id });
-            goPage('cockpit');
-          }
-        : undefined,
-    cockpit: () => goPage('cockpit'),
-  };
 
   if (pageShown && page === 'guide') {
     return (
@@ -1924,6 +1982,8 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
           onClose={() => setAgentsDialog(null)}
         />
       )}
+      {guideReturn}
+      {showGuidePrompt && <GuidePrompt onStart={() => answerGuide(true)} onClose={() => answerGuide(false)} />}
     </div>
     </FoldersContext.Provider>
   );
