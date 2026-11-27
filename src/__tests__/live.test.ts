@@ -439,11 +439,19 @@ describe('closed and error fields, read before and after the service gives them'
 });
 
 describe('a stream that goes silent', () => {
-  afterEach(() => vi.unstubAllGlobals());
+  let stop: (() => void) | undefined;
+
+  afterEach(() => {
+    stop?.();
+    stop = undefined;
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
 
   // The service restarted behind a proxy, or the laptop slept: the connection
   // stays open and sends nothing, not even the ping that comes every 15 s.
   it('is closed after idleMs, said to be down, and opened again from the last seq', async () => {
+    vi.useFakeTimers();
     const streams: string[] = [];
     const enc = new TextEncoder();
     vi.stubGlobal(
@@ -469,18 +477,33 @@ describe('a stream that goes silent', () => {
     const src = new LiveDataSource({ baseUrl: BASE, retryBaseMs: 5, retryMaxMs: 20, idleMs: 40 });
     const got: CockpitEvent[] = [];
     const states: boolean[] = [];
-    const stop = src.subscribe((e) => got.push(e), undefined, (up) => states.push(up));
-    await vi.waitFor(() => expect(got.map((e) => e.seq)).toEqual([21, 22]), { timeout: 2000 });
+    let firstEvent!: () => void;
+    let secondEvent!: () => void;
+    const first = new Promise<void>((resolve) => { firstEvent = resolve; });
+    const second = new Promise<void>((resolve) => { secondEvent = resolve; });
+    stop = src.subscribe((e) => {
+      got.push(e);
+      if (e.seq === 21) firstEvent();
+      if (e.seq === 22) secondEvent();
+    }, undefined, (up) => states.push(up));
+    await first;
+    await vi.advanceTimersByTimeAsync(39);
+    expect(states).toEqual([true]);
+    expect(streams).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(states).toEqual([true, false]);
+    await vi.advanceTimersByTimeAsync(5);
+    await second;
+    expect(got.map((e) => e.seq)).toEqual([21, 22]);
     expect(streams[1]).toContain('store=st_1');
     expect(streams[1]).toContain('after=21');
-    expect(states.slice(0, 3)).toEqual([true, false, true]);
-    stop();
+    expect(states).toEqual([true, false, true]);
   });
 
   it('a ping keeps it open', async () => {
+    vi.useFakeTimers();
     const streams: string[] = [];
     const enc = new TextEncoder();
-    const timers: ReturnType<typeof setInterval>[] = [];
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: string, init?: RequestInit) => {
@@ -490,7 +513,6 @@ describe('a stream that goes silent', () => {
         const body = new ReadableStream<Uint8Array>({
           start(c) {
             const t = setInterval(() => c.enqueue(enc.encode(': ping\n\n')), 10);
-            timers.push(t);
             init?.signal?.addEventListener('abort', () => {
               clearInterval(t);
               c.error(new DOMException('aborted', 'AbortError'));
@@ -502,11 +524,15 @@ describe('a stream that goes silent', () => {
     );
     const src = new LiveDataSource({ baseUrl: BASE, retryBaseMs: 5, retryMaxMs: 20, idleMs: 40 });
     const states: boolean[] = [];
-    const stop = src.subscribe(() => {}, undefined, (up) => states.push(up));
-    await new Promise((r) => setTimeout(r, 200));
+    let connected!: () => void;
+    const connection = new Promise<void>((resolve) => { connected = resolve; });
+    stop = src.subscribe(() => {}, undefined, (up) => {
+      states.push(up);
+      if (up) connected();
+    });
+    await connection;
+    await vi.advanceTimersByTimeAsync(200);
     expect(streams).toHaveLength(1);
     expect(states).toEqual([true]);
-    stop();
-    timers.forEach(clearInterval);
   });
 });
