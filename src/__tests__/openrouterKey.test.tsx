@@ -6,7 +6,7 @@ import { OpenRouterKey } from '../components/OpenRouterKey';
 import { AgentsDialog } from '../components/AgentsDialog';
 import { LiveDataSource } from '../data/LiveDataSource';
 import { Harness, SubscriptionList } from '../types';
-import { click, flush, render } from './helpers';
+import { choose, click, flush, render } from './helpers';
 
 // A fake key: the shape OpenRouter's have, no one's credential.
 const FAKE_KEY = 'sk-or-v1-fake0000111122223333444455556666';
@@ -193,7 +193,7 @@ describe('The OpenRouter agent form', () => {
       <AgentsDialog loadHarnesses={async () => harnesses} createAgent={createAgent} updateAgent={vi.fn()} onClose={() => undefined} subscriptions={f.api} />,
     );
     await flush();
-    await click(container.querySelector('[data-access="openrouter"]'));
+    await choose(container, 'access', 'openrouter');
     await flush();
     expect(row(container)).not.toBeNull();
     expect(container.textContent).toContain('AgentBus adds your OpenRouter key to each call.');

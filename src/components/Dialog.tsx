@@ -65,14 +65,24 @@ export const Dialog: React.FC<DialogProps> = ({ title, label, onClose, busy = fa
         if (!busyRef.current) closeRef.current();
       } else if (e.key === 'Tab' && box.current) {
         // Tab stays inside the dialog.
-        const all = [...box.current.querySelectorAll<HTMLElement>(FOCUSABLE)].filter((x) => x.offsetParent !== null || x === document.activeElement);
-        if (all.length === 0) return;
+        const focused = document.activeElement as HTMLElement | null;
+        const all = [...box.current.querySelectorAll<HTMLElement>(FOCUSABLE)].filter(
+          (x) => x.tabIndex >= 0 && !x.matches(':disabled') && (x.offsetParent !== null || x === focused),
+        );
+        if (all.length === 0) {
+          e.preventDefault();
+          if (!box.current.contains(focused)) box.current.focus();
+          return;
+        }
         const first = all[0];
         const last = all[all.length - 1];
-        if (e.shiftKey && document.activeElement === first) {
+        if (!focused || !all.includes(focused)) {
+          e.preventDefault();
+          (e.shiftKey ? last : first).focus();
+        } else if (e.shiftKey && focused === first) {
           e.preventDefault();
           last.focus();
-        } else if (!e.shiftKey && document.activeElement === last) {
+        } else if (!e.shiftKey && focused === last) {
           e.preventDefault();
           first.focus();
         }
@@ -98,6 +108,7 @@ export const Dialog: React.FC<DialogProps> = ({ title, label, onClose, busy = fa
     },
     className: `new-dialog${className ? ` ${className}` : ''}`,
     role: alert ? 'alertdialog' : 'dialog',
+    tabIndex: -1,
     'aria-modal': true,
     // Named by its title: as aria-label when the title is plain text, so
     // the name is the same string a test or a screen reader looks for.

@@ -1,11 +1,12 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Button, Combo, Seg, Select } from "./Controls";
 import { Dialog, DialogActions } from "./Dialog";
 import { Loading, Notice } from "./Notice";
 import { harnessName, PRODUCT } from "../words";
 import { AccessOption, AgentFields, Harness, ModelList, SavedAgent } from "../types";
-import { ConnectStep, SubscriptionApi } from "./ConnectStep";
+import { ConnectStep, ConnectStepHandle, SubscriptionApi } from "./ConnectStep";
 import { APIKey, OpenRouterKey, vendorKeys } from "./OpenRouterKey";
+import { AgentLogo, DownIcon } from "./Icons";
 
 // The "+ Agent" form, and the same form to edit a saved agent: Harness,
 // then Access (only what that harness offers), then Model (what that harness
@@ -63,6 +64,9 @@ const usable = (h: Harness) =>
   !h.disabled && (h.access ?? []).some((x) => !x.disabled);
 const accessesOf = (h?: Harness): AccessOption[] => h?.access ?? [];
 const firstAccess = (h?: Harness) => accessesOf(h).find((x) => !x.disabled);
+
+// A dropdown action, distinct from Default (empty) and every non-blank model ID.
+const customModelOption = { value: " ", label: "Custom model ID…" };
 
 function autoName(f: FormState, harnesses: Harness[]): string {
   const label = harnessName(f.harness, harnesses.find((h) => h.name === f.harness)?.label);
@@ -151,6 +155,10 @@ export const AgentsDialog: React.FC<AgentsDialogProps> = ({
   const editing = edit?.id ?? null;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [signingIn, setSigningIn] = useState(false);
+  const signIn = useRef<ConnectStepHandle>(null);
+  const [showOptions, setShowOptions] = useState(!!edit);
+  const [enterCustomModel, setEnterCustomModel] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -175,6 +183,9 @@ export const AgentsDialog: React.FC<AgentsDialogProps> = ({
   const [modelsBusy, setModelsBusy] = useState(false);
   const [modelsError, setModelsError] = useState<string | null>(null);
   const modelsFor = form ? `${form.harness} ${form.access}` : "";
+  useEffect(() => {
+    setEnterCustomModel(false);
+  }, [modelsFor]);
   const readModels = (refresh: boolean) => {
     if (!loadModels || !form?.harness || !form.access) return () => undefined;
     let active = true;
@@ -211,7 +222,7 @@ export const AgentsDialog: React.FC<AgentsDialogProps> = ({
   // follows until the person types one.
   const update = (patch: Partial<FormState>) =>
     setForm((cur) => {
-      if (!cur) return cur;
+      if (!cur || signingIn || busy) return cur;
       const f = { ...cur, ...patch };
       const h = hs.find((x) => x.name === f.harness);
       let acc = accessesOf(h).find((x) => x.kind === f.access && !x.disabled);
@@ -246,8 +257,9 @@ export const AgentsDialog: React.FC<AgentsDialogProps> = ({
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form || busy) return;
+    if (!form || busy || signingIn) return;
     if (!form.name.trim()) {
+      setShowOptions(true);
       setError("Give the agent a name.");
       return;
     }
@@ -278,18 +290,49 @@ export const AgentsDialog: React.FC<AgentsDialogProps> = ({
     if (m.label) modelLabels[m.id] = m.label;
   }
   const openRouter = form?.access === "openrouter";
+  const modelRequired = !!access && access.kind !== "subscription" && access.kind !== "api";
+  const searchableModels = modelRequired && access.any_model;
+  const canEnterCustomModel = !modelRequired && !!access?.any_model;
+  const modelOptions = [
+    { value: "", label: "Default" },
+    ...offered.filter((id) => id.trim()).map((id) => ({
+      value: id,
+      label: modelLabels[id] || id,
+      hint: modelLabels[id] && modelLabels[id] !== id ? id : undefined,
+    })),
+    ...(form?.model.trim() && !offered.includes(form.model)
+      ? [{ value: form.model, label: form.model }]
+      : []),
+    ...(canEnterCustomModel ? [customModelOption] : []),
+  ];
+  const pickModel = (value: string) => {
+    if (signingIn || busy) return;
+    const custom = value === customModelOption.value;
+    setEnterCustomModel(custom);
+    if (!custom) update({ model: value });
+  };
   // A key set in Settings that the access uses: the vendor's (access "api")
   // or a provider's, such as xAI's (access "xai"). The service names it.
   const apiKey = form?.access === "api" || (!openRouter && !!access?.key_name);
+  const optionsToggle = (
+    <button type="button" className="ad-options" hidden={signingIn} aria-expanded={showOptions}
+      aria-controls={modelRequired ? "ad-name" : "ad-model ad-name"} onClick={() => setShowOptions(!showOptions)}>
+      <DownIcon /> {modelRequired ? "Agent name" : "Model and name"}
+      {!modelRequired && !showOptions && <span>{form?.model || "Default model"}</span>}
+    </button>
+  );
 
   // While a save is in flight nothing closes: its answer would land on
   // whatever came next.
   return (
     <Dialog
-      title={editing ? `Edit ${edit?.name}` : "New agent"}
-      label={editing ? "Edit agent" : "New agent"}
+      title={signingIn ? `Connect ${hName}` : editing ? `Edit ${edit?.name}` : "New agent"}
+      label={signingIn ? `Connect ${hName}` : editing ? "Edit agent" : "New agent"}
       className="agents-dialog"
-      onClose={onClose}
+      onClose={() => {
+        if (signingIn) signIn.current?.leave();
+        else onClose();
+      }}
       busy={busy}
     >
         {loadError && <Notice kind="error">{loadError}</Notice>}
@@ -300,124 +343,132 @@ export const AgentsDialog: React.FC<AgentsDialogProps> = ({
             {/* While a save is in flight nothing in the form changes: the
                 answer closes the form with what was sent. */}
             <fieldset className="ad-set" disabled={busy}>
-              <label>
-                <span>Harness</span>
+              <div className="ad-tool" hidden={signingIn}>
+                <span className="ad-label">Coding tool</span>
                 <Seg
-                  label="Harness"
+                  label="Coding tool"
                   dataKey="harness"
                   value={form.harness}
                   options={hs
                     .filter((h) => !h.disabled || h.name === form.harness)
                     .map((h) => ({
                       value: h.name,
-                      label: harnessName(h.name, h.label),
+                      label: (
+                        <>
+                          <AgentLogo harness={h.name} />
+                          {harnessName(h.name, h.label)}
+                        </>
+                      ),
                       disabled: !usable(h),
                       title: !h.found ? `Not installed where ${PRODUCT} runs` : undefined,
                     }))}
                   onChange={(v) => update({ harness: v })}
                 />
-                <span className="nd-note">
-                  {harness && !harness.found
-                    ? `Not installed where ${PRODUCT} runs.`
-                    : "The agent's loop and tools."}
-                </span>
-              </label>
-              <label>
-                <span>Access</span>
-                <Seg
-                  label="Access"
-                  dataKey="access"
-                  value={form.access}
-                  options={accessesOf(harness)
-                    .filter((x) => !x.disabled || x.kind === form.access)
-                    .map((x) => ({
-                      value: x.kind,
-                      // Settings says whose API key; here the choice is only "API key".
-                      label: x.kind === "api" ? "API key" : x.label,
-                      disabled: !!x.disabled,
-                    }))}
-                  onChange={(v) => update({ access: v })}
-                />
-                <span className="nd-note">
-                  {openRouter
-                    ? `${PRODUCT} adds your OpenRouter key to each call.`
-                    : apiKey
-                      ? `${PRODUCT} adds your ${vendorKeys[access?.key_name ?? ""]?.label ?? access?.label ?? "API key"} to each call.`
-                      : `${PRODUCT} adds your ${hName} sign-in to each call.`}
-                </span>
-              </label>
-              {subscriptions && form.access === "subscription" && form.harness && (
-                <ConnectStep key={form.harness} harness={form.harness} api={subscriptions} />
-              )}
-              {subscriptions && openRouter && <OpenRouterKey api={subscriptions} />}
-              {subscriptions && apiKey && access?.key_name && (
-                <APIKey key={access.key_name} api={subscriptions} name={access.key_name} onChange={() => readModels(true)} />
-              )}
-              <label>
-                <span>Model</span>
-                {access?.any_model ? (
-                  <Combo
-                    name="model"
-                    label="Model"
-                    value={form.model}
-                    onChange={(v) => update({ model: v })}
-                    placeholder={
-                      access.kind === "openrouter"
-                        ? "an OpenRouter model id"
-                        : access.kind !== "api" && access.key_name
-                          ? "a model id"
-                          : `empty: ${hName}'s default`
-                    }
-                    suggestions={offered}
-                    labels={modelLabels}
-                  />
-                ) : (
-                  <Select
-                    name="model"
-                    label="Model"
-                    value={form.model}
-                    onChange={(v) => update({ model: v })}
-                    options={[
-                      ...(access?.models ?? []).map((m) => ({ value: m, label: m })),
-                      ...(form.model && !(access?.models ?? []).includes(form.model)
-                        ? [{ value: form.model, label: form.model }]
-                        : []),
-                      { value: "", label: "Harness default" },
-                    ]}
-                  />
+                {harness && !harness.found && (
+                  <span className="nd-note">Not installed where {PRODUCT} runs.</span>
                 )}
-                {loadModels && access?.any_model && (
-                  <span className="nd-note ad-models" data-source={listed?.source ?? ""} title={listed ? `From ${sourceText(listed.source, hName, apiKey ? access?.key_name : undefined)}` : undefined}>
-                    {modelsBusy
-                      ? "Loading…"
-                      : modelsError
-                        ? modelsError
-                        : listed && listed.models.length === 0 && listed.source !== "fixed"
-                          ? `No list of ${hName}'s models yet. Type a model id above.`
-                          : listed?.error
-                          ? listed.error
-                          : listed
-                            ? `${listed.models.length} ${listed.models.length === 1 ? "model" : "models"}${listed.fetched_at ? ` · updated ${when(listed.fetched_at)}` : ""}`
-                            : ""}{" "}
+              </div>
+              <div className={signingIn ? undefined : "ad-group ad-access"}
+                role={signingIn ? undefined : "group"} aria-labelledby={signingIn ? undefined : "ad-access-label"}>
+                <label hidden={signingIn}>
+                  <span id="ad-access-label">Model access</span>
+                  <Select
+                    label="Model access"
+                    name="access"
+                    value={form.access}
+                    disabled={signingIn || busy}
+                    options={accessesOf(harness)
+                      .filter((x) => !x.disabled || x.kind === form.access)
+                      .map((x) => ({
+                        value: x.kind,
+                        // Settings says whose API key; here the choice is only "API key".
+                        label: x.kind === "api" ? "API key" : x.label,
+                        disabled: !!x.disabled,
+                      }))}
+                    onChange={(v) => update({ access: v })}
+                  />
+                </label>
+                {(openRouter || apiKey) && (
+                  <span className="nd-note" hidden={signingIn}>
+                    {PRODUCT} adds your {openRouter
+                      ? "OpenRouter key"
+                      : vendorKeys[access?.key_name ?? ""]?.label ?? access?.label ?? "API key"} to each call.
+                  </span>
+                )}
+                {subscriptions && form.access === "subscription" && form.harness && (
+                  <ConnectStep key={form.harness} ref={signIn} harness={form.harness} api={subscriptions} onSigningInChange={setSigningIn} />
+                )}
+                {subscriptions && openRouter && <OpenRouterKey api={subscriptions} />}
+                {subscriptions && apiKey && access?.key_name && (
+                  <APIKey key={access.key_name} api={subscriptions} name={access.key_name} onChange={() => readModels(true)} />
+                )}
+              </div>
+              {!modelRequired && optionsToggle}
+              <div id="ad-model" className="ad-group" role="group" aria-labelledby="ad-model-label"
+                hidden={signingIn || (!modelRequired && !showOptions)}>
+                <label>
+                  <span id="ad-model-label">Model</span>
+                  {searchableModels ? (
+                    <Combo
+                      name="model"
+                      label="Model"
+                      value={form.model}
+                      disabled={signingIn || busy}
+                      onChange={(v) => update({ model: v })}
+                      placeholder={openRouter ? "an OpenRouter model id" : "a model id"}
+                      suggestions={offered}
+                      labels={modelLabels}
+                    />
+                  ) : (
+                    <Select
+                      name="model"
+                      label="Model"
+                      value={enterCustomModel && canEnterCustomModel ? customModelOption.value : form.model}
+                      disabled={signingIn || busy || (!modelRequired && !showOptions)}
+                      onChange={pickModel}
+                      options={modelOptions}
+                    />
+                  )}
+                </label>
+                {enterCustomModel && canEnterCustomModel && (
+                  <label>
+                    <span>Custom model ID</span>
+                    <input
+                      name="custom_model"
+                      type="text"
+                      value={form.model}
+                      onChange={(e) => update({ model: e.target.value })}
+                      spellCheck={false}
+                      autoComplete="off"
+                      autoFocus
+                    />
+                  </label>
+                )}
+                {loadModels && access?.any_model && (modelsBusy || modelsError || listed) && (
+                  <div className="ad-models" data-source={listed?.source ?? ""}>
+                    <span role="status" title={listed ? `From ${sourceText(listed.source, hName, apiKey ? access?.key_name : undefined)}` : undefined}>
+                      {modelsBusy
+                        ? "Loading…"
+                        : modelsError
+                          ? modelsError
+                          : listed && listed.models.length === 0 && listed.source !== "fixed"
+                            ? `No list of ${hName}'s models yet.${searchableModels ? " Type a model id above." : ""}`
+                            : listed?.error
+                              ? listed.error
+                              : listed
+                                ? `${listed.models.length} ${listed.models.length === 1 ? "model" : "models"}${listed.fetched_at ? ` · updated ${when(listed.fetched_at)}` : ""}`
+                                : ""}
+                    </span>
                     {listed && listed.source !== "fixed" && (
-                      <Button kind="secondary" small className="ad-models-refresh" onClick={() => readModels(true)} disabled={modelsBusy}>
+                      <Button kind="link" className="ad-models-refresh" onClick={() => readModels(true)} disabled={modelsBusy}>
                         Refresh
                       </Button>
                     )}
-                  </span>
+                  </div>
                 )}
-                <span className="nd-note">
-                  {access?.kind !== "openrouter" && access?.any_model ? (
-                    <>Empty uses {hName}&apos;s default.</>
-                  ) : (
-                    <>
-                      What {hName} offers here
-                      {access?.any_model ? ", or any OpenRouter model id" : ""}.
-                    </>
-                  )}
-                </span>
-              </label>
-              <label>
+              </div>
+              {modelRequired && optionsToggle}
+              <label id="ad-name" hidden={signingIn || !showOptions}>
                 <span>Name</span>
                 <input
                   name="name"
@@ -430,12 +481,14 @@ export const AgentsDialog: React.FC<AgentsDialogProps> = ({
                   autoComplete="off"
                 />
               </label>
-              {error && <Notice kind="error">{error}</Notice>}
-              <DialogActions>
-                <Button kind="primary" type="submit" className="ad-save" disabled={busy || !form.harness || !form.access}>
-                  {busy ? "Saving…" : editing ? "Save" : "Create agent"}
-                </Button>
-              </DialogActions>
+              <div hidden={signingIn}>
+                {error && <Notice kind="error">{error}</Notice>}
+                <DialogActions>
+                  <Button kind="primary" type="submit" className="ad-save" disabled={busy || !form.harness || !form.access}>
+                    {busy ? "Saving…" : editing ? "Save" : "Create agent"}
+                  </Button>
+                </DialogActions>
+              </div>
             </fieldset>
           </form>
         )}

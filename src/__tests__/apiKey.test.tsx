@@ -7,7 +7,7 @@ import { AgentsDialog } from '../components/AgentsDialog';
 import { signInOf } from '../components/SignInDot';
 import { LiveDataSource } from '../data/LiveDataSource';
 import { Harness, SubscriptionList } from '../types';
-import { click, flush, render } from './helpers';
+import { choose, click, flush, render, selectIn } from './helpers';
 
 // Fake keys: no one's credential.
 const FAKE_ANTH = 'sk-ant-api03-fake0000111122223333';
@@ -103,13 +103,13 @@ describe('The API key agent form', () => {
       <AgentsDialog loadHarnesses={async () => harnesses} createAgent={createAgent} updateAgent={vi.fn()} onClose={() => undefined} subscriptions={f.api} />,
     );
     await flush();
-    await click(container.querySelector('[data-access="api"]'));
+    await choose(container, 'access', 'api');
     await flush();
     expect(container.querySelector('.key-row[data-harness="anthropic"]')).not.toBeNull();
     // The access choice reads only "API key"; the row and note say whose.
-    expect(container.querySelector('[data-access="api"]')?.textContent).toBe('API key');
+    expect(selectIn(container, 'access')?.textContent).toBe('API key');
     expect(container.textContent).toContain('AgentBus adds your Anthropic API key');
-    expect((container.querySelector('input[name="model"]') as HTMLInputElement).value).toBe('');
+    expect(selectIn(container, 'model')?.textContent).toBe('Default');
     await act(async () => {
       (container.querySelector('form.agent-form') as HTMLFormElement).requestSubmit();
     });
@@ -141,7 +141,7 @@ describe('The models of an API key agent', () => {
       <AgentsDialog loadHarnesses={async () => harnesses} loadModels={loadModels} createAgent={vi.fn()} updateAgent={vi.fn()} onClose={() => undefined} subscriptions={f.api} />,
     );
     await flush();
-    await click(container.querySelector('[data-access="api"]'));
+    await choose(container, 'access', 'api');
     await flush();
     expect(loadModels).toHaveBeenCalledWith('claude', 'api', false);
     await click(container.querySelector('.key-set'));
@@ -215,7 +215,7 @@ describe('The provider agent form', () => {
       <AgentsDialog loadHarnesses={async () => harnesses} createAgent={createAgent} updateAgent={vi.fn()} onClose={() => undefined} subscriptions={f.api} />,
     );
     await flush();
-    await click(container.querySelector('[data-access="xai"]'));
+    await choose(container, 'access', 'xai');
     await flush();
     expect(container.querySelector('.key-row[data-harness="xai"]')).not.toBeNull();
     expect(container.textContent).toContain('xAI API key');

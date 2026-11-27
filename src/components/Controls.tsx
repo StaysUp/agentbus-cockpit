@@ -194,7 +194,7 @@ export const Select: React.FC<{
         {variant !== 'icon' && <span className="cs-v">{chosen ? chosen.label : (placeholder ?? '')}</span>}
         <DownIcon />
       </button>
-      {open && btn.current && (
+      {open && !disabled && btn.current && (
         <Menu
           anchor={btn.current}
           label={label}

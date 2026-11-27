@@ -79,6 +79,27 @@ describe('Dialog', () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
+  it('keeps forward and reverse Tab inside from programmatically focused status text', async () => {
+    const r = await render(
+      <Dialog title="Connect" onClose={() => {}}>
+        <span tabIndex={-1} role="status">Preparing sign-in…</span>
+        <button>First action</button>
+        <button>Back to setup</button>
+      </Dialog>,
+    );
+    const dialog = r.container.querySelector('[role="dialog"]')!;
+    const status = dialog.querySelector<HTMLElement>('[role="status"]')!;
+    const [first, last] = dialog.querySelectorAll('button');
+    for (const button of [first, last]) Object.defineProperty(button, 'offsetParent', { value: dialog });
+    for (const [shiftKey, target] of [[false, first], [true, last]] as const) {
+      await act(async () => {
+        status.focus();
+        status.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', shiftKey, bubbles: true, cancelable: true }));
+      });
+      expect(document.activeElement).toBe(target);
+    }
+  });
+
   it('a dialog opened over another closes alone on Esc, and focus goes back', async () => {
     const Two: React.FC = () => {
       const [outer, setOuter] = useState(true);
