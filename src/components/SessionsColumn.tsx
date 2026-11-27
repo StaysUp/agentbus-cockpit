@@ -139,15 +139,19 @@ export const SessionsColumn: React.FC<SessionsColumnProps> = ({
               {isEditing ? (
                 <TitleEdit title={s.title} onSave={(t) => onRename!(s.id, t)} onDone={() => setEditing(null)} />
               ) : isSelected && onRename ? (
-                <span className="s-tt s-tt-edit" title="Rename" onClick={() => setEditing(s.id)}>
-                  {s.title}
+                <>
+                  <span className="s-tt s-tt-edit" title={s.title} onClick={() => setEditing(s.id)}>
+                    {s.title}
+                  </span>
                   {statusIcons}
-                </span>
+                </>
               ) : (
-                <span className="s-tt">
-                  {s.title}
+                <>
+                  <span className="s-tt" title={s.title}>
+                    {s.title}
+                  </span>
                   {statusIcons}
-                </span>
+                </>
               )}
               {/* A new session's row says $0 before its first reply is priced; show nothing until one is. */}
               {status && formatCost(s.cost_usd) && !(s.cost_usd === 0 && status.costUsd === null) ? (

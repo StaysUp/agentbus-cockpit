@@ -36,4 +36,11 @@ describe('narrow.css', () => {
   it('no rule above 1200px', () => {
     expect(css).not.toMatch(/min-width:\s*(1[2-9]\d\d|[2-9]\d\d\d)px/);
   });
+
+  it('session titles truncate to one line with an ellipsis and stay within their row', () => {
+    const appCss = readFileSync(new URL('../styles/app.css', import.meta.url), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+    expect(appCss).toMatch(/\.sess-row\s*\{[^}]*min-width:\s*0/);
+    expect(appCss).toMatch(/\.sess\s*\{[^}]*min-width:\s*0[^}]*box-sizing:\s*border-box/);
+    expect(appCss).toMatch(/#sessions \.s-tt\s*\{[^}]*min-width:\s*0[^}]*white-space:\s*nowrap[^}]*overflow:\s*hidden[^}]*text-overflow:\s*ellipsis/);
+  });
 });
