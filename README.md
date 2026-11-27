@@ -71,6 +71,12 @@ button for it, so people using the cockpit never land there.
 
 ## Using it
 
+- **Guide** (in the foot nav, or from an empty Agents column) walks through the setup: add your
+  agents, connect a sign-in or key, bring your config if you want it, start a session, and ask a
+  second agent to check the work. A step is marked done from what the cockpit already reads, so the
+  guide never asks you to repeat something it can see. A first visit with no agents and no sessions
+  asks once whether to open it; a step that takes you to another screen leaves a way back with the
+  progress so far at the foot of the window.
 - **An agent is a saved setup**: a harness (Claude Code, Codex or Antigravity), how it reaches a
   model (a subscription connected in Settings, or the OpenRouter key set in Settings), the
   model and a name. "+ Agent" makes one. A subscription agent starts with no model,

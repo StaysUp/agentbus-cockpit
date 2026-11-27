@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { LayoutGrid, MessageSquare, Monitor, Server, Settings } from 'lucide-react';
+import { BookOpen, LayoutGrid, MessageSquare, Monitor, Server, Settings } from 'lucide-react';
 import { follow, PAGE_PATHS, type Page } from '../page';
 import { FeedbackDialog } from './FeedbackDialog';
 
@@ -9,6 +9,7 @@ interface FootNavProps {
   // Each target opens its page; absent means the source does not have it, so
   // the row is not shown. onCockpit is the way back from a page.
   onCockpit?: () => void;
+  onGuide?: () => void;
   onApps?: () => void;
   onRunners?: () => void;
   onSettings?: () => void;
@@ -22,20 +23,22 @@ interface FootNavProps {
 // Each page's icon, before its name in the foot nav.
 const NAV_ICONS: Partial<Record<Page, typeof Server>> = {
   cockpit: Monitor,
+  guide: BookOpen,
   apps: LayoutGrid,
   runners: Server,
   settings: Settings,
 };
 
 // FootNav is the one foot nav list, the same rows in the same order on the
-// cockpit and on every page: Cockpit, Apps, Runners, Settings, Feedback. The page you
-// are on stays in its place, marked as current rather than left out, so nothing
-// moves. A page the source does not have is the only row not shown. Feedback
-// opens a small box rather than a page; this owns that box, so the cockpit and
-// the pages both open it the same way.
+// cockpit and on every page: Cockpit, Guide, Apps, Runners, Settings, Feedback.
+// The page you are on stays in its place, marked as current rather than left
+// out, so nothing moves. A page the source does not have is the only row not
+// shown. Feedback opens a small box rather than a page; this owns that box, so
+// the cockpit and the pages both open it the same way.
 export const FootNav: React.FC<FootNavProps> = ({
   current,
   onCockpit,
+  onGuide,
   onApps,
   onRunners,
   onSettings,
@@ -75,6 +78,7 @@ export const FootNav: React.FC<FootNavProps> = ({
     <>
       <nav className="side-links" aria-label="Pages">
         {row('cockpit', 'Cockpit', onCockpit)}
+        {row('guide', 'Guide', onGuide)}
         {row('apps', 'Apps', onApps)}
         {row('runners', 'Runners', onRunners, online)}
         {row('settings', 'Settings', onSettings)}

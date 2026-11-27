@@ -3,10 +3,11 @@
 // Back, reload and a bookmark all work; vite serves index.html for each.
 import { useCallback, useEffect, useRef, useState, type MouseEvent } from 'react';
 
-export type Page = 'cockpit' | 'apps' | 'runners' | 'settings';
+export type Page = 'cockpit' | 'guide' | 'apps' | 'runners' | 'settings';
 
 export const PAGE_PATHS: Record<Page, string> = {
   cockpit: '/',
+  guide: '/guide',
   apps: '/apps',
   runners: '/runners',
   settings: '/settings',
@@ -15,6 +16,7 @@ export const PAGE_PATHS: Record<Page, string> = {
 // pageOf is the page at path; any other path is the cockpit.
 export function pageOf(path: string): Page {
   const p = path.replace(/\/+$/, '');
+  if (p === '/guide') return 'guide';
   if (p === '/apps') return 'apps';
   if (p === '/runners') return 'runners';
   if (p === '/settings') return 'settings';

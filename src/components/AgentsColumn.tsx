@@ -23,6 +23,8 @@ interface AgentsColumnProps {
   onAddAgent?: () => void;
   onEditAgent?: (agent: SavedAgent) => void;
   onRemoveAgent?: (agentId: string) => Promise<void>;
+  // Given only when the cockpit has the guide: opens the setup walkthrough.
+  onGuide?: () => void;
   // Given only when the source lists runners (GET /api/v0/runners): opens
   // the Runners page. runnersOnline is how many are online; undefined
   // before the first read.
@@ -57,6 +59,7 @@ export const AgentsColumn: React.FC<AgentsColumnProps> = ({
   onAddAgent,
   onEditAgent,
   onRemoveAgent,
+  onGuide,
   onRunners,
   runnersOnline,
   onApps,
@@ -84,7 +87,14 @@ export const AgentsColumn: React.FC<AgentsColumnProps> = ({
       </header>
       <div className="colbody">
         {agents.length === 0 && (
-          <p className="empty agents-empty">No agents yet.</p>
+          <div className="empty agents-empty">
+            <p>No agents yet.</p>
+            {onGuide && (
+              <Button kind="link" className="agents-guide" onClick={onGuide}>
+                Open the setup guide
+              </Button>
+            )}
+          </div>
         )}
         {agents.map((a) => {
           const isSelected = selectedAgentId === a.id;
@@ -152,6 +162,7 @@ export const AgentsColumn: React.FC<AgentsColumnProps> = ({
           On the cockpit the Cockpit row is left out — you are on it. */}
       <ColumnFoot
         current="cockpit"
+        onGuide={onGuide}
         onApps={onApps}
         onRunners={onRunners}
         onSettings={onSettings}
