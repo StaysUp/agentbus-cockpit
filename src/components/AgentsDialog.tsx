@@ -33,8 +33,12 @@ interface AgentsDialogProps {
 }
 
 // What a harness, an access and a model are called on screen.
-export const accessText = (a: { access: string; key_env?: string }): string =>
-  a.access === "subscription"
+// An access the cockpit does not name (a provider, such as xai) shows as the
+// API gives it; a missing one shows as nothing.
+export const accessText = (a: { access?: string; key_env?: string }): string =>
+  !a.access
+    ? ""
+    : a.access === "subscription"
     ? "subscription"
     : a.access === "openrouter"
       ? a.key_env && a.key_env !== "OPENROUTER_API_KEY"
@@ -46,7 +50,8 @@ export const accessText = (a: { access: string; key_env?: string }): string =>
 
 export function agentLine(a: SavedAgent, harnesses?: Harness[]): string {
   const h = harnesses?.find((x) => x.name === a.harness);
-  return `${harnessName(a.harness, h?.label)} · ${a.model || "default model"} · ${accessText(a)}`;
+  // A part with no value is left out, never shown as "undefined".
+  return [harnessName(a.harness, h?.label), a.model || "default model", accessText(a)].filter((x) => !!x).join(" · ");
 }
 
 interface FormState {
