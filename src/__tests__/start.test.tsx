@@ -2558,7 +2558,11 @@ describe('Several folders', () => {
     const dialog = r.container.querySelector('.new-dialog')!;
     const picks = () => Array.from(dialog.querySelectorAll('.nd-recent button')) as HTMLButtonElement[];
     await click(picks()[0]);
+    await click(dialog.querySelector('[data-start="local"]'));
+    expect(dialog.querySelector('input[name="base"]')).not.toBeNull();
     await click(dialog.querySelector('button.nd-add-folder') as HTMLButtonElement);
+    expect(dialog.querySelector('[data-start="local"]')).toBeNull();
+    expect(dialog.querySelector('input[name="base"]')).toBeNull();
     expect(dialog.querySelector('input[name="folder-2"]')).not.toBeNull();
     expect(mode(dialog, 'direct').disabled).toBe(true);
     // An empty second row stops Start and says so.
