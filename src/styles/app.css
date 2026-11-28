@@ -1336,8 +1336,6 @@ input:not([type="checkbox"]):not([type="radio"]):focus-visible, textarea:focus-v
 .rn-workspaces .ws-id { font-size: var(--fs-s); }
 .rn-workspaces .ws-state { white-space: nowrap; color: var(--ink2); }
 .rn-workspaces .ws-state.st-closing { color: var(--amber); }
-.rn-workspaces tr.ws-gone td { color: var(--ink3); }
-.ws-show-closed { margin-top: 0.5rem; }
 
 /* An asked-work line names the asked session first. */
 .m-asked .asked-title { font-weight: 600; color: var(--ink2); }

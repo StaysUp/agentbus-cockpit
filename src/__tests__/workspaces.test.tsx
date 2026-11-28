@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RunnersPage } from '../components/RunnersPage';
-import { CLOSE_WAITING, hasUnapplied, UNAPPLIED, WorkspacesApi, workspaceState } from '../components/Workspaces';
+import { CLOSE_WAITING, hasUnapplied, UNAPPLIED, WorkspacesApi } from '../components/Workspaces';
 import { LiveDataSource } from '../data/LiveDataSource';
 import { CloseState, RunnerInfo, WorkspaceRow } from '../types';
 import type { WorkspaceOutcome } from '../data/outcome';
@@ -87,7 +87,7 @@ describe('workspaces on a runner’s page', () => {
     expect(row(r.container, 'ws_two').querySelector('.ws-age')!.textContent).toBe('1 hour ago');
   });
 
-  it('names each workspace’s task (its session’s title), its id and its state: open, closing, closed, put away', async () => {
+  it('names each workspace’s task (its session’s title), its id and its state (open or closing); closed and put-away ones never show, and there is no toggle for them', async () => {
     const more: WorkspaceRow[] = [
       ...rows,
       ws({ workspace: 'ws_away', machine: 'con_aaaaaaaaaaaaaaaa', folder: '/Users/p/away', closed: ago(30),
@@ -103,18 +103,14 @@ describe('workspaces on a runner’s page', () => {
     expect(cell('ws_local', '.ws-task')).toBe('No session yet');
     expect(cell('ws_new', '.ws-id')).toBe('ws_new');
     expect(cell('ws_new', '.ws-state')).toBe('open');
-    // Closed and put-away copies wait behind Show closed, newest removal first.
+    // Closed and put-away copies are never listed, and nothing offers to show them.
     expect(ids(r.container)).toEqual(['ws_new', 'ws_local', 'ws_old']);
-    await click([...r.container.querySelectorAll('button')].find((b) => b.textContent === 'Show closed (2)'));
-    expect(ids(r.container)).toEqual(['ws_new', 'ws_local', 'ws_old', 'ws_closed', 'ws_away']);
-    expect(cell('ws_closed', '.ws-state')).toBe('closed');
-    expect(cell('ws_away', '.ws-state')).toBe('put away');
-    expect(row(r.container, 'ws_away').querySelector('.ws-close')).toBeNull();
+    expect(r.container.querySelector('[data-workspace="ws_closed"], [data-workspace="ws_away"]')).toBeNull();
+    expect([...r.container.querySelectorAll('button')].some((b) => /closed/i.test(b.textContent ?? ''))).toBe(false);
     // Close: closing until it runs.
     await click(row(r.container, 'ws_old').querySelector('.ws-close'));
     await flush();
     expect(cell('ws_old', '.ws-state')).toBe('closing');
-    expect(workspaceState(more[3])).toBe('closed');
   });
 
   it('gives a runner with no open workspaces no table', async () => {

@@ -81,7 +81,7 @@ export const RunnersPage: React.FC<RunnersPageProps> = ({ runners, error, pendin
   const wsOf = (r: RunnerInfo): WorkspaceRow[] => (ws.rows ?? []).filter(onMachine(r));
   // A machine's queued and running commands: those whose workspace is on it.
   const cmdsOf = (r: RunnerInfo): ApiCommand[] => {
-    const here = new Set([...(ws.rows ?? []), ...ws.closedRows].filter(onMachine(r)).map((w) => w.workspace));
+    const here = new Set((ws.rows ?? []).filter(onMachine(r)).map((w) => w.workspace));
     return (commands ?? []).filter((c) => !commandEnded(c) && here.has(c.workspace));
   };
   const after = () => {
@@ -121,7 +121,7 @@ export const RunnersPage: React.FC<RunnersPageProps> = ({ runners, error, pendin
             onDone={after}
             commands={commands && { list: cmdsOf(shown), taskOf, stop: onStopCommand }}
             workspaces={
-              workspaces && { rows: wsOf(shown), closedRows: ws.closedRows.filter(onMachine(shown)), taskOf, error: ws.error, folders, close: workspaces.close, closing: ws.closing, stalled: ws.stalled, onClosing: ws.onClosing, outcome: workspaces.outcome, onClosed: ws.onClosed }
+              workspaces && { rows: wsOf(shown), taskOf, error: ws.error, folders, close: workspaces.close, closing: ws.closing, stalled: ws.stalled, onClosing: ws.onClosing, outcome: workspaces.outcome, onClosed: ws.onClosed }
             }
           />
         ) : (
@@ -260,7 +260,6 @@ interface RunnerWorkspaces {
   folders?: FolderInfo[];
   close: (workspace: string) => Promise<CloseState>;
   closing: ReadonlySet<string>;
-  closedRows?: WorkspaceRow[];
   taskOf?: (workspace: string) => string | undefined;
   stalled?: ReadonlyMap<string, number>;
   onClosing: (workspace: string) => void;
@@ -382,7 +381,7 @@ const RunnerDetail: React.FC<{
           <>
             {workspaces.error && <Notice kind="error">{workspaces.error}</Notice>}
             {commands && <CommandsTable commands={commands.list} taskOf={commands.taskOf} onStop={commands.stop} />}
-            <WorkspacesTable rows={workspaces.rows} closedRows={workspaces.closedRows} taskOf={workspaces.taskOf} folders={workspaces.folders} close={workspaces.close} closing={workspaces.closing} stalled={workspaces.stalled} onClosing={workspaces.onClosing} outcome={workspaces.outcome} onClosed={workspaces.onClosed} />
+            <WorkspacesTable rows={workspaces.rows} taskOf={workspaces.taskOf} folders={workspaces.folders} close={workspaces.close} closing={workspaces.closing} stalled={workspaces.stalled} onClosing={workspaces.onClosing} outcome={workspaces.outcome} onClosed={workspaces.onClosed} />
           </>
         )}
         {actions && !r.online && (
