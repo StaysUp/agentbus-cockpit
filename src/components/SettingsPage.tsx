@@ -141,6 +141,8 @@ const GROUPS: Group[] = [
     controls: [
       { key: "home_files", name: "Copied from your home", kind: { t: "list", placeholder: "~/.aws/config", mono: true },
         line: "Files and folders from your home, one per line, such as ~/.aws/config." },
+      { key: "carry_files", name: "Copied from your folder", kind: { t: "list", placeholder: ".env", mono: true },
+        line: "For a session that starts from a branch: files of your folder git ignores, one per line, such as .env or .env.*." },
     ],
     side: [
       "Use my config adds the usual config files found on the folder's machine. Look them over, then save.",

@@ -1,8 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { FolderInfo, lastMachine, lastSandbox, recentFolders, rememberSandbox } from '../data/folders';
-import { Harness, RunRequest, RunnerInfo, SavedAgent } from '../types';
+import { BranchList, BranchesRequest, Harness, RunRequest, RunnerInfo, SavedAgent } from '../types';
 import { agentLine } from './AgentsDialog';
-import { Button, Seg, Select } from './Controls';
+import { Button, Combo, Seg, Select } from './Controls';
 import { Dialog, DialogActions } from './Dialog';
 import { CloseIcon, PlusIcon } from './Icons';
 import { Notice, WithCode } from './Notice';
@@ -28,6 +28,9 @@ interface NewSessionDialogProps {
   // the machine picked, in a folder on it. Empty or absent: a service that
   // names no machine, where the folder is a path on the one AgentBus runs on.
   machines?: RunnerInfo[];
+  // Lists the branches of the folder's repo, or of its remote, for the
+  // Start from pickers. Absent: the branch is typed.
+  listBranches?: (req: BranchesRequest) => Promise<BranchList>;
 }
 
 // A refused typed folder, in plain words. The service's own text is written
@@ -75,6 +78,7 @@ export const NewSessionDialog: React.FC<NewSessionDialogProps> = ({
   onAddAgent,
   folders: allFolders = [],
   machines = [],
+  listBranches,
 }) => {
   const [agents, setAgents] = useState<SavedAgent[] | null>(null);
   const [harnesses, setHarnesses] = useState<Harness[] | undefined>(undefined);
@@ -173,6 +177,22 @@ export const NewSessionDialog: React.FC<NewSessionDialogProps> = ({
   // run in a copy of the folder whose changes you apply. Off: the agent works
   // in the folder as it is.
   const [sandbox, setSandbox] = useState(lastSandbox);
+  // Where a Copy session starts: the folder as it is (the default), or a git
+  // base of the folder's repo -- a local branch, tag or commit, or a branch
+  // fetched from a remote first. The service resolves it when the workspace
+  // is made, so a name it cannot find is refused here, on the form.
+  const [start, setStart] = useState<'folder' | 'local' | 'remote'>('folder');
+  const [base, setBase] = useState('');
+  const [remote, setRemote] = useState('');
+  // What the folder's machine listed for the folder picked: the remotes, and
+  // the branches of the repo or of the remote picked.
+  const [listed, setListed] = useState<BranchList | null>(null);
+  const [listing, setListing] = useState(false);
+  const [listError, setListError] = useState<string | null>(null);
+  const listedAt = useRef('');
+  // The folder field: the branch pickers send the person to it while no
+  // folder is picked, since the branches are that folder's.
+  const folderInput = useRef<HTMLInputElement>(null);
   const [starting, setStarting] = useState(false);
   // Start was pressed with something missing: the missing field says so.
   const [tried, setTried] = useState(false);
@@ -212,7 +232,75 @@ export const NewSessionDialog: React.FC<NewSessionDialogProps> = ({
   const mixed = several && rowMachines.size > 1;
   const rowsOk = !twice && !mixed;
   const machineOk = !byMachine || (!!picked && picked.online);
-  const ready = agent !== '' && hasWhere && rowsOk && machineOk && !starting;
+  const fromBase = sandbox && !several && start !== 'folder';
+  // The folder as the service takes it: a listed one by reference, or a
+  // typed path on the machine picked.
+  const folderAt = (): Pick<RunRequest, 'folder' | 'folder_ref' | 'machine'> | null => {
+    const where = wheres[0];
+    if (!where || several) return null;
+    if ('ref' in where) return { folder_ref: where.ref, machine: where.machine };
+    const p = where.path.trim();
+    return p === '' ? null : { folder: p, ...(byMachine ? { machine } : {}) };
+  };
+  const at = folderAt();
+  const atKey = at ? JSON.stringify(at) : '';
+  // Another folder has its own remotes: the remote is picked again.
+  useEffect(() => {
+    setRemote('');
+    setBase('');
+  }, [atKey]);
+  // List the branches once a folder is picked and a branch start is chosen:
+  // the repo's own for a local branch; for a remote branch, the remote's,
+  // after the repo's own call has named its remotes. A typed path waits until
+  // typing stops.
+  useEffect(() => {
+    if (!fromBase || !listBranches || !at) {
+      setListed(null);
+      setListError(null);
+      return;
+    }
+    const want = start === 'remote' ? remote : '';
+    let active = true;
+    // Only a path still being typed waits; another remote of the same
+    // folder lists at once.
+    const wait = at.folder && listedAt.current !== atKey ? 400 : 0;
+    const t = setTimeout(
+      async () => {
+        listedAt.current = atKey;
+        setListing(true);
+        setListError(null);
+        try {
+          const list = await listBranches({ ...at, ...(want ? { remote: want } : {}) });
+          if (!active) return;
+          setListed(list);
+          if (start === 'remote' && !want && list.remotes.length > 0) {
+            setRemote(list.remotes.includes('origin') ? 'origin' : list.remotes[0]);
+          }
+        } catch (err) {
+          if (!active) return;
+          setListed(null);
+          const msg = (err as Error).message;
+          setListError((at.folder && folderRefusal(msg)) || msg);
+        } finally {
+          if (active) setListing(false);
+        }
+      },
+      wait
+    );
+    return () => {
+      active = false;
+      clearTimeout(t);
+    };
+    // at is derived from the first folder and machine; atKey stands for it.
+  }, [fromBase, start, remote, atKey, listBranches]);
+  // The branches the list shows: the repo's own while a local branch is
+  // chosen, the remote's while that remote is.
+  const shownList = listed && (start === 'remote' ? listed.remote === remote && remote !== '' : !listed.remote) ? listed : null;
+  const branchNames = shownList?.branches.map((b) => b.name) ?? [];
+  const branchLabels: Record<string, string> = {};
+  if (shownList?.current) branchLabels[shownList.current] = `${shownList.current} (checked out)`;
+  const baseOk = !fromBase || (base.trim() !== '' && (start !== 'remote' || remote.trim() !== ''));
+  const ready = agent !== '' && hasWhere && rowsOk && machineOk && baseOk && !starting;
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -232,8 +320,11 @@ export const NewSessionDialog: React.FC<NewSessionDialogProps> = ({
         : 'ref' in one
           ? { folder_ref: one.ref, machine: one.machine }
           : { folder: one.path.trim(), ...(byMachine ? { machine: machine } : {}) };
+      const from = fromBase
+        ? { base: base.trim(), ...(start === 'remote' ? { remote: remote.trim() } : {}) }
+        : {};
       rememberSandbox(sandbox);
-      await onStart({ agent, ...at, sandbox, prompt: prompt.trim() === '' ? '' : prompt }, name.trim() || undefined);
+      await onStart({ agent, ...at, sandbox, ...from, prompt: prompt.trim() === '' ? '' : prompt }, name.trim() || undefined);
     } catch (err) {
       const msg = (err as Error).message;
       setError((wheres.some((w) => w && 'path' in w) && folderRefusal(msg)) || msg);
@@ -412,6 +503,92 @@ export const NewSessionDialog: React.FC<NewSessionDialogProps> = ({
               : 'Works in your folder as it is — no copy to apply.'}
           </div>
         </label>
+        {sandbox && !several && (
+          <label className="nd-start">
+            <span>Start from</span>
+            <Seg
+              label="Where the session starts from"
+              dataKey="start"
+              value={start}
+              options={[
+                { value: 'folder', label: 'Folder as it is' },
+                { value: 'local', label: 'Local branch' },
+                { value: 'remote', label: 'Remote branch' },
+              ]}
+              onChange={(v) => {
+                setStart(v as 'folder' | 'local' | 'remote');
+                setBase('');
+              }}
+            />
+            {start === 'folder' && (
+              <div className="nd-note">The copy has your folder exactly as it is, uncommitted edits included.</div>
+            )}
+          </label>
+        )}
+        {fromBase && !at && (
+          <div className="nd-base">
+            <button type="button" className="nd-need-folder" onClick={() => folderInput.current?.focus()}>
+              Pick a folder above: its {start === 'remote' ? "remotes and their branches" : 'branches'} are listed here.
+            </button>
+          </div>
+        )}
+        {fromBase && at && (
+          <div className="nd-base">
+            {start === 'remote' && (
+              <label>
+                <span>Remote</span>
+                <Select
+                  name="remote"
+                  label="Remote"
+                  value={remote}
+                  disabled={!listed || listed.remotes.length === 0}
+                  placeholder={listing && !listed ? LOADING : listError ? '' : 'This repo has no remotes'}
+                  options={(listed?.remotes ?? []).map((r) => ({ value: r, label: r }))}
+                  onChange={(v) => {
+                    setRemote(v);
+                    setBase('');
+                  }}
+                />
+              </label>
+            )}
+            <label>
+              <span>{start === 'remote' ? 'Branch' : 'Branch, tag or commit'}</span>
+              <Combo
+                name="base"
+                label={start === 'remote' ? 'Branch' : 'Branch, tag or commit'}
+                value={base}
+                suggestions={branchNames}
+                labels={branchLabels}
+                onChange={setBase}
+                placeholder={
+                  listing
+                    ? LOADING
+                      : start === 'remote'
+                        ? 'Search the remote\'s branches'
+                        : 'Search branches, or type a tag or commit id'
+                }
+                className={tried && base.trim() === '' ? 'invalid' : undefined}
+              />
+            </label>
+            {listError && <Notice kind="error" className="nd-branches-error">{listError}</Notice>}
+            {shownList?.stale && (
+              <div className="nd-note">
+                {remote} could not be reached: these are the branches last fetched from it, which may be behind.
+              </div>
+            )}
+            {tried && !baseOk && (
+              <Notice kind="error" className="nd-missing">
+                {start === 'remote' ? 'Name the remote and the branch to start from.' : 'Name the branch, tag or commit to start from.'}
+              </Notice>
+            )}
+            <div className="nd-note">
+              {start === 'remote'
+                ? 'Fetched from the remote when the session starts, so it has what the remote has now. Your folder and its branch do not change.'
+                : 'Starts from that commit as your repo has it. Your uncommitted edits are not in it, and your folder does not change.'}{' '}
+              Files git ignores, such as .env, come along only when Settings, Config, Copied from your folder names them.
+            </div>
+          </div>
+        )}
         <label>
           <span>Name (optional)</span>
           <input

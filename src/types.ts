@@ -381,6 +381,12 @@ export interface RunRequest {
   // changes are applied on request. False: the agent works in the folder as it
   // is. The workspace's one mode, set when it is created.
   sandbox?: boolean;
+  // Where a sandbox workspace starts, when not the folder as it is: a branch,
+  // tag or commit of the folder's git repo (base), fetched first from remote
+  // when that is set. Resolved by the folder's machine when the workspace is
+  // made.
+  base?: string;
+  remote?: string;
   // The session's name, set on POST /api/v0/sessions. Absent leaves the first
   // message as its title.
   title?: string;
@@ -437,6 +443,26 @@ export interface CloseState {
   event?: string;
   already?: boolean;
   error?: string;
+}
+
+// POST /api/v0/folders/branches: which folder, and optionally which remote.
+export interface BranchesRequest {
+  folder?: string;
+  folder_ref?: string;
+  machine?: string;
+  remote?: string;
+}
+
+// Its answer: the repo's remotes, and the branches of the repo (current is
+// the one checked out) or of the remote named. stale: the remote could not be
+// reached, so these are the ones last fetched from it.
+export interface BranchList {
+  remotes: string[];
+  remote?: string;
+  current?: string;
+  branches: { name: string; commit: string }[];
+  stale?: boolean;
+  truncated?: boolean;
 }
 
 // GET /api/v0/turns/<id>/diff, as the cockpit reads it: what one turn
@@ -930,6 +956,10 @@ export interface DataSource {
   // startInWorkspace makes the session and its first turn in a workspace
   // createWorkspace already made, so the folder is never re-checked there.
   createWorkspace?(req: RunRequest): Promise<string>;
+  // POST /api/v0/folders/branches: the git branches a workspace may start
+  // from, listed by the folder's machine -- the repo's own, or with remote
+  // the ones that remote has now.
+  listBranches?(req: BranchesRequest): Promise<BranchList>;
   startInWorkspace?(workspace: string, req: RunRequest): Promise<Started>;
   // agent names a saved agent: the turn runs on it, in the session's folder.
   sendMessage?(

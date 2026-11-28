@@ -112,6 +112,8 @@ function fakeService(opts: {
   // POST /workspaces: the first of the three calls. Without it, a workspace
   // ws_new1 is made from the body.
   workspaces?: (body: unknown) => Response | Promise<Response>;
+  // POST /folders/branches: the branch pickers' lists. Without it, 404.
+  branches?: (body: { folder?: string; folder_ref?: string; machine?: string; remote?: string }) => Response | Promise<Response>;
   // POST /sessions: the second call. Without it, session 'new1' is made.
   makeSession?: (body: { workspace?: string; title?: string }) => Response | Promise<Response>;
   // POST /turns with session: a session's next turn.
@@ -187,6 +189,7 @@ function fakeService(opts: {
     // A new session is three calls: POST /workspaces, POST /sessions, then
     // POST /turns with the created session. The workspace owns the folder and
     // the mode; the first turn of a fresh session names 'new1'.
+    if (p === '/api/v0/folders/branches' && method === 'POST' && opts.branches) return opts.branches(body);
     if (p === '/api/v0/workspaces' && method === 'POST') {
       if (opts.workspaces) return opts.workspaces(body);
       const b = body as { folder?: string; folder_ref?: string; machine?: string; sandbox?: boolean };
@@ -538,6 +541,202 @@ describe('The mode selector', () => {
     await submitForm(dialog);
     expect(workspaceBody(svc)).toEqual({ folder: '/Users/ana/x', sandbox: false });
     expect(localStorage.getItem('agentbus.sandbox')).toBe('0');
+    r.unmount();
+  });
+
+  const startAt = (dialog: Element, v: string) => dialog.querySelector(`[data-start="${v}"]`) as HTMLButtonElement;
+  // A typed folder's branches are listed once typing stops.
+  const typingStops = () => act(async () => void (await new Promise((r) => setTimeout(r, 450))));
+  const branchPosts = (svc: { reqs: Req[] }) =>
+    svc.reqs.filter((q) => q.method === 'POST' && q.path === '/api/v0/folders/branches').map((q) => q.body);
+  // The branch picker's suggestions, as its open list shows them.
+  const suggested = async (dialog: Element) => {
+    await click(dialog.querySelector('input[name="base"]'));
+    return Array.from(document.querySelectorAll('[role="listbox"] [role="option"]')).map((o) => o.getAttribute('data-value'));
+  };
+  const pickBranch = async (name: string) => {
+    const opt = document.querySelector(`[role="listbox"] [role="option"][data-value="${name}"]`);
+    if (!opt) throw new Error(`no branch ${name}`);
+    await click(opt);
+  };
+  const LOCAL = { remotes: ['origin', 'upstream'], current: 'main', branches: [
+    { name: 'main', commit: 'a'.repeat(40) }, { name: 'feature/login', commit: 'b'.repeat(40) }] };
+  const ORIGIN = { remotes: ['origin', 'upstream'], remote: 'origin', branches: [
+    { name: 'feature/login', commit: 'c'.repeat(40) }, { name: 'only-online', commit: 'd'.repeat(40) }, { name: 'main', commit: 'e'.repeat(40) }] };
+  const lists = (body: { remote?: string }) => json(body.remote === 'origin' ? ORIGIN : body.remote ? { ...ORIGIN, remote: body.remote, branches: [] } : LOCAL);
+
+  it('starts from the folder as it is by default: no base is sent and no branches are listed', async () => {
+    const svc = fakeService({ sessions: [row('s1')], events: { s1: oneTurn('s1', 'hi') }, agents: AGENTS, branches: lists });
+    const r = await mount(svc);
+    await click(r.container.querySelector('#sessions button.new-session'));
+    await settle();
+    const dialog = r.container.querySelector('.new-dialog')!;
+    expect(startAt(dialog, 'folder').getAttribute('aria-checked')).toBe('true');
+    expect(dialog.querySelector('input[name="base"]')).toBeNull();
+    await setValue(dialog.querySelector('input[name="folder"]'), '/Users/ana/x');
+    await typingStops();
+    expect(branchPosts(svc)).toEqual([]);
+    r.unmount();
+  });
+
+  it('a local branch is picked from the repo\'s own branches, searched, the checked-out one marked', async () => {
+    const svc = fakeService({ sessions: [row('s1')], events: { s1: oneTurn('s1', 'hi') }, agents: AGENTS, branches: lists });
+    const r = await mount(svc);
+    await click(r.container.querySelector('#sessions button.new-session'));
+    await settle();
+    const dialog = r.container.querySelector('.new-dialog')!;
+    await setValue(dialog.querySelector('input[name="folder"]'), '/Users/ana/x');
+    await click(startAt(dialog, 'local'));
+    await typingStops();
+    expect(branchPosts(svc)).toEqual([{ folder: '/Users/ana/x' }]);
+    expect(dialog.querySelector('select[name="remote"], button[name="remote"]')).toBeNull();
+    expect(await suggested(dialog)).toEqual(['main', 'feature/login']);
+    expect(document.querySelector('[role="option"][data-value="main"]')?.textContent).toContain('checked out');
+    // Typing searches the list.
+    await setValue(dialog.querySelector('input[name="base"]'), 'log');
+    expect(Array.from(document.querySelectorAll('[role="listbox"] [role="option"]')).map((o) => o.getAttribute('data-value'))).toEqual(['feature/login']);
+    await pickBranch('feature/login');
+    await setValue(dialog.querySelector('textarea[name="prompt"]'), 'go');
+    await submitForm(dialog);
+    expect(workspaceBody(svc)).toEqual({ folder: '/Users/ana/x', sandbox: true, base: 'feature/login' });
+    r.unmount();
+  });
+
+  it('a remote branch: the remote is picked from the repo\'s remotes (origin first), and its branch from what it has now', async () => {
+    const svc = fakeService({ sessions: [row('s1')], events: { s1: oneTurn('s1', 'hi') }, agents: AGENTS, branches: lists });
+    const r = await mount(svc);
+    await click(r.container.querySelector('#sessions button.new-session'));
+    await settle();
+    const dialog = r.container.querySelector('.new-dialog')!;
+    await setValue(dialog.querySelector('input[name="folder"]'), '/Users/ana/x');
+    await click(startAt(dialog, 'remote'));
+    await typingStops();
+    await settle();
+    // The repo's own call names the remotes; origin is picked, and listed.
+    expect(branchPosts(svc)).toEqual([{ folder: '/Users/ana/x' }, { folder: '/Users/ana/x', remote: 'origin' }]);
+    expect(await optionsOf(dialog, 'remote')).toEqual([['origin', 'origin', false], ['upstream', 'upstream', false]]);
+    expect(await suggested(dialog)).toEqual(['feature/login', 'only-online', 'main']);
+    await pickBranch('only-online');
+    await setValue(dialog.querySelector('textarea[name="prompt"]'), 'go');
+    await submitForm(dialog);
+    expect(workspaceBody(svc)).toEqual({ folder: '/Users/ana/x', sandbox: true, base: 'only-online', remote: 'origin' });
+    r.unmount();
+  });
+
+  it('a remote that cannot be reached says its branches may be behind', async () => {
+    const svc = fakeService({
+      sessions: [row('s1')], events: { s1: oneTurn('s1', 'hi') }, agents: AGENTS,
+      branches: (b) => json(b.remote ? { ...ORIGIN, stale: true } : LOCAL),
+    });
+    const r = await mount(svc);
+    await click(r.container.querySelector('#sessions button.new-session'));
+    await settle();
+    const dialog = r.container.querySelector('.new-dialog')!;
+    await setValue(dialog.querySelector('input[name="folder"]'), '/Users/ana/x');
+    await click(startAt(dialog, 'remote'));
+    await typingStops();
+    await settle();
+    expect(dialog.textContent).toContain('origin could not be reached: these are the branches last fetched from it, which may be behind.');
+    r.unmount();
+  });
+
+  it('a folder that is not a git repo says so under the picker', async () => {
+    const svc = fakeService({
+      sessions: [row('s1')], events: { s1: oneTurn('s1', 'hi') }, agents: AGENTS,
+      branches: () => json({ error: 'the folder is not in a git repo with a commit, so it cannot start from a base' }, 400),
+    });
+    const r = await mount(svc);
+    await click(r.container.querySelector('#sessions button.new-session'));
+    await settle();
+    const dialog = r.container.querySelector('.new-dialog')!;
+    await setValue(dialog.querySelector('input[name="folder"]'), '/Users/ana/x');
+    await click(startAt(dialog, 'local'));
+    await typingStops();
+    expect(dialog.querySelector('.nd-branches-error')?.textContent).toBe('the folder is not in a git repo with a commit, so it cannot start from a base');
+    r.unmount();
+  });
+
+  it('with no folder picked, a branch start sends the person to the folder field, and lists nothing', async () => {
+    const svc = fakeService({ sessions: [row('s1')], events: { s1: oneTurn('s1', 'hi') }, agents: AGENTS, branches: lists });
+    const r = await mount(svc);
+    await click(r.container.querySelector('#sessions button.new-session'));
+    await settle();
+    const dialog = r.container.querySelector('.new-dialog')!;
+    for (const pick of ['local', 'remote']) {
+      await click(startAt(dialog, pick));
+      expect(dialog.querySelector('input[name="base"]')).toBeNull();
+      const need = dialog.querySelector('.nd-need-folder') as HTMLButtonElement;
+      expect(need.textContent).toContain('Pick a folder above');
+      await click(need);
+      expect(document.activeElement).toBe(dialog.querySelector('input[name="folder"]'));
+    }
+    expect(branchPosts(svc)).toEqual([]);
+    // Once a folder is typed, its branches are listed and the picker is there.
+    await setValue(dialog.querySelector('input[name="folder"]'), '/Users/ana/x');
+    await typingStops();
+    await settle();
+    expect(dialog.querySelector('.nd-need-folder')).toBeNull();
+    expect(await suggested(dialog)).toEqual(['feature/login', 'only-online', 'main']);
+    r.unmount();
+  });
+
+  it('a tag or commit not in the list may still be typed', async () => {
+    const svc = fakeService({ sessions: [row('s1')], events: { s1: oneTurn('s1', 'hi') }, agents: AGENTS, branches: lists });
+    const r = await mount(svc);
+    await click(r.container.querySelector('#sessions button.new-session'));
+    await settle();
+    const dialog = r.container.querySelector('.new-dialog')!;
+    await setValue(dialog.querySelector('input[name="folder"]'), '/Users/ana/x');
+    await click(startAt(dialog, 'local'));
+    await typingStops();
+    await setValue(dialog.querySelector('input[name="base"]'), ' v1.2.3 ');
+    await setValue(dialog.querySelector('textarea[name="prompt"]'), 'go');
+    await submitForm(dialog);
+    expect(workspaceBody(svc)).toEqual({ folder: '/Users/ana/x', sandbox: true, base: 'v1.2.3' });
+    r.unmount();
+  });
+
+  it('a branch start waits for the branch name, and Direct has no start picker', async () => {
+    const svc = fakeService({ sessions: [row('s1')], events: { s1: oneTurn('s1', 'hi') }, agents: AGENTS, branches: lists });
+    const r = await mount(svc);
+    await click(r.container.querySelector('#sessions button.new-session'));
+    await settle();
+    const dialog = r.container.querySelector('.new-dialog')!;
+    await setValue(dialog.querySelector('input[name="folder"]'), '/Users/ana/x');
+    await click(startAt(dialog, 'local'));
+    await setValue(dialog.querySelector('textarea[name="prompt"]'), 'go');
+    await submitForm(dialog);
+    expect(svc.reqs.filter((q) => q.method === 'POST' && q.path === '/api/v0/workspaces')).toHaveLength(0);
+    expect(dialog.textContent).toContain('Name the branch, tag or commit to start from.');
+    await click(mode(dialog, 'direct'));
+    expect(startAt(dialog, 'local')).toBeNull();
+    expect(dialog.querySelector('input[name="base"]')).toBeNull();
+    await submitForm(dialog);
+    expect(workspaceBody(svc)).toEqual({ folder: '/Users/ana/x', sandbox: false });
+    r.unmount();
+  });
+
+  it('a base the folder\'s repo does not have is refused on the form, with the service\'s words', async () => {
+    const svc = fakeService({
+      sessions: [row('s1')],
+      events: { s1: oneTurn('s1', 'hi') },
+      agents: AGENTS,
+      branches: lists,
+      workspaces: () => json({ error: "base is not a branch, tag or commit in the folder's repo" }, 400),
+    });
+    const r = await mount(svc);
+    await click(r.container.querySelector('#sessions button.new-session'));
+    await settle();
+    const dialog = r.container.querySelector('.new-dialog')!;
+    await setValue(dialog.querySelector('input[name="folder"]'), '/Users/ana/x');
+    await click(startAt(dialog, 'local'));
+    await setValue(dialog.querySelector('input[name="base"]'), 'nope');
+    await submitForm(dialog);
+    await settle();
+    const back = r.container.querySelector('.new-dialog')!;
+    expect(back.querySelector('.form-error')?.textContent).toBe("base is not a branch, tag or commit in the folder's repo");
+    expect((back.querySelector('input[name="base"]') as HTMLInputElement).value).toBe('nope');
+    expect(sessionBody(svc)).toBeUndefined();
     r.unmount();
   });
 
@@ -2359,7 +2558,11 @@ describe('Several folders', () => {
     const dialog = r.container.querySelector('.new-dialog')!;
     const picks = () => Array.from(dialog.querySelectorAll('.nd-recent button')) as HTMLButtonElement[];
     await click(picks()[0]);
+    await click(dialog.querySelector('[data-start="local"]'));
+    expect(dialog.querySelector('input[name="base"]')).not.toBeNull();
     await click(dialog.querySelector('button.nd-add-folder') as HTMLButtonElement);
+    expect(dialog.querySelector('[data-start="local"]')).toBeNull();
+    expect(dialog.querySelector('input[name="base"]')).toBeNull();
     expect(dialog.querySelector('input[name="folder-2"]')).not.toBeNull();
     expect(mode(dialog, 'direct').disabled).toBe(true);
     // An empty second row stops Start and says so.

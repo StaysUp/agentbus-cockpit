@@ -40,6 +40,8 @@ import {
   AppSummary,
   AppDef,
   TurnText,
+  BranchesRequest,
+  BranchList,
 } from '../types';
 import { FolderInfo } from './folders';
 import { Compaction, ConfigFound, FoundPath, Policy, SettingsInfo, Versioned } from './settings';
@@ -714,9 +716,23 @@ export class LiveDataSource implements DataSource {
     if (req.machine) wsBody.machine = req.machine;
     // Sent explicitly, both ways, so the record carries the person's choice.
     wsBody.sandbox = req.sandbox !== false;
+    if (req.base) wsBody.base = req.base;
+    if (req.base && req.remote) wsBody.remote = req.remote;
     if (key) wsBody.idempotency_key = key;
     const ws = await this.send<{ workspace: string }>('POST', '/api/v0/workspaces', wsBody);
     return ws.workspace;
+  }
+
+  // POST /api/v0/folders/branches: the folder's machine lists the branches a
+  // workspace may start from. A typed folder is checked there too.
+  async listBranches(req: BranchesRequest): Promise<BranchList> {
+    const body: Record<string, unknown> = {};
+    if (req.folder_ref) body.folder_ref = req.folder_ref;
+    else if (req.folder) body.folder = req.folder;
+    if (req.machine) body.machine = req.machine;
+    if (req.remote) body.remote = req.remote;
+    const list = await this.send<BranchList>('POST', '/api/v0/folders/branches', body);
+    return { ...list, remotes: list.remotes ?? [], branches: list.branches ?? [] };
   }
 
   // POST /api/v0/sessions then POST /api/v0/turns in a workspace already made:
