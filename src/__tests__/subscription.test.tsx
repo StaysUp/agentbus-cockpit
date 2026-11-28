@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { act, StrictMode } from 'react';
 import { describe, expect, it, vi } from 'vitest';
-import { ConnectStep, SubscriptionApi } from '../components/ConnectStep';
+import { ConnectStep, pollMs, SubscriptionApi } from '../components/ConnectStep';
+import { AgentsDialog } from '../components/AgentsDialog';
 import { ConnectView, SubscriptionList } from '../types';
 import { connectView } from '../data/LiveDataSource';
 import { click, flush, render } from './helpers';
@@ -42,6 +43,286 @@ async function waitFor(ok: () => boolean, what: string) {
 }
 
 const phase = (root: HTMLElement) => root.querySelector('.connect-step')?.getAttribute('data-phase');
+
+describe('subscription sign-in in New agent', () => {
+  const url = 'https://auth.example/device';
+  const pending: ConnectView = { harness: 'codex', state: 'running', output: [url], code: 'DEMO-CODE', paste: false };
+  const loadHarnesses = async () => [{
+    name: 'codex', found: true,
+    access: [{ kind: 'subscription', label: 'ChatGPT subscription', models: [], any_model: true }],
+  }];
+
+  it('waits for the explicit sign-in action, checks on return and restores the edited form', async () => {
+    const tab = {
+      opener: window as Window | null,
+      document: document.implementation.createHTMLDocument(),
+    };
+    const navigate = vi.fn((event: MouseEvent) => event.preventDefault());
+    tab.document.body.addEventListener('click', navigate);
+    const open = vi.spyOn(window, 'open').mockReturnValue(tab as unknown as Window);
+    let finishCopy!: () => void;
+    const writeText = vi.fn((_code: string) => new Promise<void>((resolve) => { finishCopy = resolve; }));
+    vi.stubGlobal('navigator', Object.create(navigator, { clipboard: { value: { writeText } } }));
+    let started!: (v: ConnectView) => void;
+    let polled!: (v: ConnectView) => void;
+    const api: SubscriptionApi = {
+      ...fakeApi('codex', url),
+      connect: vi.fn(() => new Promise<ConnectView>((resolve) => { started = resolve; })),
+      get: vi.fn(() => new Promise<ConnectView>((resolve) => { polled = resolve; })),
+      cancel: vi.fn(async () => {}),
+    };
+    const view = await render(<AgentsDialog loadHarnesses={loadHarnesses} subscriptions={api}
+      createAgent={vi.fn()} updateAgent={vi.fn()} onClose={vi.fn()} />);
+    const { container } = view;
+    try {
+      await click(container.querySelector('.ad-options'));
+      await type(container.querySelector('input[name="name"]')!, 'Codex reviewer');
+      expect(container.querySelector('[aria-labelledby="ad-access-label"] .cs-connect')).not.toBeNull();
+      await click(container.querySelector('.cs-connect'));
+      expect(open).not.toHaveBeenCalled();
+      expect(container.querySelector('[role="dialog"]')?.getAttribute('aria-label')).toBe('Connect Codex');
+      expect(container.querySelector('[aria-labelledby="ad-access-label"]')).toBeNull();
+      expect(container.querySelector('.ad-save')?.closest('[hidden]')).not.toBeNull();
+      await act(async () => started({ ...pending, output: [], code: undefined }));
+      expect(container.querySelector('.cs-open')).toBeNull();
+      expect(container.querySelector('.cs-sign-in-footer .cs-cancel')?.textContent).toBe('Cancel sign-in');
+      await act(async () => { window.dispatchEvent(new Event('focus')); });
+      await act(async () => polled(pending));
+      expect(open).not.toHaveBeenCalled();
+      expect(writeText).not.toHaveBeenCalled();
+      expect(container.querySelector('.cs-code')?.textContent).toBe('DEMO-CODE');
+      const signIn = container.querySelector<HTMLAnchorElement>('.cs-open')!;
+      expect(container.querySelector('.cs-progress')?.textContent).toBe('Ready to sign in');
+      expect(signIn.textContent).toBe('Copy code and open sign-in');
+      expect(signIn.href).toBe(url);
+      expect(signIn.target).toBe('_blank');
+      await click(signIn);
+      expect(writeText).toHaveBeenCalledExactlyOnceWith('DEMO-CODE');
+      expect(open).not.toHaveBeenCalled();
+      await act(async () => finishCopy());
+      expect(open).toHaveBeenCalledExactlyOnceWith('', '_blank');
+      expect(navigate).toHaveBeenCalledTimes(1);
+      expect(tab.document.querySelector('a')?.href).toBe(url);
+      expect(tab.document.querySelector('a')?.rel).toBe('noreferrer');
+      expect(tab.opener).toBeNull();
+      expect(container.querySelector('.cs-progress')?.textContent).toBe('Waiting for sign-in in the other tab…');
+      expect(container.querySelector('.cs-spinner')).not.toBeNull();
+      expect(signIn.textContent).toBe('Reopen sign-in page');
+      await act(async () => { window.dispatchEvent(new Event('focus')); });
+      expect(container.querySelector('.cs-progress')?.textContent).toBe('Checking connection…');
+      expect(container.querySelector('.cs-spinner')).not.toBeNull();
+      await act(async () => polled({ harness: 'codex', state: 'connected', output: [], paste: false }));
+      expect(container.querySelector('[role="dialog"]')?.getAttribute('aria-label')).toBe('New agent');
+      expect(container.querySelector('.cs-status')?.textContent).toBe('connected');
+      expect(container.querySelector<HTMLInputElement>('input[name="name"]')?.value).toBe('Codex reviewer');
+      expect(container.querySelector('a.cs-open')).toBeNull();
+    } finally {
+      view.unmount();
+      open.mockRestore();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('rechecks on return when a background poll is already in flight', async () => {
+    const waiting = { ...pending, code: undefined };
+    let finishPoll!: (v: ConnectView) => void;
+    let finishCheck!: (v: ConnectView) => void;
+    const api = {
+      ...fakeApi('codex', url),
+      connect: vi.fn(async () => waiting),
+      get: vi.fn()
+        .mockImplementationOnce(() => new Promise<ConnectView>((resolve) => { finishPoll = resolve; }))
+        .mockImplementationOnce(() => new Promise<ConnectView>((resolve) => { finishCheck = resolve; })),
+    };
+    vi.useFakeTimers();
+    const visibility = vi.spyOn(document, 'visibilityState', 'get');
+    const view = await render(<ConnectStep harness="codex" api={api} onSigningInChange={vi.fn()} />);
+    const status = () => view.container.querySelector('.cs-progress')?.textContent;
+    try {
+      await click(view.container.querySelector('.cs-connect'));
+      await click(view.container.querySelector('.cs-open'));
+      visibility.mockReturnValue('hidden');
+      await act(async () => { document.dispatchEvent(new Event('visibilitychange')); });
+      expect(status()).toBe('Waiting for sign-in in the other tab…');
+      await act(async () => { await vi.advanceTimersByTimeAsync(pollMs); });
+      expect(api.get).toHaveBeenCalledTimes(1);
+      visibility.mockReturnValue('visible');
+      await act(async () => {
+        document.dispatchEvent(new Event('visibilitychange'));
+        window.dispatchEvent(new Event('focus'));
+      });
+      expect(status()).toBe('Checking connection…');
+      expect(api.get).toHaveBeenCalledTimes(1);
+      await act(async () => finishPoll(waiting));
+      expect(api.get).toHaveBeenCalledTimes(2);
+      expect(status()).toBe('Checking connection…');
+      await act(async () => finishCheck(waiting));
+      expect(status()).toBe('Waiting for sign-in in the other tab…');
+      expect(api.get).toHaveBeenCalledTimes(2);
+    } finally {
+      view.unmount();
+      visibility.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps the device code in view when copying is blocked and lets the user open the page manually', async () => {
+    const open = vi.spyOn(window, 'open').mockReturnValue(null);
+    const writeText = vi.fn(async () => { throw new Error('Clipboard denied'); });
+    vi.stubGlobal('navigator', Object.create(navigator, { clipboard: { value: { writeText } } }));
+    const api = { ...fakeApi('codex', url), connect: vi.fn(async () => pending) };
+    const view = await render(<ConnectStep harness="codex" api={api} onSigningInChange={vi.fn()} />);
+    try {
+      await click(view.container.querySelector('.cs-connect'));
+      const signIn = view.container.querySelector<HTMLAnchorElement>('.cs-open')!;
+      const event = new MouseEvent('click', { bubbles: true, cancelable: true });
+      await act(async () => { signIn.dispatchEvent(event); });
+      expect(event.defaultPrevented).toBe(true);
+      expect(open).not.toHaveBeenCalled();
+      expect(view.container.textContent).toContain('Couldn’t copy automatically. Copy the code manually before opening sign-in.');
+      expect(view.container.querySelector('.cs-progress')?.textContent).toBe('Ready to sign in');
+      expect(view.container.querySelector('.cs-code')?.textContent).toBe('DEMO-CODE');
+      expect(signIn.textContent).toBe('Open sign-in page');
+      expect(signIn.href).toBe(url);
+    } finally {
+      view.unmount();
+      open.mockRestore();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('offers the sign-in link when the browser blocks the automatic tab', async () => {
+    const open = vi.spyOn(window, 'open').mockReturnValue(null);
+    const writeText = vi.fn(async (_code: string) => {});
+    vi.stubGlobal('navigator', Object.create(navigator, { clipboard: { value: { writeText } } }));
+    const api = { ...fakeApi('codex', url), connect: vi.fn(async () => pending) };
+    const view = await render(<ConnectStep harness="codex" api={api} onSigningInChange={vi.fn()} />);
+    try {
+      await click(view.container.querySelector('.cs-connect'));
+      const link = view.container.querySelector<HTMLAnchorElement>('.cs-open')!;
+      await click(link);
+      expect(writeText).toHaveBeenCalledExactlyOnceWith('DEMO-CODE');
+      expect(open).toHaveBeenCalledTimes(1);
+      expect(link.textContent).toBe('Open sign-in page');
+      expect(link.href).toBe(url);
+      expect(view.container.querySelector('.cs-progress')?.textContent).toBe('Ready to sign in');
+    } finally {
+      view.unmount();
+      open.mockRestore();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('does not open the provider if cancellation was requested while the clipboard was pending', async () => {
+    const open = vi.spyOn(window, 'open').mockReturnValue(null);
+    let finishCopy!: () => void;
+    const writeText = vi.fn((_code: string) => new Promise<void>((resolve) => { finishCopy = resolve; }));
+    vi.stubGlobal('navigator', Object.create(navigator, { clipboard: { value: { writeText } } }));
+    const api = { ...fakeApi('codex', url), connect: vi.fn(async () => pending), cancel: vi.fn(async () => {}) };
+    const view = await render(<ConnectStep harness="codex" api={api} onSigningInChange={vi.fn()} />);
+    try {
+      await click(view.container.querySelector('.cs-connect'));
+      await click(view.container.querySelector('.cs-open'));
+      await click(view.container.querySelector('.cs-cancel'));
+      await act(async () => finishCopy());
+      expect(api.cancel).toHaveBeenCalledExactlyOnceWith('codex');
+      expect(open).not.toHaveBeenCalled();
+      expect(view.container.querySelector('.cs-open')).toBeNull();
+    } finally {
+      view.unmount();
+      open.mockRestore();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('closes the access dropdown when the service reports a running sign-in', async () => {
+    let deliverList!: (list: SubscriptionList) => void;
+    const api = {
+      ...fakeApi('codex', url),
+      list: vi.fn(() => new Promise<SubscriptionList>((resolve) => { deliverList = resolve; })),
+    };
+    const harnesses = async () => [{
+      name: 'codex', found: true,
+      access: [
+        { kind: 'subscription', label: 'ChatGPT subscription', models: [] },
+        { kind: 'api', label: 'API key', models: [] },
+      ],
+    }];
+    const view = await render(<AgentsDialog loadHarnesses={harnesses} subscriptions={api}
+      createAgent={vi.fn()} updateAgent={vi.fn()} onClose={vi.fn()} />);
+    try {
+      const access = view.container.querySelector<HTMLButtonElement>('button[name="access"]')!;
+      await click(access);
+      expect(document.querySelector('[role="listbox"] [data-value="api"]')).not.toBeNull();
+      await act(async () => deliverList({ subscriptions: [
+        { harness: 'codex', connected: false, expired: false, connect: pending },
+      ] }));
+      expect(access.disabled).toBe(true);
+      expect(access.value).toBe('subscription');
+      expect(document.querySelector('[role="listbox"]')).toBeNull();
+      expect(view.container.querySelector('.cs-dedicated')).not.toBeNull();
+    } finally {
+      view.unmount();
+    }
+  });
+
+  it('Esc restores the draft while Connect is pending and ignores its late answer', async () => {
+    let finishStart!: (view: ConnectView) => void;
+    const api = {
+      ...fakeApi('codex', url),
+      connect: vi.fn(() => new Promise<ConnectView>((resolve) => { finishStart = resolve; })),
+      cancel: vi.fn(async () => {}),
+    };
+    const onClose = vi.fn();
+    const view = await render(<AgentsDialog loadHarnesses={loadHarnesses} subscriptions={api}
+      createAgent={vi.fn()} updateAgent={vi.fn()} onClose={onClose} />);
+    try {
+      const { container } = view;
+      await click(container.querySelector('.ad-options'));
+      await type(container.querySelector('input[name="name"]')!, 'Codex reviewer');
+      await click(container.querySelector('.cs-connect'));
+      expect(container.querySelector('.cs-cancel')?.textContent).toBe('Back to setup');
+      await act(async () => {
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+      });
+      await act(async () => finishStart(pending));
+      expect(container.querySelector('[role="dialog"]')?.getAttribute('aria-label')).toBe('New agent');
+      expect(container.querySelector<HTMLInputElement>('input[name="name"]')?.value).toBe('Codex reviewer');
+      expect(api.cancel).not.toHaveBeenCalled();
+      expect(onClose).not.toHaveBeenCalled();
+    } finally {
+      view.unmount();
+    }
+  });
+
+  it('offers Back to setup during sign-in on servers that cannot cancel', async () => {
+    const api = { ...fakeApi('codex', url), connect: vi.fn(async () => pending) };
+    const view = await render(<AgentsDialog loadHarnesses={loadHarnesses} subscriptions={api}
+      createAgent={vi.fn()} updateAgent={vi.fn()} onClose={vi.fn()} />);
+    try {
+      await click(view.container.querySelector('.cs-connect'));
+      const back = view.container.querySelector('.cs-cancel');
+      expect(back?.textContent).toBe('Back to setup');
+      await click(back);
+      expect(view.container.querySelector('[role="dialog"]')?.getAttribute('aria-label')).toBe('New agent');
+      expect(view.container.querySelector('.cs-dedicated')).toBeNull();
+    } finally {
+      view.unmount();
+    }
+  });
+
+  it('offers an ordinary sign-in link when the provider has no device code', async () => {
+    const view = await render(<ConnectStep harness="claude" api={fakeApi()} onSigningInChange={vi.fn()} />);
+    try {
+      await click(view.container.querySelector('.cs-connect'));
+      expect(view.container.querySelector('.cs-open')?.textContent).toBe('Open sign-in page');
+      expect(view.container.querySelector('.cs-code')).toBeNull();
+      expect(view.container.querySelector('[aria-label="Code from the sign-in page"]')).not.toBeNull();
+    } finally {
+      view.unmount();
+    }
+  });
+});
 
 async function type(input: HTMLInputElement, value: string) {
   await act(async () => {

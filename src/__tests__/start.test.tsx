@@ -1491,37 +1491,33 @@ describe('The prompt box', () => {
 
 describe('Agents', () => {
   const formLabels = (r: { container: HTMLElement }) =>
-    Array.from(r.container.querySelectorAll('.agent-form .ad-set > label > span:first-child')).map((x) => x.textContent);
+    Array.from(r.container.querySelectorAll(
+      '.ad-set > :is(label, .ad-tool):not([hidden]) > span:first-child, .ad-set > .ad-group:not([hidden]) > label:first-child > span:first-child',
+    )).map((x) => x.textContent);
 
-  it('+ Agent opens the form: Harness, Access, Model, Name, and nothing that does not work', async () => {
+  it('+ Agent shows the tool and access first, with optional fields available on demand', async () => {
     const svc = fakeService({ sessions: [row('s1')], events: { s1: oneTurn('s1', 'hi') }, agents: AGENTS });
     const r = await mount(svc);
     await click(r.container.querySelector('#agents button.add-agent'));
     await settle();
-    expect(formLabels(r)).toEqual([
-      'Harness',
-      'Access',
-      'Model',
-      'Name',
-    ]);
+    expect(formLabels(r)).toEqual(['Coding tool', 'Model access']);
     const form = r.container.querySelector('.agent-form')!;
     // A harness or an access the service marks not available is left out, not shown disabled.
     expect(form.querySelector('[data-harness="opencode"]')).toBeNull();
-    expect(form.querySelector('[data-access="api"]')).toBeNull();
+    expect((await optionsOf(form, 'access')).map(([value]) => value)).not.toContain('api');
+    await click(form.querySelector('.ad-options'));
+    expect(formLabels(r)).toEqual(['Coding tool', 'Model access', 'Model', 'Name']);
     expect(form.textContent).not.toMatch(/Not available yet|coming soon/i);
     expect(form.querySelector('select')).toBeNull();
     // A subscription agent starts with no model, so the harness picks its
     // own; the name follows harness and model.
     expect((form.querySelector('input[name="name"]') as HTMLInputElement).value).toBe('Claude Code');
     const models = (await optionsOf(form, 'model')).map((o) => o[0]);
-    expect(models).toEqual(['sonnet', 'opus', 'haiku', '']);
+    expect(models).toEqual(['', 'sonnet', 'opus', 'haiku']);
     r.unmount();
   });
 
-  // A subscription that takes any model name: the field is free text, a
-  // new agent names none (the tool's default), and none is saved when the
-  // field stays empty.
-  it('a subscription agent starts with no model and takes a typed name', async () => {
+  it('a new subscription agent starts on Default and saves without a model', async () => {
     const codex = {
       name: 'codex',
       label: 'Codex',
@@ -1533,10 +1529,9 @@ describe('Agents', () => {
     await click(r.container.querySelector('#agents button.add-agent'));
     await settle();
     const form = () => r.container.querySelector('.agent-form')!;
-    expect(selectIn(form(), 'model')).toBeNull();
-    const model = form().querySelector('input[name="model"]') as HTMLInputElement;
-    expect(model.value).toBe('');
-    expect(model.placeholder).toBe("empty: Codex's default");
+    await click(form().querySelector('.ad-options'));
+    expect(selectIn(form(), 'model')?.value).toBe('');
+    expect(selectIn(form(), 'model')?.textContent).toBe('Default');
     expect((form().querySelector('input[name="name"]') as HTMLInputElement).value).toBe('Codex');
     await submitForm(form());
     const post = svc.reqs.find((q) => q.path === '/api/v0/agents' && q.method === 'POST');
@@ -1550,9 +1545,10 @@ describe('Agents', () => {
     await click(r.container.querySelector('#agents button.add-agent'));
     await settle();
     const form = () => r.container.querySelector('.agent-form')!;
-    await click(form().querySelector('[data-access="openrouter"]'));
+    await chooseOpt(form(), 'access', 'openrouter');
     expect(selectIn(form(), 'model')).toBeNull();
     const model = form().querySelector('input[name="model"]') as HTMLInputElement;
+    expect(model.closest('label')?.hidden).toBe(false);
     expect(model.value).toBe('deepseek/deepseek-v4.1-flash');
     await setValue(model, 'qwen/qwen3-coder:free');
     expect((form().querySelector('input[name="name"]') as HTMLInputElement).value).toBe('Claude Code · qwen/qwen3-coder:free');
@@ -1582,6 +1578,7 @@ describe('Agents', () => {
     await click(r.container.querySelector('#agents button.add-agent'));
     await settle();
     const form = () => r.container.querySelector('.agent-form')!;
+    await click(form().querySelector('.ad-options'));
     await setValue(form().querySelector('input[name="name"]'), 'Codex');
     await chooseOpt(form(), 'model', 'haiku');
     expect((form().querySelector('input[name="name"]') as HTMLInputElement).value).toBe('Codex');

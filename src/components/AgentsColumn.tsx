@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { SavedAgent, SubscriptionList } from '../types';
 import { ColumnFoot } from './ColumnFoot';
-import { PlusIcon } from './Icons';
+import { AgentLogo, PlusIcon } from './Icons';
 import { PlanUsage, usageOf } from './PlanUsage';
 import { SignInDot, signInOf } from './SignInDot';
 import { Button, FoldButton } from './Controls';
@@ -90,8 +90,8 @@ export const AgentsColumn: React.FC<AgentsColumnProps> = ({
           const isSelected = selectedAgentId === a.id;
           const body = (
             <>
-              <span className={`mark ${a.harness}`}>
-                {agentMark(a)}
+              <span className="mark">
+                <AgentLogo harness={a.harness} />
                 <SignInDot signIn={signInOf(a, subscriptions)} onOpen={onOpenSignIn} />
               </span>
               <span className="ag-t">
@@ -165,13 +165,6 @@ export const AgentsColumn: React.FC<AgentsColumnProps> = ({
     </aside>
   );
 };
-
-// The letter on an agent's mark: its harness's, else its name's first.
-function agentMark(a: SavedAgent): string {
-  if (a.harness === 'claude') return 'C';
-  if (a.harness === 'codex') return 'X';
-  return a.name.charAt(0).toUpperCase();
-}
 
 // A saved agent's access and model, in a few words, such as "subscription · haiku".
 function savedLine(a: SavedAgent): string {

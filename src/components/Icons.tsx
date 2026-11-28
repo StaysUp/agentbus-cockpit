@@ -1,5 +1,9 @@
 import React from 'react';
-import { Check, ChevronDown, ChevronRight, Copy, FileDiff, Lock, Plus, ShieldCheck, X } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, Copy, FileDiff, Lock, Plus, ShieldCheck, Terminal, X } from 'lucide-react';
+import antigravityLogo from '../assets/agent-logos/antigravity.svg';
+import claudeLogo from '../assets/agent-logos/claude-code.svg';
+import codexLogo from '../assets/agent-logos/codex.svg';
+import opencodeLogo from '../assets/agent-logos/opencode.svg';
 
 // The cockpit's icons, from Lucide (thin-stroke, ISC), re-exported under the
 // cockpit's own names so callers do not change. Sizes match the hand-drawn
@@ -16,6 +20,20 @@ export const CopyIcon: React.FC = () => <Copy size={12} strokeWidth={1.7} aria-h
 export const TickIcon: React.FC = () => <Check size={13} strokeWidth={2.5} aria-hidden="true" />;
 
 export const CloseIcon: React.FC = () => <X size={16} strokeWidth={2.2} aria-hidden="true" />;
+
+export const TerminalIcon: React.FC = () => <Terminal size={14} aria-hidden="true" />;
+
+const agentLogos = new Map([
+  ['agy', antigravityLogo],
+  ['claude', claudeLogo],
+  ['codex', codexLogo],
+  ['opencode', opencodeLogo],
+]);
+
+export const AgentLogo: React.FC<{ harness: string }> = ({ harness }) => {
+  const logo = agentLogos.get(harness);
+  return logo ? <img className={`ag-logo ${harness}`} src={logo} alt="" /> : <TerminalIcon />;
+};
 
 // LockIcon marks a closed or archived conversation: it takes no more messages,
 // or is hidden from the list.
