@@ -3,7 +3,7 @@
 // /api/v0/folders, turn.started folder_ref) and apply up to a turn.
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { LiveDataSource } from '../data/LiveDataSource';
-import { FoldersContext, folderLabel, sessionFolderRef } from '../data/folders';
+import { FoldersContext, byRecentUse, folderLabel, recentFolderRefs, rememberFolderRef, sessionFolderRef } from '../data/folders';
 import { SessionPanel } from '../components/SessionPanel';
 import { buildTurns } from '../data/turns';
 import { SessionDetail } from '../types';
@@ -18,6 +18,29 @@ function json(body: unknown, status = 200): Response {
 afterEach(() => vi.unstubAllGlobals());
 
 const folders = [{ ref: 'fld_3f1c0a9b2e4d5f60', name: 'shop', machine: 'con_8a7b6c5d4e3f2a10', runner: 'run_1' }];
+
+describe('recently used folders', () => {
+  const list = [
+    { ref: 'fld_1', name: 'a' },
+    { ref: 'fld_2', name: 'b' },
+    { ref: 'fld_3', name: 'c' },
+  ];
+  afterEach(() => localStorage.clear());
+
+  it('orders the listed folders by recent use, then in the service order', () => {
+    expect(byRecentUse(list, ['fld_3', 'fld_9', 'fld_1']).map((f) => f.ref)).toEqual(['fld_3', 'fld_1', 'fld_2']);
+    expect(byRecentUse(list, []).map((f) => f.ref)).toEqual(['fld_1', 'fld_2', 'fld_3']);
+  });
+
+  it('remembers a reference once, newest first, and reads a broken store as empty', () => {
+    rememberFolderRef('fld_1');
+    rememberFolderRef('fld_2');
+    rememberFolderRef('fld_1');
+    expect(recentFolderRefs()).toEqual(['fld_1', 'fld_2']);
+    localStorage.setItem('agentbus.folderRefs', '{not json');
+    expect(recentFolderRefs()).toEqual([]);
+  });
+});
 
 describe('folders by reference', () => {
   it('names a folder by its reference when the API lists it, else by its path', () => {

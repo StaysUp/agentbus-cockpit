@@ -472,6 +472,10 @@ tr.ev-open > td { background: var(--bg); border-bottom: 1px solid var(--line); p
 .nd-recent button { text-align: left; padding: 2px 0.375rem; border-radius: 0.3125rem; color: var(--ink3); }
 .nd-recent button:hover, .nd-recent button.on { color: var(--ink); }
 .nd-recent code { font-size: var(--fs-xs); }
+.nd-recent button { display: flex; align-items: baseline; gap: 0.5rem; }
+.nd-recent button:disabled { opacity: 0.5; cursor: default; }
+.nd-recent button:disabled:hover { color: var(--ink3); }
+.nd-machine { margin-left: auto; font-size: var(--fs-xs); color: var(--ink3); white-space: nowrap; }
 .nd-note { font-size: var(--fs-xs); color: var(--ink3); margin-top: -0.375rem; }
 .nd-sandbox { display: flex; flex-direction: column; gap: 0.25rem; margin-top: 0.125rem; }
 .nd-sandbox .nd-note { margin-top: 0; }

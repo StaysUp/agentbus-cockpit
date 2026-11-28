@@ -28,6 +28,40 @@ export function rememberFolder(folder: string, machine?: string): void {
   }
 }
 
+// The listed folders a session was last started in, by reference, newest
+// first, so the dialog offers recently used folders first. References only,
+// as for paths above.
+const REF_KEY = 'agentbus.folderRefs';
+const KEEP_REFS = 20;
+
+export function recentFolderRefs(): string[] {
+  try {
+    const list: unknown = JSON.parse(localStorage.getItem(REF_KEY) ?? '[]');
+    return Array.isArray(list) ? list.filter((f): f is string => typeof f === 'string').slice(0, KEEP_REFS) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function rememberFolderRef(ref: string): void {
+  try {
+    const list = [ref, ...recentFolderRefs().filter((f) => f !== ref)].slice(0, KEEP_REFS);
+    localStorage.setItem(REF_KEY, JSON.stringify(list));
+  } catch {
+    // Storage blocked: the folders keep the service's order next time.
+  }
+}
+
+// The listed folders, recently used first (newest first), then the rest in
+// the service's order (newest report first).
+export function byRecentUse(folders: FolderInfo[], recent: string[] = recentFolderRefs()): FolderInfo[] {
+  const rank = new Map(recent.map((ref, i) => [ref, i]));
+  return folders
+    .map((f, i) => ({ f, i, r: rank.get(f.ref) ?? Infinity }))
+    .sort((a, b) => a.r - b.r || a.i - b.i)
+    .map((x) => x.f);
+}
+
 // Whether the last new session ran in a sandbox, remembered per viewer so the
 // dialog offers the same choice next time. A copy behind a wall (true, the
 // default) or the folder as it is (false). Stored as '1' or '0'; anything else,

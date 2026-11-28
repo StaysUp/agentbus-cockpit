@@ -22,7 +22,7 @@ import { ApplyPanel, MERGE_REQUEST, refusedTooBig } from './components/Changes';
 import { RightPanel, usePanelTabs } from './components/RightPanel';
 import { recordFileName, saveRecord } from './data/exportRecord';
 import { SessionsColumn } from './components/SessionsColumn';
-import { FolderInfo, FoldersContext, rememberFolder, rememberMachine } from './data/folders';
+import { FolderInfo, FoldersContext, rememberFolder, rememberFolderRef, rememberMachine } from './data/folders';
 import { ReplayDataSource } from './data/ReplayDataSource';
 import { applyList, countedIn, isNewerList, ListCursor, StreamedCost, streamedCost } from './data/sessionList';
 import { addLiveEvent, LiveTurns, mergeLive, noteEventTime } from './data/liveStatus';
@@ -1055,6 +1055,7 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
     const started = await dataSource.startRun!({ ...req, ...at, title });
     refreshQueue?.();
     if (req.folder) rememberFolder(req.folder, req.machine);
+    if (req.folder_ref) rememberFolderRef(req.folder_ref);
     if (req.machine) rememberMachine(req.machine);
     awaitTurn(gen, started);
     return started;
