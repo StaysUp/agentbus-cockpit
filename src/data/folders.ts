@@ -6,7 +6,7 @@ import { createContext, useContext } from 'react';
 // anything else. Recents are history, not settings.
 
 const KEY = 'agentbus.folders';
-const KEEP = 5;
+const KEEP = 10;
 
 const keyOf = (machine?: string) => (machine ? `${KEY}.${machine}` : KEY);
 
@@ -103,4 +103,58 @@ export function sessionFolderRef(s: { folder_ref?: string; turnsList?: { folderR
   const turns = s.turnsList ?? [];
   for (let i = turns.length - 1; i >= 0; i--) if (turns[i].folderRef) return turns[i].folderRef;
   return undefined;
+}
+
+// How many recent folders the New session dialog offers.
+export const RECENT_KEEP = 10;
+
+// The folders sessions were started in, newest first, once each, at most
+// RECENT_KEEP: read from the record (GET /api/v0/sessions carries each
+// session's folder and workspace), so every browser shows the same list.
+//
+// machineOf gives a session's machine from its workspace (GET
+// /api/v0/workspaces): a workspace with no machine is on the service's own
+// machine. With machine given, only that machine's folders; a session whose
+// machine is not known is left out. clean makes two spellings of one path one.
+export function recentFromSessions(
+  sessions: { folder?: string; workspace?: string; started: string }[],
+  clean: (p: string) => string,
+  machine?: string,
+  machineOf?: (workspace: string) => string | undefined
+): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const newest = [...sessions].sort((a, b) => b.started.localeCompare(a.started));
+  for (const s of newest) {
+    if (!s.folder) continue;
+    if (machine !== undefined && (!s.workspace || machineOf?.(s.workspace) !== machine)) continue;
+    const c = clean(s.folder);
+    if (seen.has(c)) continue;
+    seen.add(c);
+    out.push(s.folder);
+    if (out.length === RECENT_KEEP) break;
+  }
+  return out;
+}
+
+// Each path's short label: its last part, or as many of its last parts as it
+// takes to tell it from the others in the list.
+export function shortPaths(paths: string[]): Map<string, string> {
+  const parts = paths.map((p) => p.replace(/\/+$/, '').split('/').filter(Boolean));
+  const depth = parts.map(() => 1);
+  for (let round = 0; round < 64; round++) {
+    const label = (i: number) => parts[i].slice(-depth[i]).join('/');
+    let changed = false;
+    for (let i = 0; i < parts.length; i++) {
+      const same = parts.map((_, j) => j).filter((j) => j !== i && label(j) === label(i));
+      if (same.length === 0) continue;
+      for (const j of [i, ...same]) if (depth[j] < parts[j].length) {
+        depth[j]++;
+        changed = true;
+      }
+    }
+    if (!changed) break;
+  }
+  // Every part needed: the path as it is.
+  return new Map(paths.map((p, i) => [p, depth[i] < parts[i].length ? parts[i].slice(-depth[i]).join('/') : p]));
 }

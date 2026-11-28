@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { FolderInfo, lastMachine, lastSandbox, recentFolders, rememberSandbox } from '../data/folders';
+import { FolderInfo, lastMachine, lastSandbox, recentFolders, rememberSandbox, shortPaths } from '../data/folders';
 import { Harness, RunRequest, RunnerInfo, SavedAgent } from '../types';
 import { agentLine } from './AgentsDialog';
 import { Button, Seg, Select } from './Controls';
@@ -9,6 +9,11 @@ import { Notice, WithCode } from './Notice';
 import { LOADING, PRODUCT, SESSION } from '../words';
 
 interface NewSessionDialogProps {
+  // The folders sessions were started in, from the record, newest first:
+  // only the given machine's, or all with none. null: the record cannot say
+  // (machines are listed, but no session's machine is known), and the
+  // folders started from this browser are offered instead.
+  recentFolders?: (machine?: string) => string[] | null;
   // The saved agents (GET /api/v0/agents).
   loadAgents: () => Promise<SavedAgent[]>;
   // The harnesses, to say which agents cannot start here. Optional.
@@ -67,6 +72,7 @@ const MAX_FOLDERS = 8;
 // optional first message. The service isolates it: the session works on its own copy of the folder,
 // and nothing reaches the folder until a turn's changes are applied.
 export const NewSessionDialog: React.FC<NewSessionDialogProps> = ({
+  recentFolders: fromRecord,
   loadAgents,
   loadHarnesses,
   onStart,
@@ -101,10 +107,14 @@ export const NewSessionDialog: React.FC<NewSessionDialogProps> = ({
   }, [machines, machineTouched, machine]);
   const picked = usable.find((m) => m.machine === machine);
   // The listed folders and the recent paths of the machine picked; all of
-  // them on a service that names no machine. At most five recent paths,
-  // newest first (recentFolders keeps no more).
+  // them on a service that names no machine. At most ten recent paths,
+  // newest first, from the record; from this browser only when the record
+  // cannot say.
   const folders = byMachine ? allFolders.filter((f) => f.machine === machine) : allFolders;
-  const recent = useMemo(() => recentFolders(byMachine ? machine : undefined), [byMachine, machine]);
+  const recent = useMemo(
+    () => fromRecord?.(byMachine ? machine : undefined) ?? recentFolders(byMachine ? machine : undefined),
+    [fromRecord, byMachine, machine]
+  );
   // No folder is picked for the person: the session runs where they say,
   // so Start waits for a listed folder, a recent one or a typed path. A
   // listed folder that leaves the list is dropped.
@@ -167,6 +177,8 @@ export const NewSessionDialog: React.FC<NewSessionDialogProps> = ({
     if (listedNames.has(c.split('/').pop() ?? '')) return false;
     return recent.findIndex((g) => cleanPath(g) === c) === i;
   });
+  // Each shown short: its last part, or enough of the path to tell two apart.
+  const recentLabel = shortPaths(recentPicks);
   const [prompt, setPrompt] = useState('');
   const [name, setName] = useState('');
   // The session's mode, remembered per viewer. On (the default): a sandbox,
@@ -351,8 +363,14 @@ export const NewSessionDialog: React.FC<NewSessionDialogProps> = ({
                       </button>
                     ))}
                     {recentPicks.map((f) => (
-                      <button type="button" key={f} className={`pick${w && 'path' in w && w.path === f ? ' on' : ''}`} onClick={() => pick({ path: f })}>
-                        <code>{f}</code>
+                      <button
+                        type="button"
+                        key={f}
+                        className={`pick${w && 'path' in w && w.path === f ? ' on' : ''}`}
+                        title={f}
+                        onClick={() => pick({ path: f })}
+                      >
+                        <code>{recentLabel.get(f) ?? f}</code>
                       </button>
                     ))}
                   </div>

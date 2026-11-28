@@ -112,6 +112,8 @@ function fakeService(opts: {
   // POST /workspaces: the first of the three calls. Without it, a workspace
   // ws_new1 is made from the body.
   workspaces?: (body: unknown) => Response | Promise<Response>;
+  // GET /workspaces: the workspace list. Without it the service has none (404).
+  workspaceList?: Record<string, unknown>[];
   // POST /sessions: the second call. Without it, session 'new1' is made.
   makeSession?: (body: { workspace?: string; title?: string }) => Response | Promise<Response>;
   // POST /turns with session: a session's next turn.
@@ -187,6 +189,7 @@ function fakeService(opts: {
     // A new session is three calls: POST /workspaces, POST /sessions, then
     // POST /turns with the created session. The workspace owns the folder and
     // the mode; the first turn of a fresh session names 'new1'.
+    if (p === '/api/v0/workspaces' && method === 'GET' && opts.workspaceList) return json({ workspaces: opts.workspaceList });
     if (p === '/api/v0/workspaces' && method === 'POST') {
       if (opts.workspaces) return opts.workspaces(body);
       const b = body as { folder?: string; folder_ref?: string; machine?: string; sandbox?: boolean };
@@ -421,14 +424,14 @@ describe('New session', () => {
       { ref: 'fld_00000000000000a1', name: 'app', machine: 'con_1', runner: 'run_1' },
       { ref: 'fld_00000000000000b2', name: 'site', machine: 'con_2', runner: 'run_2' },
     ];
-    localStorage.setItem('agentbus.folders', JSON.stringify(['/Users/ana/old']));
-    const svc = fakeService({ sessions: [row('s1')], events: { s1: oneTurn('s1', 'hi') }, agents: AGENTS, folders });
+    const svc = fakeService({ sessions: [row('s1', { folder: '/Users/ana/old' })], events: { s1: oneTurn('s1', 'hi') }, agents: AGENTS, folders });
     const r = await mount(svc);
     await click(r.container.querySelector('#sessions button.new-session'));
     await settle();
     const dialog = r.container.querySelector('.new-dialog')!;
     const picks = Array.from(dialog.querySelectorAll('.nd-recent button')) as HTMLButtonElement[];
-    expect(picks.map((b) => b.textContent)).toEqual(['app', 'site', '/Users/ana/old']);
+    expect(picks.map((b) => b.textContent)).toEqual(['app', 'site', 'old']);
+    expect(picks[2].getAttribute('title')).toBe('/Users/ana/old');
     // Nothing is picked until the person picks. Start with no folder says
     // which field is missing, and starts nothing.
     expect(dialog.querySelector('.nd-recent button.on')).toBeNull();
@@ -447,7 +450,7 @@ describe('New session', () => {
     expect(sentBody(svc)).toEqual({ session: 'new1', agent: 'claude', prompt: 'read the README' });
     expect(r.container.querySelector('.new-dialog')).toBeNull();
     // A folder by reference is not a path to remember.
-    expect(JSON.parse(localStorage.getItem('agentbus.folders') ?? '[]')).toEqual(['/Users/ana/old']);
+    expect(localStorage.getItem('agentbus.folders')).toBeNull();
     r.unmount();
   });
 
@@ -1044,15 +1047,24 @@ describe('New session: name, no first message, folders', () => {
     r.unmount();
   });
 
-  it('shows at most five recent folders, newest first', async () => {
-    localStorage.setItem('agentbus.folders', JSON.stringify(['/a1', '/a2', '/a3', '/a4', '/a5', '/a6', '/a7']));
-    const svc = fakeService({ sessions: [row('s1')], events: { s1: oneTurn('s1', 'hi') }, agents: AGENTS });
+  it('shows the folders of the newest 10 sessions, from the record, short, with the whole path on hover', async () => {
+    // 12 sessions, each in its own folder; session n started n minutes past 9.
+    // Two folders end in the same part (app): each shows enough to tell them apart.
+    const path = (n: number) => (n === 12 ? '/Users/ana/work/app' : n === 11 ? '/Users/ana/play/app' : `/Users/ana/p${n}`);
+    const sessions = Array.from({ length: 12 }, (_, i) =>
+      row(`s${i + 1}`, { folder: path(i + 1), started: `2026-11-05T09:${String(i + 1).padStart(2, '0')}:00Z` })
+    );
+    // Listed oldest first, so the order shown is the record's, not the list's.
+    const svc = fakeService({ sessions, events: { s1: oneTurn('s1', 'hi') }, agents: AGENTS });
     const { r, dialog } = await openDialog(svc);
-    expect(Array.from(dialog.querySelectorAll('.nd-recent button')).map((b) => b.textContent)).toEqual(['/a1', '/a2', '/a3', '/a4', '/a5']);
-    await setValue(dialog.querySelector('input[name="folder"]'), '/b');
-    await setValue(dialog.querySelector('textarea[name="prompt"]'), 'x');
-    await submitForm(dialog);
-    expect(JSON.parse(localStorage.getItem('agentbus.folders') ?? '[]')).toEqual(['/b', '/a1', '/a2', '/a3', '/a4']);
+    const picks = Array.from(dialog.querySelectorAll('.nd-recent button'));
+    expect(picks.map((b) => b.getAttribute('title'))).toEqual([12, 11, 10, 9, 8, 7, 6, 5, 4, 3].map(path));
+    expect(picks.map((b) => b.textContent)).toEqual(['work/app', 'play/app', 'p10', 'p9', 'p8', 'p7', 'p6', 'p5', 'p4', 'p3']);
+    // A pick fills the field with the whole path.
+    await click(picks[1]);
+    expect((dialog.querySelector('input[name="folder"]') as HTMLInputElement).value).toBe('/Users/ana/play/app');
+    // Nothing read from or kept in this browser for it.
+    expect(localStorage.getItem('agentbus.folders')).toBeNull();
     r.unmount();
   });
 
@@ -1063,7 +1075,7 @@ describe('New session: name, no first message, folders', () => {
       'this server has no folders of its own: name folder_ref and machine from GET /api/v0/folders, which lists the folders its runners own',
     ];
     const svc = fakeService({
-      sessions: [row('s1')],
+      sessions: [row('s1', { folder: undefined })],
       events: { s1: oneTurn('s1', 'hi') },
       agents: AGENTS,
       folders,
@@ -2265,9 +2277,18 @@ describe('New session: the machine, then a folder on it', () => {
   const choose = (dialog: Element, v: string) => chooseOpt(dialog, 'machine', v);
 
   it('lists the machines, offline ones disabled, and shows only the picked machine\'s folders and recents', async () => {
-    localStorage.setItem('agentbus.folders.con_a', JSON.stringify(['/Users/ana/web']));
-    localStorage.setItem('agentbus.folders.con_c', JSON.stringify(['/work/ops']));
-    const svc = fakeService({ sessions: [row('s1')], events: { s1: oneTurn('s1', 'hi') }, agents: AGENTS, folders: FOLDERS, runners: MACHINES });
+    // Each session's machine is its workspace's, from the workspace list.
+    const svc = fakeService({
+      sessions: [row('s1', { folder: '/Users/ana/web', workspace: 'ws_a' }), row('s2', { folder: '/work/ops', workspace: 'ws_c' })],
+      workspaceList: [
+        { workspace: 'ws_a', machine: 'con_a', sandbox: true, created: '2026-11-05T09:00:00Z' },
+        { workspace: 'ws_c', machine: 'con_c', sandbox: true, created: '2026-11-05T09:00:00Z' },
+      ],
+      events: { s1: oneTurn('s1', 'hi') },
+      agents: AGENTS,
+      folders: FOLDERS,
+      runners: MACHINES,
+    });
     const { r, dialog } = await openDialog(svc);
     const options = await optionsOf(dialog, 'machine');
     expect(options).toEqual([
@@ -2276,12 +2297,12 @@ describe('New session: the machine, then a folder on it', () => {
       ['con_b', 'box', true],
     ]);
     expect(selectIn(dialog, 'machine')!.value).toBe('con_a');
-    expect(picks(dialog)).toEqual(['app', '/Users/ana/web']);
+    expect(picks(dialog)).toEqual(['app', 'web']);
     // A folder picked on one machine is dropped when the machine changes.
     await click(dialog.querySelector('.nd-recent button'));
     expect(dialog.querySelector('.nd-recent button.on')?.textContent).toBe('app');
     await choose(dialog, 'con_c');
-    expect(picks(dialog)).toEqual(['infra', '/work/ops']);
+    expect(picks(dialog)).toEqual(['infra', 'ops']);
     expect(dialog.querySelector('.nd-recent button.on')).toBeNull();
     expect((dialog.querySelector('input[name="folder"]') as HTMLInputElement).value).toBe('');
     r.unmount();
@@ -2504,14 +2525,15 @@ describe('Several folders', () => {
   });
 
   it('the picks show each folder once: one recent path in two spellings, and a recent path of a listed folder', async () => {
-    localStorage.setItem('agentbus.folders', JSON.stringify(['/Users/ana/Sites/app', '/Users/ana/x', '/Users/ana/x/', '/Users/ana/y']));
     const folders = [{ ref: 'fld_00000000000000a1', name: 'app' }];
-    const svc = fakeService({ sessions: [row('s1')], events: { s1: oneTurn('s1', 'hi') }, agents: AGENTS, folders });
+    const at = (id: string, folder: string, m: number) => row(id, { folder, started: `2026-11-05T09:0${m}:00Z` });
+    const sessions = [at('s1', '/Users/ana/Sites/app', 4), at('s2', '/Users/ana/x', 3), at('s3', '/Users/ana/x/', 2), at('s4', '/Users/ana/y', 1)];
+    const svc = fakeService({ sessions, events: { s1: oneTurn('s1', 'hi') }, agents: AGENTS, folders });
     const r = await mount(svc);
     await click(r.container.querySelector('#sessions button.new-session'));
     await settle();
     const dialog = r.container.querySelector('.new-dialog')!;
-    expect(Array.from(dialog.querySelectorAll('.nd-recent button')).map((b) => b.textContent)).toEqual(['app', '/Users/ana/x', '/Users/ana/y']);
+    expect(Array.from(dialog.querySelectorAll('.nd-recent button')).map((b) => b.textContent)).toEqual(['app', 'x', 'y']);
     r.unmount();
   });
 

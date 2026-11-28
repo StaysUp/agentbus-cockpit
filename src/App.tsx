@@ -17,12 +17,12 @@ import { type SettingsApi } from './data/settings';
 import { useTabShown } from './data/useTabShown';
 import { SubscriptionApi } from './components/ConnectStep';
 import { SignInDot, signInOf } from './components/SignInDot';
-import { NewSessionDialog } from './components/NewSessionDialog';
+import { cleanPath, NewSessionDialog } from './components/NewSessionDialog';
 import { ApplyPanel, MERGE_REQUEST, refusedTooBig } from './components/Changes';
 import { RightPanel, usePanelTabs } from './components/RightPanel';
 import { recordFileName, saveRecord } from './data/exportRecord';
 import { SessionsColumn } from './components/SessionsColumn';
-import { FolderInfo, FoldersContext, rememberFolder, rememberMachine } from './data/folders';
+import { FolderInfo, FoldersContext, recentFromSessions, rememberFolder, rememberMachine } from './data/folders';
 import { ReplayDataSource } from './data/ReplayDataSource';
 import { applyList, countedIn, isNewerList, ListCursor, StreamedCost, streamedCost } from './data/sessionList';
 import { addLiveEvent, LiveTurns, mergeLive, noteEventTime, steadyNow } from './data/liveStatus';
@@ -1091,6 +1091,33 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
       outcome: d.getWorkspaceOutcome ? (id: string, event: string) => d.getWorkspaceOutcome!(id, event) : undefined,
     };
   }, [dataSource]);
+  // The New session dialog's recent folders, from the record: the sessions'
+  // folders, each session's machine from its workspace. Read when the dialog
+  // opens; a workspace with no machine is on the service's own machine.
+  const [wsMachines, setWsMachines] = useState<Map<string, string | undefined> | null>(null);
+  useEffect(() => {
+    if (!newSession || !workspacesApi) return;
+    let live = true;
+    workspacesApi.list().then(
+      (rows) => live && rows && setWsMachines(new Map(rows.map((w) => [w.workspace, w.machine]))),
+      () => {}
+    );
+    return () => {
+      live = false;
+    };
+  }, [newSession, workspacesApi]);
+  const homeMachine = runners.runners?.find((r) => r.role !== 'connector' && r.machine)?.machine;
+  const recentFoldersOf = useCallback(
+    (machine?: string): string[] | null => {
+      const list = allSessions ?? [];
+      if (machine === undefined) return recentFromSessions(list, cleanPath);
+      // Machines are listed, but which session ran where is not known: the
+      // record cannot split them, so the dialog uses this browser's list.
+      if (!wsMachines) return null;
+      return recentFromSessions(list, cleanPath, machine, (w) => (wsMachines.has(w) ? (wsMachines.get(w) ?? homeMachine) : undefined));
+    },
+    [allSessions, wsMachines, homeMachine]
+  );
   const runnersOnline = runners.runners ? runners.runners.filter((r) => r.online).length : undefined;
   // Which build the service is, read once: it is fixed for the life of the
   // process. A source without the route, or a read that fails, shows none.
@@ -1973,6 +2000,7 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
 
       {newSession && canStart && (
         <NewSessionDialog
+          recentFolders={recentFoldersOf}
           loadAgents={loadSaved}
           loadHarnesses={dataSource.getHarnesses ? loadHarnesses : undefined}
           onStart={startRun}
