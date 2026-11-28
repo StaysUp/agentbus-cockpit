@@ -29,6 +29,7 @@ import { addLiveEvent, LiveTurns, mergeLive, noteEventTime } from './data/liveSt
 import { askedWork } from './data/askedWork';
 import { refreshNow } from './utils/useNow';
 import { versionLabel } from './utils/format';
+import { loadOpenRouterModels } from './data/openRouterModels';
 import { QueueSource } from './data/jobs';
 import { useQueue } from './data/useJobs';
 import { addRun } from './data/shell';
@@ -1881,6 +1882,7 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
           updateAgent={(id, f) => dataSource.updateAgent!(id, f)}
           subscriptions={subscriptionApi}
           loadModels={dataSource.getModels ? loadModels : undefined}
+          loadOpenRouterModels={loadOpenRouterModels}
           edit={agentsDialog.edit}
           onClose={() => setAgentsDialog(null)}
         />

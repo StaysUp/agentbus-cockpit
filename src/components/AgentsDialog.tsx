@@ -1,11 +1,19 @@
-import React, { useEffect, useState } from "react";
-import { Button, Combo, Seg, Select } from "./Controls";
+import React, { useEffect, useRef, useState } from "react";
+import { Button, Combo, ComboChoice, Seg, Select } from "./Controls";
 import { Dialog, DialogActions } from "./Dialog";
 import { Loading, Notice } from "./Notice";
 import { harnessName, PRODUCT } from "../words";
 import { AccessOption, AgentFields, Harness, ModelList, SavedAgent } from "../types";
 import { ConnectStep, SubscriptionApi } from "./ConnectStep";
 import { APIKey, OpenRouterKey, vendorKeys } from "./OpenRouterKey";
+import {
+  isAbortError,
+  OPENROUTER_EMPTY,
+  OPENROUTER_LOAD_ERROR,
+  OPENROUTER_REFRESH_ERROR,
+  OpenRouterModel,
+  orderModels,
+} from "../data/openRouterModels";
 
 // The "+ Agent" form, and the same form to edit a saved agent: Harness,
 // then Access (only what that harness offers), then Model (what that harness
@@ -29,7 +37,11 @@ interface AgentsDialogProps {
   subscriptions?: SubscriptionApi;
   // The models a harness's access can use now (GET /api/v0/harnesses/<h>/
   // models), offered beside the harness's own. Absent: only those.
+  // OpenRouter does not use it: that list has no price or context.
   loadModels?: (harness: string, access: string, refresh?: boolean) => Promise<ModelList>;
+  // OpenRouter's public catalogue. Absent: the field keeps the harness's
+  // own model ids, and typing an id still works.
+  loadOpenRouterModels?: (refresh?: boolean, signal?: AbortSignal) => Promise<OpenRouterModel[]>;
 }
 
 // What a harness, an access and a model are called on screen.
@@ -143,6 +155,7 @@ export const AgentsDialog: React.FC<AgentsDialogProps> = ({
   onChanged,
   subscriptions,
   loadModels,
+  loadOpenRouterModels,
 }) => {
   const [harnesses, setHarnesses] = useState<Harness[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -176,7 +189,7 @@ export const AgentsDialog: React.FC<AgentsDialogProps> = ({
   const [modelsError, setModelsError] = useState<string | null>(null);
   const modelsFor = form ? `${form.harness} ${form.access}` : "";
   const readModels = (refresh: boolean) => {
-    if (!loadModels || !form?.harness || !form.access) return () => undefined;
+    if (!loadModels || !form?.harness || !form.access || form.access === "openrouter") return () => undefined;
     let active = true;
     const [h, a] = [form.harness, form.access];
     setModelsBusy(true);
@@ -193,10 +206,65 @@ export const AgentsDialog: React.FC<AgentsDialogProps> = ({
   };
   useEffect(() => {
     setModels(null);
+    if (form?.access === "openrouter") {
+      setModelsBusy(false);
+      setModelsError(null);
+      return;
+    }
     return readModels(false);
     // The list follows the harness and access only.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [modelsFor, loadModels]);
+
+  // OpenRouter's own catalogue. The harness's access.models stay selectable
+  // when this has not arrived, or when the call fails.
+  const [catalogue, setCatalogue] = useState<OpenRouterModel[] | null>(null);
+  const [catBusy, setCatBusy] = useState(false);
+  const [catError, setCatError] = useState<string | null>(null);
+  const catGen = useRef(0);
+  const catAbort = useRef<AbortController | null>(null);
+  const readCatalogue = (refresh: boolean) => {
+    if (!loadOpenRouterModels || form?.access !== "openrouter") return;
+    const gen = ++catGen.current;
+    catAbort.current?.abort();
+    const ac = new AbortController();
+    catAbort.current = ac;
+    setCatBusy(true);
+    setCatError(null);
+    // A refresh that fails keeps this list. The note says so, instead of
+    // the first-load error, which would claim that nothing loaded.
+    const kept = catalogue;
+    loadOpenRouterModels(refresh, ac.signal).then(
+      (models) => {
+        if (gen !== catGen.current) return;
+        setCatalogue(models);
+        setCatError(null);
+      },
+      (err: unknown) => {
+        if (gen !== catGen.current || isAbortError(err)) return;
+        setCatError(refresh && kept !== null ? OPENROUTER_REFRESH_ERROR : OPENROUTER_LOAD_ERROR);
+      },
+    ).finally(() => {
+      if (gen === catGen.current) setCatBusy(false);
+    });
+  };
+  useEffect(() => {
+    if (form?.access !== "openrouter" || !loadOpenRouterModels) {
+      catGen.current += 1;
+      catAbort.current?.abort();
+      setCatalogue(null);
+      setCatError(null);
+      setCatBusy(false);
+      return;
+    }
+    readCatalogue(false);
+    return () => {
+      catGen.current += 1;
+      catAbort.current?.abort();
+    };
+    // The catalogue follows the access, not the harness: it is one list.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form?.access, loadOpenRouterModels]);
 
   const hs = harnesses ?? [];
   const harness = form ? hs.find((h) => h.name === form.harness) : undefined;
@@ -281,6 +349,29 @@ export const AgentsDialog: React.FC<AgentsDialogProps> = ({
   // A key set in Settings that the access uses: the vendor's (access "api")
   // or a provider's, such as xAI's (access "xai"). The service names it.
   const apiKey = form?.access === "api" || (!openRouter && !!access?.key_name);
+  // Suggested ids from the harness, then the rest of OpenRouter's catalogue.
+  const orChoices: ComboChoice[] | undefined =
+    openRouter && loadOpenRouterModels
+      ? orderModels(catalogue ?? [], access?.models ?? []).map((row) => ({
+          value: row.id,
+          label: row.title,
+          detail: row.detail || undefined,
+          group: row.group,
+          search: row.search,
+        }))
+      : undefined;
+  const catCount = catalogue?.length ?? 0;
+  const catNote = !openRouter || !loadOpenRouterModels
+    ? ""
+    : catBusy || (catalogue === null && !catError)
+      ? "Loading…"
+      : catError
+        ? catError
+        : catalogue === null
+          ? "Loading…"
+          : catCount === 0
+            ? OPENROUTER_EMPTY
+            : `${catCount} ${catCount === 1 ? "model" : "models"}`;
 
   // While a save is in flight nothing closes: its answer would land on
   // whatever came next.
@@ -370,6 +461,7 @@ export const AgentsDialog: React.FC<AgentsDialogProps> = ({
                     }
                     suggestions={offered}
                     labels={modelLabels}
+                    choices={orChoices}
                   />
                 ) : (
                   <Select
@@ -386,7 +478,17 @@ export const AgentsDialog: React.FC<AgentsDialogProps> = ({
                     ]}
                   />
                 )}
-                {loadModels && access?.any_model && (
+                {openRouter && loadOpenRouterModels && (
+                  <span className="nd-note ad-models" data-source="openrouter">
+                    {catNote}{" "}
+                    {!catBusy && (catalogue !== null || catError) && (
+                      <Button kind="secondary" small className="ad-models-refresh" onClick={() => readCatalogue(true)} disabled={catBusy}>
+                        Refresh
+                      </Button>
+                    )}
+                  </span>
+                )}
+                {loadModels && access?.any_model && !openRouter && (
                   <span className="nd-note ad-models" data-source={listed?.source ?? ""} title={listed ? `From ${sourceText(listed.source, hName, apiKey ? access?.key_name : undefined)}` : undefined}>
                     {modelsBusy
                       ? "Loading…"

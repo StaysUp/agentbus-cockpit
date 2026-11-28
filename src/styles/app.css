@@ -949,6 +949,8 @@ tr.ev-open > td { background: var(--bg); border-bottom: 1px solid var(--line); p
 .ctl-menu .menu-i.act:not(:disabled) { background: var(--hover); }
 .ctl-menu .menu-i:disabled { color: var(--ink3); cursor: not-allowed; background: none; }
 .ctl-menu .mi-l { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ctl-menu .menu-i.big .mi-l { white-space: normal; overflow: visible; text-overflow: clip; }
+.ctl-menu .menu-i.big .sub { overflow-wrap: anywhere; }
 .ctl-menu .tag { padding-left: 0.75rem; white-space: nowrap; }
 /* Switch */
 .ctl-switch { display: inline-flex; align-items: center; gap: 0.5rem; font-size: var(--fs-s); color: var(--ink2); cursor: pointer; }

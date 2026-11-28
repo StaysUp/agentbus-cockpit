@@ -14,6 +14,8 @@ export interface Option {
   label: React.ReactNode;
   // A quiet second part on the option's line, such as a model's provider.
   hint?: React.ReactNode;
+  // A second line under the label. The row grows tall enough to wrap.
+  detail?: React.ReactNode;
   disabled?: boolean;
   // A group heading shown above the first option of each group.
   group?: string;
@@ -33,18 +35,22 @@ const Menu: React.FC<{
   align?: 'left' | 'right';
 }> = ({ anchor, label, options, value, active, setActive, onPick, menuRef, align }) => {
   const [pos, setPos] = useState<React.CSSProperties>({ visibility: 'hidden' });
+  // A detail line wraps inside the field's width, and stays on the screen.
+  const wrap = options.some((o) => !!o.detail);
   useLayoutEffect(() => {
     const place = () => {
       const r = anchor.getBoundingClientRect();
       const h = menuRef.current?.offsetHeight ?? 0;
       const below = window.innerHeight - r.bottom;
       const up = h > below - 8 && r.top > below;
-      const width = Math.max(r.width, 160);
-      const left = align === 'right' ? Math.max(8, r.right - width) : Math.min(r.left, window.innerWidth - width - 8);
+      const room = Math.max(160, window.innerWidth - 16);
+      const width = Math.min(Math.max(r.width, 160), room);
+      const left = align === 'right' ? Math.max(8, r.right - width) : Math.min(Math.max(8, r.left), window.innerWidth - width - 8);
       setPos({
         position: 'fixed',
         left,
         minWidth: width,
+        ...(wrap ? { width, maxWidth: room } : {}),
         // Both set: the stylesheet's .menu has a top of its own.
         ...(up ? { top: 'auto', bottom: window.innerHeight - r.top + 4 } : { top: r.bottom + 4, bottom: 'auto' }),
         maxHeight: Math.max(120, (up ? r.top : below) - 16),
@@ -57,7 +63,7 @@ const Menu: React.FC<{
       window.removeEventListener('resize', place);
       window.removeEventListener('scroll', place, true);
     };
-  }, [anchor, align, menuRef]);
+  }, [anchor, align, menuRef, wrap]);
   let group: string | undefined;
   return createPortal(
     <div className="menu ctl-menu" role="listbox" aria-label={label} ref={menuRef} style={pos}>
@@ -70,7 +76,7 @@ const Menu: React.FC<{
             <button
               type="button"
               role="option"
-              className={`menu-i${i === active ? ' act' : ''}`}
+              className={`menu-i${o.detail ? ' big' : ''}${i === active ? ' act' : ''}`}
               aria-selected={o.value === value}
               data-value={o.value}
               disabled={o.disabled}
@@ -78,7 +84,10 @@ const Menu: React.FC<{
               onClick={() => onPick(o.value)}
             >
               <span className="ck">{o.value === value ? '✓' : ''}</span>
-              <span className="mi-l">{o.label}</span>
+              <span className="mi-l">
+                {o.label}
+                {o.detail && <span className="sub">{o.detail}</span>}
+              </span>
               {o.hint && <span className="tag">{o.hint}</span>}
             </button>
           </React.Fragment>
@@ -211,8 +220,45 @@ export const Select: React.FC<{
   );
 };
 
+// One rich suggestion. Searched by its value, label and search text.
+// detail is the second line on screen; it is not searched, so words that
+// only decorate that line (a price's "in" and "out") do not match every row.
+// A group with no match is absent, because only its options carry the heading.
+export interface ComboChoice {
+  value: string;
+  label: string;
+  detail?: string;
+  group?: string;
+  search?: string;
+}
+
+// Bring the active choices row into the menu. A row already fully inside
+// the menu is left where it is. scrollIntoView is the common path; setting
+// scrollTop covers an environment that has no such method.
+function revealActiveRow(menu: HTMLElement, row: HTMLElement): void {
+  const menuBox = menu.getBoundingClientRect();
+  const rowBox = row.getBoundingClientRect();
+  if (rowBox.height > 0 && rowBox.top >= menuBox.top && rowBox.bottom <= menuBox.bottom) return;
+  const byScroll = () => {
+    const top = row.offsetTop;
+    const height = row.offsetHeight || rowBox.height;
+    if (rowBox.top < menuBox.top) menu.scrollTop = top;
+    else menu.scrollTop = Math.max(0, top + height - menu.clientHeight);
+  };
+  if (typeof row.scrollIntoView !== 'function') {
+    byScroll();
+    return;
+  }
+  try {
+    row.scrollIntoView({ block: 'nearest' });
+  } catch {
+    byScroll();
+  }
+}
+
 // Combo is a text field with suggestions in the same menu: any text may be
-// typed, and a suggestion fills the field.
+// typed, and a suggestion fills the field. choices, when passed, is that
+// list instead of suggestions and labels.
 export const Combo: React.FC<{
   name: string;
   label: string;
@@ -225,7 +271,8 @@ export const Combo: React.FC<{
   // A suggestion's name for a screen, by its value, such as a model's label:
   // shown with the value beside it, and searched too.
   labels?: Record<string, string>;
-}> = ({ name, label, value, suggestions, onChange, placeholder, disabled, className, labels }) => {
+  choices?: ComboChoice[];
+}> = ({ name, label, value, suggestions, onChange, placeholder, disabled, className, labels, choices }) => {
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(-1);
   // The list filters by what the person typed since it opened, never by a
@@ -235,11 +282,21 @@ export const Combo: React.FC<{
   const picked = useRef(false);
   const input = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  // The choices row an arrow key just moved to. The menu may not be in the
+  // document yet (the key also opens it), so the scroll waits for layout.
+  const arrowScroll = useRef<number | null>(null);
   const q = typed ? value.trim().toLowerCase() : '';
-  const list = suggestions.filter(
-    (s) => !q || ((s.toLowerCase().includes(q) || !!labels?.[s]?.toLowerCase().includes(q)) && s.toLowerCase() !== q),
-  );
-  const options: Option[] = list.map((s) => (labels?.[s] ? { value: s, label: labels[s], hint: s } : { value: s, label: s }));
+  const options: Option[] = choices
+    ? choices
+        .filter((c) => {
+          if (!q) return true;
+          if (c.value.toLowerCase() === q) return false;
+          return [c.label, c.value, c.search ?? ''].join('\n').toLowerCase().includes(q);
+        })
+        .map((c) => ({ value: c.value, label: c.label, detail: c.detail || undefined, group: c.group }))
+    : suggestions
+        .filter((s) => !q || ((s.toLowerCase().includes(q) || !!labels?.[s]?.toLowerCase().includes(q)) && s.toLowerCase() !== q))
+        .map((s) => (labels?.[s] ? { value: s, label: labels[s], hint: s } : { value: s, label: s }));
   const shown = open && options.length > 0 && !disabled;
   useEffect(() => {
     if (!open) return;
@@ -251,6 +308,15 @@ export const Combo: React.FC<{
     document.addEventListener('mousedown', away);
     return () => document.removeEventListener('mousedown', away);
   }, [open]);
+  useLayoutEffect(() => {
+    const index = arrowScroll.current;
+    if (!choices || index === null) return;
+    arrowScroll.current = null;
+    const menu = menuRef.current;
+    const row = menu?.querySelectorAll<HTMLElement>('[role="option"]')[index];
+    if (!menu || !row) return;
+    revealActiveRow(menu, row);
+  }, [active, open, choices]);
   return (
     <>
       <input
@@ -298,8 +364,11 @@ export const Combo: React.FC<{
             setOpen(true);
             const n = options.length;
             const down = e.key === 'ArrowDown';
-            // From no option: down is the first, up the last.
-            if (n) setActive((i) => (i < 0 ? (down ? 0 : n - 1) : (i + (down ? 1 : -1) + n) % n));
+            // From no option: down is the first, up the last. The ends wrap.
+            if (!n) return;
+            const next = active < 0 ? (down ? 0 : n - 1) : (active + (down ? 1 : -1) + n) % n;
+            if (choices) arrowScroll.current = next;
+            setActive(next);
           } else if (e.key === 'Tab') {
             setOpen(false);
           } else if (e.key === 'Enter' && shown && active >= 0 && active < options.length) {
