@@ -4,7 +4,7 @@ import { liveStatus, LiveTurn, RUNNER_WAIT_MS, steadyNow } from '../data/liveSta
 import { harnessName, turnNotes } from '../data/turns';
 import { Level, QueuedTurn, SavedAgent, SessionDetail, ShellRun, Started, Turn, TurnDetail, Answer } from '../types';
 import { useNow } from '../utils/useNow';
-import { Markdown } from './Markdown';
+import { FileBase, FileClick, Markdown } from './Markdown';
 import { formatCost, formatTokens, stateLabel, turnStateClass } from '../utils/format';
 import { Cost } from './Cost';
 import { folderLabel, sessionFolderRef, useFolders } from '../data/folders';
@@ -28,6 +28,9 @@ interface ConvoColumnProps {
   session: SessionDetail;
   selectedTurn: Turn | null;
   onSelectTurn: (turn: Turn) => void;
+  // A click on a local file in a turn's reply. `base` is the session folder
+  // the reply's paths were shown relative to. Absent: the click copies the path.
+  onOpenFile?: (turn: Turn, base: FileBase, file: FileClick) => void;
   // The selected level. While the panel is open on a turn or one of its
   // calls, that turn carries the mark; at the session level, and while the
   // panel is closed, nothing here does.
@@ -331,6 +334,7 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
   session,
   selectedTurn,
   onSelectTurn,
+  onOpenFile,
   level = 'turn',
   panelOpen = true,
   agentName,
@@ -1073,7 +1077,12 @@ export const ConvoColumn: React.FC<ConvoColumnProps> = ({
                   {answer && !showLive && (
                     <div className={`m-agent md-reply${detail ? '' : ' preview'}`}>
                       {/* The agent's reply is markdown, shown formatted. The turn panel keeps it raw. */}
-                      <Markdown text={answer} cut={answerCut} files={{ session: session.id, folder: session.folder }} />
+                      <Markdown
+                        text={answer}
+                        cut={answerCut}
+                        files={{ session: session.id, folder: session.folder }}
+                        onFile={onOpenFile ? (file) => onOpenFile(turn, { session: session.id, folder: session.folder }, file) : undefined}
+                      />
                     </div>
                   )}
 

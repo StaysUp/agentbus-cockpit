@@ -414,14 +414,59 @@ export function fileRef(path: string, base: FileBase): { rel: string; full: stri
   return { rel, full };
 }
 
+// The path a turn's Changes list is matched on. The line stays on the text
+// the chat shows; it is not part of which file it is. A leading "./" is the
+// same file without it. The whole path is compared, so "src/a.ts" is not "a.ts".
+export function fileKey(path: string, base: FileBase): string {
+  const { rel } = fileRef(path, base);
+  return rel.replace(/:\d+$/, '').replace(/\\/g, '/').replace(/^(?:\.\/)+/, '');
+}
+
+// What a click on a local file reports. `path` is the destination after a
+// file: URL and percent-decoding. `full` is the tooltip, line included.
+export interface FileClick {
+  path: string;
+  full: string;
+}
+
+// Writes text to the clipboard. A browser that refuses it leaves the text
+// uncopied; the click still does not navigate. Matches CopyButton's call.
+export function copyText(text: string): void {
+  const clip = navigator.clipboard;
+  if (!clip || typeof clip.writeText !== 'function') return;
+  try {
+    const wrote = clip.writeText(text) as unknown;
+    if (wrote && typeof (wrote as Promise<void>).then === 'function') {
+      void (wrote as Promise<void>).catch(() => {
+        // Refused (permission, or a document that is not focused).
+      });
+    }
+  } catch {
+    // writeText threw. The text stays uncopied.
+  }
+}
+
+// Set by a screen that knows which turn the reply belongs to. Absent: a
+// click copies the full path.
+const FileOpenContext = createContext<((file: FileClick) => void) | undefined>(undefined);
+
 // A link to a local file: its words, then its path, quietly. It is not a
-// browser link; the full path shows on hover.
+// browser link; the full path shows on hover. A click tells the turn, or
+// copies the path when no turn is listening, and does not also select the
+// turn under it.
 function FileLink({ path, label, children }: { path: string; label: string; children: React.ReactNode }) {
   const { rel, full } = fileRef(path, useContext(FileBaseContext));
+  const open = useContext(FileOpenContext);
   const said = label.trim();
   const noPath = said === rel || said === full || said === '';
+  const onClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    if (open) open({ path, full });
+    else copyText(full);
+  };
   return (
-    <span className="md-file" title={full}>
+    <button type="button" className="md-file" title={full} onClick={onClick}>
       {noPath ? <code>{rel}</code> : children}
       {!noPath && (
         <>
@@ -429,7 +474,7 @@ function FileLink({ path, label, children }: { path: string; label: string; chil
           <code className="md-file-path">{rel}</code>
         </>
       )}
-    </span>
+    </button>
   );
 }
 
@@ -676,10 +721,13 @@ function renderBlocks(blocks: Block[], key: string, tight = false, tail?: React.
 }
 
 // `cut` says the text is a preview cut short: a "…" follows its last block.
-// `files` is where local paths in links are shown relative to.
-export function Markdown({ text, cut = false, files }: { text: string; cut?: boolean; files?: FileBase }) {
+// `files` is where local paths in links are shown relative to. `onFile` is a
+// click on one of those paths; left out, the click copies the full path.
+export function Markdown({ text, cut = false, files, onFile }: { text: string; cut?: boolean; files?: FileBase; onFile?: (file: FileClick) => void }) {
   const blocks = parseBlocks(text);
   if (cut && blocks.length === 0) return <p className="md-cut">…</p>;
-  const out = <>{renderBlocks(blocks, 'b', false, cut ? '…' : undefined)}</>;
-  return files ? <FileBaseContext.Provider value={files}>{out}</FileBaseContext.Provider> : out;
+  let out: React.ReactNode = <>{renderBlocks(blocks, 'b', false, cut ? '…' : undefined)}</>;
+  if (onFile) out = <FileOpenContext.Provider value={onFile}>{out}</FileOpenContext.Provider>;
+  if (files) out = <FileBaseContext.Provider value={files}>{out}</FileBaseContext.Provider>;
+  return out;
 }

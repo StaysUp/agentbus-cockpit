@@ -2583,18 +2583,30 @@ describe('what the cockpit asks the service for (performance, 2026-11-28)', () =
     expect(texts()).toBe(CALLS.open.texts + 3);
     const before = { lists: lists(), texts: texts() };
     // 60 s of a running turn: one stream event every 2 s, each re-reading the list.
-    await svc.push(ev({ session: 's1', kind: 'turn.started', turn: 'T201-s1', exchange: 'x201', text: 'message 201' }));
-    for (let i = 0; i < 29; i++) {
-      await svc.push(ev({ session: 's1', kind: i % 2 ? 'model.responded' : 'model.requested', turn: 'T201-s1', exchange: 'x201', status: 200, text: 'ok' }));
+    // The end-poll reads that same turn on a wall clock (queuedTurn is
+    // GET /turns/<id>, the text read). How many of those land depends on how
+    // long this loop takes, so the count is not the list. Hold the clock
+    // still; the budget below is one text read of the running turn per list read.
+    vi.stubGlobal('setInterval', () => 0);
+    vi.stubGlobal('clearInterval', () => {});
+    try {
+      await svc.push(ev({ session: 's1', kind: 'turn.started', turn: 'T201-s1', exchange: 'x201', text: 'message 201' }));
+      for (let i = 0; i < 29; i++) {
+        await svc.push(ev({ session: 's1', kind: i % 2 ? 'model.responded' : 'model.requested', turn: 'T201-s1', exchange: 'x201', status: 200, text: 'ok' }));
+        await settle();
+      }
       await settle();
+      expect({ lists: lists() - before.lists, texts: texts() - before.texts }).toEqual(CALLS.poll);
+      expect(r.container.querySelector('#convo')!.textContent).toContain('message 201');
+    } finally {
+      vi.unstubAllGlobals();
     }
-    await settle();
-    expect({ lists: lists() - before.lists, texts: texts() - before.texts }).toEqual(CALLS.poll);
-    expect(r.container.querySelector('#convo')!.textContent).toContain('message 201');
     r.unmount();
   }, 30_000);
 });
 
 // What the counting test above measured. Before (0.6.7): opening read 2 list
 // pages and 200 texts; 60 s of a running turn read 90 list pages and 32 texts.
-const CALLS = { open: { lists: 2, texts: 20 }, poll: { lists: 30, texts: 32 } };
+// The busy stream now re-reads the running turn once per list read. The 2s
+// end-poll is the same GET and is held still above, so it is not in this count.
+const CALLS = { open: { lists: 2, texts: 20 }, poll: { lists: 30, texts: 30 } };

@@ -2,7 +2,7 @@ import React from 'react';
 import { addedContext, CallGroup, callFailed, turnNotes } from '../data/turns';
 import { Level, Turn, TurnDetail } from '../types';
 import { formatDuration, formatTime, toolInputSummary, toolStateClass, toolStateLabel } from '../utils/format';
-import { Markdown } from './Markdown';
+import { FileBase, FileClick, Markdown } from './Markdown';
 import { Session, STATE } from '../words';
 import { ContextTab, LoadContext } from './ContextTab';
 import { Cost } from './Cost';
@@ -18,6 +18,8 @@ interface CallPanelProps {
   onLevel?: (level: Level) => void;
   // Opens one of the tool calls in its turn's Events tab.
   onOpenEvent?: (turn: Turn, eventId: string) => void;
+  // A click on a local file in this call's reply.
+  onOpenFile?: (turn: Turn, base: FileBase, file: FileClick) => void;
   // Reads a call's stored request; left out when the source keeps none.
   loadContext?: LoadContext;
   // The session's turns, to name the turn a replayed history came from.
@@ -31,7 +33,7 @@ const n = (v: number | undefined) => (v ?? 0).toLocaleString();
 
 // The model call level: one request and its reply, from the call's
 // model.requested and model.responded pair.
-export const CallPanel: React.FC<CallPanelProps> = ({ turn, call, tab, onTab, onLevel, onOpenEvent, loadContext, turns, loadTurn, onClose }) => {
+export const CallPanel: React.FC<CallPanelProps> = ({ turn, call, tab, onTab, onLevel, onOpenEvent, onOpenFile, loadContext, turns, loadTurn, onClose }) => {
   const req = call.pair.requested;
   const res = call.pair.responded;
   const usage = res?.usage;
@@ -117,7 +119,11 @@ export const CallPanel: React.FC<CallPanelProps> = ({ turn, call, tab, onTab, on
                 <div className="sub-h first">Text</div>
                 {typeof res.text === 'string' && res.text !== '' ? (
                   <div className="m-agent md-reply result-md">
-                    <Markdown text={res.text} files={{ session: turn.sessionId, folder: turn.folder }} />
+                    <Markdown
+                      text={res.text}
+                      files={{ session: turn.sessionId, folder: turn.folder }}
+                      onFile={onOpenFile ? (file) => onOpenFile(turn, { session: turn.sessionId, folder: turn.folder }, file) : undefined}
+                    />
                   </div>
                 ) : (
                   <p className="dim">No text yet.</p>

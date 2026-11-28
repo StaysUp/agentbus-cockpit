@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest';
 import { ConvoColumn } from '../components/ConvoColumn';
-import { Markdown } from '../components/Markdown';
+import { fileKey, Markdown } from '../components/Markdown';
 import { RightPanel } from '../components/RightPanel';
 import { ReplayDataSource } from '../data/ReplayDataSource';
 import { click, ev, jsonl, openSession, render } from './helpers';
@@ -189,6 +189,85 @@ describe('Markdown: the agent reply in the chat', () => {
     r.unmount();
   });
 
+  it('a file path keeps its line on screen and drops it when matched to a change', () => {
+    const base = { session: '14b92fbf510e8dce', folder: '/home/me/proj' };
+    expect(fileKey('/home/me/proj/src/a.ts:12', base)).toBe('src/a.ts');
+    expect(fileKey('/home/me/proj/src/a.ts#L12', base)).toBe('src/a.ts');
+    expect(fileKey('./src/a.ts', base)).toBe('src/a.ts');
+    expect(fileKey('src/a.ts', base)).toBe('src/a.ts');
+    expect(fileKey('/home/me/proj/src/a.ts:12', base)).toBe(fileKey('src/a.ts', base));
+    // A longer name, or the same name in another directory, is a different file.
+    expect(fileKey('/home/me/proj/src/a.ts', base)).not.toBe(fileKey('/home/me/proj/a.ts', base));
+    expect(fileKey('/home/me/proj/lib/a.txt', base)).not.toBe(fileKey('/home/me/proj/a.txt', base));
+    expect(fileKey('/home/me/proj/xa.txt', base)).not.toBe('a.txt');
+    const full = '/Users/test/.local/share/agentbus-mac/sessions/14b92fbf510e8dce/cmd/agentbus/main.go:69';
+    expect(fileKey(full, base)).toBe('cmd/agentbus/main.go');
+    expect(fileKey('cmd/agentbus/main.go', base)).toBe('cmd/agentbus/main.go');
+  });
+
+  it('a click on a local file copies its full path, line included, and does not select the turn under it', async () => {
+    let picks = 0;
+    let copied = '';
+    const own = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText: (t: string) => { copied = t; } }, configurable: true });
+    try {
+      const r = await render(
+        <div onClick={() => { picks++; }}>
+          <Markdown text={'See [current CLI source](/Users/you/project/cmd/agentbus/main.go:6) and [web](https://example.com/a) and [no line](./readme.md)'} />
+        </div>,
+      );
+      const files = Array.from(r.container.querySelectorAll('.md-file'));
+      expect(files.map((f) => f.tagName)).toEqual(['BUTTON', 'BUTTON']);
+      expect(files[0].textContent).toBe('current CLI source /Users/you/project/cmd/agentbus/main.go:6');
+      expect(files[0].getAttribute('title')).toBe('/Users/you/project/cmd/agentbus/main.go:6');
+      expect(files[1].textContent).toBe('no line ./readme.md');
+      await click(files[0]);
+      expect(copied).toBe('/Users/you/project/cmd/agentbus/main.go:6');
+      expect(picks).toBe(0);
+      await click(files[1]);
+      expect(copied).toBe('./readme.md');
+      expect(picks).toBe(0);
+      const web = r.container.querySelector('a')!;
+      expect(web.getAttribute('href')).toBe('https://example.com/a');
+      expect(web.getAttribute('target')).toBe('_blank');
+      await click(web);
+      expect(picks).toBe(0);
+      expect(r.container.querySelectorAll('a')).toHaveLength(1);
+      await click(r.container.querySelector('p'));
+      expect(picks).toBe(1);
+      r.unmount();
+    } finally {
+      if (own) Object.defineProperty(navigator, 'clipboard', own);
+      else delete (navigator as { clipboard?: unknown }).clipboard;
+    }
+  });
+
+  it('a file click with a handler reports the path and does not also copy it', async () => {
+    let copied = '';
+    let got = '';
+    const own = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText: (t: string) => { copied = t; } }, configurable: true });
+    try {
+      const r = await render(
+        <Markdown text={'[main.go:3](main.go:3)'} onFile={(file) => { got = file.full; }} />,
+      );
+      await click(r.container.querySelector('.md-file'));
+      expect(got).toBe('main.go:3');
+      expect(copied).toBe('');
+      expect(r.container.querySelector('.md-file')!.textContent).toBe('main.go:3');
+      r.unmount();
+    } finally {
+      if (own) Object.defineProperty(navigator, 'clipboard', own);
+      else delete (navigator as { clipboard?: unknown }).clipboard;
+    }
+  });
+
+  it('a javascript: or data: link is not a file button', async () => {
+    const r = await md('[a](javascript:alert(1)) [c](data:text/html,x)');
+    expect(r.container.querySelector('a, .md-file, button')).toBeNull();
+    r.unmount();
+  });
+
   it('a link inside a link text is not nested', async () => {
     const r = await md('[https://a.com](https://b.com)');
     const links = r.container.querySelectorAll('a');
@@ -292,6 +371,43 @@ describe('Markdown in the chat and raw in the turn panel', () => {
     expect(bubble.textContent).toBe('list **files** `x`');
     expect(bubble.querySelector('strong, code')).toBeNull();
     r.unmount();
+  });
+
+  it('the Result tab and a call reply report a file click for that turn', async () => {
+    const reply = 'See [main](/work/main.go:4)';
+    const src = new ReplayDataSource(
+      jsonl([
+        ev({ kind: 'turn.started', session: 'm1', turn: 'T1', exchange: 'x1', folder: '/work', text: 'look' }),
+        ev({ kind: 'model.requested', session: 'm1', turn: 'T1', exchange: 'x1', model: 'm' }),
+        ev({ kind: 'model.responded', session: 'm1', turn: 'T1', exchange: 'x1', status: 200, text: reply }),
+      ]),
+    );
+    const s = (await openSession(src, 'm1'))!;
+    const turn = s.turnsList[0];
+    const got: { id: string; folder?: string; full: string }[] = [];
+    const onOpenFile = (t: { id: string; folder?: string }, _base: { folder?: string }, file: { full: string }) => {
+      got.push({ id: t.id, folder: t.folder, full: file.full });
+    };
+    const result = await render(<RightPanel turn={turn} totalTurns={1} selection={null} onSelectEvent={() => {}} onOpenFile={onOpenFile} />);
+    await click(result.container.querySelector('#d-body .md-file'));
+    expect(got).toEqual([{ id: turn.id, folder: '/work', full: '/work/main.go:4' }]);
+    expect(result.container.querySelector('.md-file')!.getAttribute('title')).toBe('/work/main.go:4');
+    result.unmount();
+
+    const call = await render(
+      <RightPanel
+        level="call"
+        callId={turn.detail!.modelCalls[0].requested.id}
+        turn={turn}
+        totalTurns={1}
+        session={s}
+        onOpenFile={onOpenFile}
+      />,
+    );
+    await click(Array.from(call.container.querySelectorAll('#d-tabs .tab')).find((t) => t.textContent === 'Reply'));
+    await click(call.container.querySelector('#d-body .md-file'));
+    expect(got[1]).toEqual({ id: turn.id, folder: '/work', full: '/work/main.go:4' });
+    call.unmount();
   });
 
   it('the turn panel\'s Result tab formats the reply as the chat does', async () => {

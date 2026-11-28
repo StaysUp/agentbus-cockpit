@@ -11,7 +11,7 @@ import { ApplyPreview, ApplyState, DiscardState, TurnChangesPage, TurnDiff, Upda
 // getWorkspaceChanges/applyWorkspace/discardWorkspace act on the session's
 // workspace; these tests build sessions without a workspace field, so the
 // cockpit falls back to the session id ('c1') as the workspace.
-import { click, ev, flush, liveReplay, panelOpen, render } from './helpers';
+import { click, ev, flush, liveReplay, panelOpen, render, shownSession } from './helpers';
 import type { WorkspaceOutcome } from '../data/outcome';
 
 // The API's 202 reply (queued, with the event it names) and the outcome route
@@ -398,6 +398,377 @@ describe('The apply preview', () => {
     await flush();
     expect(r.container.querySelector('#right.apply-panel')).toBeNull();
     expect(r.container.querySelector('#right #d-tabs')).not.toBeNull();
+    r.unmount();
+  });
+});
+
+describe('A local file link and the Changes tab', () => {
+  const reply = 'See [the file](/w/a.txt:6) and [missing](/w/xa.txt:2) and [other](/w/lib/a.txt) and [rel](./a.txt).';
+  const linked = [
+    ev({ seq: 1, session: 'c1', kind: 'session.registered', agent: 'claude', folder: '/w' }),
+    ev({ seq: 2, session: 'c1', kind: 'turn.started', turn: 'T1', exchange: 'x1', folder: '/w', text: 'edit a.txt' }),
+    ev({ seq: 3, session: 'c1', kind: 'model.requested', turn: 'T1', exchange: 'x1' }),
+    ev({ seq: 4, session: 'c1', kind: 'model.responded', turn: 'T1', exchange: 'x1', status: 200, text: reply }),
+    ev({ seq: 5, session: 'c1', kind: 'turn.completed', turn: 'T1', exchange: 'x1', outcome: 'finished' }),
+  ];
+  const many: TurnChangesPage = {
+    count: 4,
+    changes: [
+      { path: 'a.txt', change: 'modified', size: 4, diff: A_DIFF },
+      { path: 'lib/a.txt', change: 'added', size: 1 },
+      { path: 'b.txt', change: 'added', size: 1 },
+      { path: 'c.txt', change: 'added', size: 1 },
+    ],
+    next_before: null,
+  };
+  const fileDiff: TurnDiff = { ...diff, files: { isolated: true, count: 4 } };
+
+  function link(root: ParentNode, label: string): HTMLElement {
+    const el = Array.from(root.querySelectorAll('#convo .md-file')).find((n) => n.textContent?.startsWith(label));
+    if (!el) throw new Error(`no file link ${label}`);
+    return el as HTMLElement;
+  }
+  function opened(root: ParentNode): string[] {
+    return Array.from(root.querySelectorAll('details.ch-file'))
+      .filter((el) => (el as HTMLDetailsElement).open)
+      .map((el) => el.querySelector('code')!.textContent!);
+  }
+
+  it('opens a changed file, including one named like another, and copies a path that is not changed', async () => {
+    let copied = '';
+    const own = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText: (t: string) => { copied = t; } }, configurable: true });
+    try {
+      const lr = liveReplay(linked, { getTurnDiff: async () => fileDiff, getTurnChanges: async () => many });
+      const source: typeof lr.source = {
+        ...lr.source,
+        getSessions: async () => withWorkspace(await lr.source.getSessions!()),
+        subscribe: (cb, snap, st) => lr.source.subscribe!(cb, (sessions, c) => snap?.(withWorkspace(sessions), c), st),
+      };
+      const r = await render(<App dataSource={source} />);
+      await flush();
+      await flush();
+      expect(panelOpen(r.container)).toBe(false);
+
+      await click(link(r.container, 'missing'));
+      await flush();
+      await flush();
+      expect(copied).toBe('/w/xa.txt:2');
+      expect(panelOpen(r.container)).toBe(false);
+
+      await click(link(r.container, 'the file'));
+      await flush();
+      await flush();
+      await flush();
+      expect(panelOpen(r.container)).toBe(true);
+      expect(r.container.querySelector('#d-tabs .tab.on')!.textContent).toBe('Changes');
+      // Four files start folded. Only a.txt is the file the link named.
+      expect(opened(r.container)).toEqual(['a.txt']);
+      expect(r.container.querySelector('#convo .md-file')!.textContent).toContain('a.txt:6');
+
+      await click(link(r.container, 'other'));
+      await flush();
+      await flush();
+      await flush();
+      expect(opened(r.container)).toContain('lib/a.txt');
+      expect(opened(r.container)).not.toEqual(['a.txt']);
+      expect(copied).toBe('/w/xa.txt:2');
+
+      await click(link(r.container, 'rel'));
+      await flush();
+      await flush();
+      expect(opened(r.container)).toContain('a.txt');
+      r.unmount();
+    } finally {
+      if (own) Object.defineProperty(navigator, 'clipboard', own);
+      else delete (navigator as { clipboard?: unknown }).clipboard;
+    }
+  });
+
+  it('a Direct session copies the path: its Changes tab keeps no file list', async () => {
+    let copied = '';
+    const own = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText: (t: string) => { copied = t; } }, configurable: true });
+    const getTurnChanges = vi.fn(async () => many);
+    try {
+      const lr = liveReplay(linked, { getTurnDiff: async () => fileDiff, getTurnChanges });
+      const direct = <T extends { id: string }>(list: T[]) => list.map((s) => ({ ...s, workspace: `ws_${s.id}`, sandbox: false as const }));
+      const source: typeof lr.source = {
+        ...lr.source,
+        getSessions: async () => direct(await lr.source.getSessions!()),
+        subscribe: (cb, snap, st) => lr.source.subscribe!(cb, (sessions, c) => snap?.(direct(sessions), c), st),
+      };
+      const r = await render(<App dataSource={source} />);
+      await flush();
+      await flush();
+      await click(link(r.container, 'the file'));
+      await flush();
+      await flush();
+      expect(copied).toBe('/w/a.txt:6');
+      expect(panelOpen(r.container)).toBe(false);
+      expect(getTurnChanges).not.toHaveBeenCalled();
+      r.unmount();
+    } finally {
+      if (own) Object.defineProperty(navigator, 'clipboard', own);
+      else delete (navigator as { clipboard?: unknown }).clipboard;
+    }
+  });
+
+  it('opens a file that is on a later changes page', async () => {
+    const page1: TurnChangesPage = {
+      count: 5,
+      changes: [
+        { path: 'zzz.txt', change: 'added', size: 1 },
+        { path: 'b.txt', change: 'added', size: 1 },
+        { path: 'c.txt', change: 'added', size: 1 },
+        { path: 'd.txt', change: 'added', size: 1 },
+      ],
+      next_before: 1,
+    };
+    const page2: TurnChangesPage = {
+      count: 5,
+      changes: [{ path: 'a.txt', change: 'modified', size: 4, diff: A_DIFF }],
+      next_before: null,
+    };
+    const loadChanges = vi.fn(async (before?: number) => (before ? page2 : page1));
+    const r = await render(
+      <TurnChangesTab
+        turnId="T1"
+        loadDiff={async () => ({ ...diff, files: { isolated: true, count: 5 } })}
+        loadChanges={loadChanges}
+        reveal={{ path: 'a.txt', n: 1 }}
+      />,
+    );
+    await flush();
+    await flush();
+    await flush();
+    expect(loadChanges).toHaveBeenCalledWith(1);
+    expect(opened(r.container)).toEqual(['a.txt']);
+    const z = Array.from(r.container.querySelectorAll('details.ch-file')).find((el) => el.querySelector('code')!.textContent === 'zzz.txt');
+    expect((z as HTMLDetailsElement).open).toBe(false);
+    r.unmount();
+  });
+
+  // A read held until the test lets it finish, so the click and a later
+  // navigation can overlap.
+  function heldChanges() {
+    const lands: ((page: TurnChangesPage) => void)[] = [];
+    const getTurnChanges = vi.fn(() => new Promise<TurnChangesPage>((res) => lands.push(res)));
+    return { lands, getTurnChanges };
+  }
+  async function mount(events: ReturnType<typeof ev>[], extra: Parameters<typeof liveReplay>[1]) {
+    const lr = liveReplay(events, extra);
+    const source: typeof lr.source = {
+      ...lr.source,
+      getSessions: async () => withWorkspace(await lr.source.getSessions!()),
+      subscribe: (cb, snap, st) => lr.source.subscribe!(cb, (sessions, c) => snap?.(withWorkspace(sessions), c), st),
+    };
+    const r = await render(<App dataSource={source} />);
+    await flush();
+    await flush();
+    return r;
+  }
+  function twoTurns() {
+    return [
+      ev({ seq: 1, session: 'c1', kind: 'session.registered', agent: 'claude', folder: '/w' }),
+      ev({ seq: 2, session: 'c1', kind: 'turn.started', turn: 'T1', exchange: 'x1', folder: '/w', text: 'edit a.txt' }),
+      ev({ seq: 3, session: 'c1', kind: 'model.requested', turn: 'T1', exchange: 'x1' }),
+      ev({ seq: 4, session: 'c1', kind: 'model.responded', turn: 'T1', exchange: 'x1', status: 200, text: 'See [the file](/w/a.txt:6).' }),
+      ev({ seq: 5, session: 'c1', kind: 'turn.completed', turn: 'T1', exchange: 'x1', outcome: 'finished' }),
+      ev({ seq: 6, session: 'c1', kind: 'turn.started', turn: 'T2', exchange: 'x2', folder: '/w', text: 'second' }),
+      ev({ seq: 7, session: 'c1', kind: 'model.requested', turn: 'T2', exchange: 'x2' }),
+      ev({ seq: 8, session: 'c1', kind: 'model.responded', turn: 'T2', exchange: 'x2', status: 200, text: 'ok' }),
+      ev({ seq: 9, session: 'c1', kind: 'turn.completed', turn: 'T2', exchange: 'x2', outcome: 'finished' }),
+    ];
+  }
+  const turnLabel = (root: ParentNode) => root.querySelector('.ph-n')!.textContent;
+  const tabOn = (root: ParentNode) => root.querySelector('#d-tabs .tab.on')!.textContent;
+
+  it('a lookup that finishes after another turn is open leaves that turn in place', async () => {
+    const { lands, getTurnChanges } = heldChanges();
+    const r = await mount(twoTurns(), { getTurnDiff: async () => fileDiff, getTurnChanges });
+    await click(link(r.container, 'the file'));
+    expect(getTurnChanges).toHaveBeenCalledTimes(1);
+    await click(r.container.querySelectorAll('#convo .tb')[1]);
+    await flush();
+    expect(turnLabel(r.container)).toContain('Turn 2 of 2');
+    await act(async () => lands[0](many));
+    await flush();
+    await flush();
+    expect(turnLabel(r.container)).toContain('Turn 2 of 2');
+    expect(tabOn(r.container)).toBe('Result');
+    expect(r.container.querySelector('details.ch-file')).toBeNull();
+    // The finished read released the in-flight flag, so a new click is read.
+    await click(link(r.container, 'the file'));
+    expect(getTurnChanges).toHaveBeenCalledTimes(2);
+    await act(async () => lands[1](many));
+    await flush();
+    await flush();
+    if (lands[2]) {
+      await act(async () => lands[2](many));
+      await flush();
+      await flush();
+    }
+    expect(tabOn(r.container)).toBe('Changes');
+    expect(opened(r.container)).toEqual(['a.txt']);
+    r.unmount();
+  });
+
+  it('a lookup that finishes after another session is open leaves that session in place', async () => {
+    const own = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+    const writeText = vi.fn();
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    try {
+      // c2 is created first, so its times are earlier and c1 is the session
+      // opened on load. `linked` is built at import, and its times would lose.
+      const older = [
+        ev({ seq: 1, session: 'c2', kind: 'session.registered', agent: 'claude', folder: '/other' }),
+        ev({ seq: 2, session: 'c2', kind: 'turn.started', turn: 'T9', exchange: 'y1', folder: '/other', text: 'other session' }),
+        ev({ seq: 3, session: 'c2', kind: 'turn.completed', turn: 'T9', exchange: 'y1', outcome: 'finished' }),
+      ];
+      const here = [
+        ev({ seq: 4, session: 'c1', kind: 'session.registered', agent: 'claude', folder: '/w' }),
+        ev({ seq: 5, session: 'c1', kind: 'turn.started', turn: 'T1', exchange: 'x1', folder: '/w', text: 'edit a.txt' }),
+        ev({ seq: 6, session: 'c1', kind: 'model.requested', turn: 'T1', exchange: 'x1' }),
+        ev({ seq: 7, session: 'c1', kind: 'model.responded', turn: 'T1', exchange: 'x1', status: 200, text: 'See [the file](/w/a.txt:6).' }),
+        ev({ seq: 8, session: 'c1', kind: 'turn.completed', turn: 'T1', exchange: 'x1', outcome: 'finished' }),
+      ];
+      const { lands, getTurnChanges } = heldChanges();
+      const r = await mount([...older, ...here], { getTurnDiff: async () => fileDiff, getTurnChanges });
+      expect(shownSession(r.container)).toBe('c1');
+      expect(panelOpen(r.container)).toBe(false);
+      await click(link(r.container, 'the file'));
+      await click(r.container.querySelector('#sessions .sess[data-session="c2"]'));
+      await flush();
+      await flush();
+      expect(shownSession(r.container)).toBe('c2');
+      await act(async () => lands[0](many));
+      await flush();
+      await flush();
+      expect(shownSession(r.container)).toBe('c2');
+      expect(panelOpen(r.container)).toBe(false);
+      expect(getTurnChanges).toHaveBeenCalledTimes(1);
+      expect(writeText).not.toHaveBeenCalled();
+      r.unmount();
+    } finally {
+      if (own) Object.defineProperty(navigator, 'clipboard', own);
+      else delete (navigator as { clipboard?: unknown }).clipboard;
+    }
+  });
+
+  it('an older file lookup cannot overwrite a newer one that already landed', async () => {
+    const turns = [
+      ev({ seq: 1, session: 'c1', kind: 'session.registered', agent: 'claude', folder: '/w' }),
+      ev({ seq: 2, session: 'c1', kind: 'turn.started', turn: 'T1', exchange: 'x1', folder: '/w', text: 'edit a.txt' }),
+      ev({ seq: 3, session: 'c1', kind: 'model.requested', turn: 'T1', exchange: 'x1' }),
+      ev({ seq: 4, session: 'c1', kind: 'model.responded', turn: 'T1', exchange: 'x1', status: 200, text: 'See [alpha](/w/a.txt:6).' }),
+      ev({ seq: 5, session: 'c1', kind: 'turn.completed', turn: 'T1', exchange: 'x1', outcome: 'finished' }),
+      ev({ seq: 6, session: 'c1', kind: 'turn.started', turn: 'T2', exchange: 'x2', folder: '/w', text: 'second' }),
+      ev({ seq: 7, session: 'c1', kind: 'model.requested', turn: 'T2', exchange: 'x2' }),
+      ev({ seq: 8, session: 'c1', kind: 'model.responded', turn: 'T2', exchange: 'x2', status: 200, text: 'See [beta](/w/b.txt).' }),
+      ev({ seq: 9, session: 'c1', kind: 'turn.completed', turn: 'T2', exchange: 'x2', outcome: 'finished' }),
+    ];
+    const { lands, getTurnChanges } = heldChanges();
+    const r = await mount(turns, { getTurnDiff: async () => fileDiff, getTurnChanges });
+    await click(link(r.container, 'alpha'));
+    expect(getTurnChanges).toHaveBeenCalledTimes(1);
+    await click(r.container.querySelectorAll('#convo .tb')[1]);
+    await flush();
+    await click(link(r.container, 'beta'));
+    expect(getTurnChanges).toHaveBeenCalledTimes(2);
+    // Turn B's read lands first and opens b.txt. Turn A's older read then
+    // lands and must leave that turn and file where they are.
+    await act(async () => lands[1](many));
+    await flush();
+    await flush();
+    if (lands[2]) {
+      await act(async () => lands[2](many));
+      await flush();
+      await flush();
+    }
+    expect(turnLabel(r.container)).toContain('Turn 2 of 2');
+    expect(tabOn(r.container)).toBe('Changes');
+    expect(opened(r.container)).toContain('b.txt');
+    await act(async () => lands[0](many));
+    await flush();
+    await flush();
+    expect(turnLabel(r.container)).toContain('Turn 2 of 2');
+    expect(tabOn(r.container)).toBe('Changes');
+    expect(opened(r.container)).toContain('b.txt');
+    expect(opened(r.container)).not.toContain('a.txt');
+    // The stale read did not leave the in-flight flag set.
+    const calls = getTurnChanges.mock.calls.length;
+    await click(link(r.container, 'beta'));
+    expect(getTurnChanges.mock.calls.length).toBe(calls + 1);
+    r.unmount();
+  });
+
+  it('an older lookup does not replace a tab chosen while it was reading', async () => {
+    const { lands, getTurnChanges } = heldChanges();
+    const r = await mount(twoTurns(), { getTurnDiff: async () => fileDiff, getTurnChanges });
+    await click(link(r.container, 'the file'));
+    await click(r.container.querySelectorAll('#convo .tb')[1]);
+    await flush();
+    const events = Array.from(r.container.querySelectorAll('#d-tabs .tab')).find((t) => t.textContent === 'Events');
+    await click(events);
+    expect(tabOn(r.container)).toBe('Events');
+    await act(async () => lands[0](many));
+    await flush();
+    await flush();
+    expect(turnLabel(r.container)).toContain('Turn 2 of 2');
+    expect(tabOn(r.container)).toBe('Events');
+    expect(r.container.querySelector('details.ch-file')).toBeNull();
+    expect(getTurnChanges).toHaveBeenCalledTimes(1);
+    r.unmount();
+  });
+
+  it('a failed Changes lookup shows the API error and does not read again', async () => {
+    const getTurnChanges = vi.fn(async () => {
+      throw new Error('the runner is offline');
+    });
+    const getTurnDiff = vi.fn(async () => fileDiff);
+    const r = await mount(linked, { getTurnDiff, getTurnChanges });
+    await click(link(r.container, 'the file'));
+    await flush();
+    await flush();
+    expect(r.container.querySelector('.form-error')!.textContent).toBe('the runner is offline');
+    expect(tabOn(r.container)).toBe('Changes');
+    expect(r.container.querySelector('details.ch-file')).toBeNull();
+    expect(getTurnChanges).toHaveBeenCalledTimes(1);
+    expect(getTurnDiff).not.toHaveBeenCalled();
+    r.unmount();
+  });
+
+  it('the Changes error clears when another turn is selected and when a later lookup succeeds', async () => {
+    let fail = true;
+    const getTurnChanges = vi.fn(async () => {
+      if (fail) {
+        fail = false;
+        throw new Error('the runner is offline');
+      }
+      return many;
+    });
+    const r = await mount(twoTurns(), { getTurnDiff: async () => fileDiff, getTurnChanges });
+    await click(link(r.container, 'the file'));
+    await flush();
+    await flush();
+    expect(r.container.querySelector('.form-error')!.textContent).toBe('the runner is offline');
+    await click(r.container.querySelectorAll('#convo .tb')[1]);
+    await flush();
+    await flush();
+    expect(r.container.querySelector('.form-error')).toBeNull();
+    await click(r.container.querySelectorAll('#convo .tb')[0]);
+    await flush();
+    await flush();
+    // Coming back does not bring the old failure with it.
+    expect(r.container.querySelector('.form-error')).toBeNull();
+    await click(link(r.container, 'the file'));
+    await flush();
+    await flush();
+    await flush();
+    expect(r.container.querySelector('.form-error')).toBeNull();
+    expect(tabOn(r.container)).toBe('Changes');
+    expect(opened(r.container)).toEqual(['a.txt']);
     r.unmount();
   });
 });

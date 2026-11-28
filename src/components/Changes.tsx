@@ -46,13 +46,28 @@ export function turnTooBig(truncated: boolean | undefined, sessionTooBig?: boole
 // One changed file: its path, kind and line counts, and its diff, which
 // scrolls sideways in its own box. A file the person changed since is
 // marked: an apply would refuse it.
-export const FileChange: React.FC<{ file: ChangedFile; open: boolean; conflict?: string }> = ({ file: f, open, conflict }) => {
+export const FileChange: React.FC<{ file: ChangedFile; open: boolean; conflict?: string; reveal?: number }> = ({ file: f, open, conflict, reveal }) => {
   const lines = f.diff ? f.diff.replace(/\n$/, '').split('\n') : [];
   const added = f.added ?? lines.filter((l) => l.startsWith('+') && !l.startsWith('+++')).length;
   const removed = f.removed ?? lines.filter((l) => l.startsWith('-') && !l.startsWith('---')).length;
   const counted = !!f.diff || (f.added ?? 0) + (f.removed ?? 0) > 0;
+  const ref = useRef<HTMLDetailsElement>(null);
+  // `open` is the fold rule (few files start open). `reveal` is a click on
+  // this path: open it and bring it into view, including after the person
+  // folded it. The number changes on each click, so the same file opens again.
+  const [opened, setOpened] = useState(open);
+  useEffect(() => {
+    if (reveal === undefined) return;
+    setOpened(true);
+    ref.current?.scrollIntoView?.({ block: 'nearest' });
+  }, [reveal]);
   return (
-    <details className={`ch-file${conflict ? ' conflict' : ''}`} open={open}>
+    <details
+      ref={ref}
+      className={`ch-file${conflict ? ' conflict' : ''}`}
+      open={opened}
+      onToggle={(e) => setOpened(e.currentTarget.open)}
+    >
       <summary className="ch-path">
         <code>{f.path}</code> <span className={`ch-kind ${f.change}`}>{f.change}</span>
         {counted && (
@@ -101,7 +116,10 @@ const FileList: React.FC<{
   // The workspace's folder names, when it has several: the files are listed
   // under each.
   folders?: string[];
-}> = ({ files, truncated, diffsCut, conflicts, folders }) => (
+  // A file a click asked to open. `n` changes on each click, including a
+  // second click on the same path.
+  reveal?: { path: string; n: number };
+}> = ({ files, truncated, diffsCut, conflicts, folders, reveal }) => (
   <div className="ch-files">
     {groupByFolder(files, folders).map((g) => (
       <React.Fragment key={g.name}>
@@ -111,7 +129,13 @@ const FileList: React.FC<{
           </div>
         )}
         {g.files.map((f) => (
-          <FileChange key={f.path} file={f} open={files.length <= FOLD_OVER} conflict={conflicts?.get(f.path)} />
+          <FileChange
+            key={f.path}
+            file={f}
+            open={files.length <= FOLD_OVER}
+            conflict={conflicts?.get(f.path)}
+            reveal={reveal?.path === f.path ? reveal.n : undefined}
+          />
         ))}
       </React.Fragment>
     ))}
@@ -161,7 +185,13 @@ export const TurnChangesTab: React.FC<{
   loadDiff: () => Promise<TurnDiff>;
   loadChanges?: (before?: number) => Promise<TurnChangesPage>;
   tooBig?: boolean;
-}> = ({ turnId, rev, loadDiff, loadChanges, tooBig }) => {
+  // A file a click asked to show. `path` is the changes list's own path.
+  // `n` increases on each click, including a second click on the same file.
+  reveal?: { path: string; n: number };
+  // The read that asked to open this tab already failed. Show that message
+  // and do not read again; a later read clears it from outside.
+  lookupError?: string;
+}> = ({ turnId, rev, loadDiff, loadChanges, tooBig, reveal, lookupError }) => {
   const [diff, setDiff] = useState<{ turn: string; d: TurnDiff } | null>(null);
   const [changes, setChanges] = useState<loaded | null>(null);
   const [error, setError] = useState<{ turn: string; msg: string } | null>(null);
@@ -180,10 +210,19 @@ export const TurnChangesTab: React.FC<{
   // A generation guards every async read: it is bumped on each turn change,
   // so a response for an earlier turn (an in-flight Load more, say) is ignored.
   const gen = useRef(0);
+  // Cursors already requested while looking for `reveal`, so a next_before
+  // that does not advance cannot page forever. Cleared when the first page
+  // is replaced (a new turn, or rev).
+  const paged = useRef<{ key: string; seen: Set<number> }>({ key: '', seen: new Set() });
   useEffect(() => {
     const mine = ++gen.current;
     setMoreError(null);
     setLoadingMore(false);
+    // The failure is already known. Reading here would only fetch it again.
+    if (lookupError) {
+      setReading(false);
+      return;
+    }
     setReading(true);
     // The shown diff and changes are left in place until the new read lands,
     // so a re-read for the same turn (rev bumped) does not flash Loading. A
@@ -192,6 +231,7 @@ export const TurnChangesTab: React.FC<{
     Promise.all([diffRef.current(), changesRef.current ? changesRef.current() : Promise.resolve(null)]).then(
       ([d, page]) => {
         if (mine !== gen.current) return;
+        paged.current = { key: '', seen: new Set() };
         setDiff({ turn: turnId, d });
         setChanges(
           page
@@ -207,10 +247,44 @@ export const TurnChangesTab: React.FC<{
         setReading(false);
       }
     );
-  }, [turnId, rev]);
+  }, [turnId, rev, lookupError]);
   const d = diff?.turn === turnId ? diff.d : null;
   const ch = changes?.turn === turnId ? changes : null;
   const err = error?.turn === turnId ? error.msg : null;
+  // A click names a file that may sit on a later page. Read forward until it
+  // is listed or the pages end. The first-page read is left to finish first:
+  // its cursor is the one this follows.
+  useEffect(() => {
+    const want = reveal?.path;
+    if (lookupError || !want || !ch || reading || loadingMore || !changesRef.current) return;
+    if (ch.files.some((file) => file.path === want)) return;
+    if (ch.nextBefore == null) return;
+    const key = `${turnId}:${reveal?.n ?? 0}`;
+    if (paged.current.key !== key) paged.current = { key, seen: new Set() };
+    if (paged.current.seen.has(ch.nextBefore)) return;
+    paged.current.seen.add(ch.nextBefore);
+    const mine = gen.current;
+    const before = ch.nextBefore;
+    setLoadingMore(true);
+    setMoreError(null);
+    changesRef.current(before).then(
+      (page) => {
+        if (mine !== gen.current) return;
+        setChanges((c) =>
+          c && c.turn === turnId
+            ? { turn: turnId, files: [...c.files, ...page.changes], nextBefore: page.next_before, truncated: c.truncated || !!page.truncated, diffsCut: c.diffsCut || !!page.diffs_cut }
+            : c
+        );
+        setLoadingMore(false);
+      },
+      (e) => {
+        if (mine !== gen.current) return;
+        setMoreError((e as Error).message);
+        setLoadingMore(false);
+      }
+    );
+  }, [reveal?.path, reveal?.n, ch, reading, loadingMore, turnId, lookupError]);
+  if (lookupError) return <Notice kind="error">{lookupError}</Notice>;
   if (err) return <Notice kind="error">{err}</Notice>;
   if (!d) return <Loading />;
   const f = d.files;
@@ -255,7 +329,7 @@ export const TurnChangesTab: React.FC<{
         <span className="sep"> · </span>
         {f && f.count > 0 ? 'changed by this turn' : 'this turn changed no files'}
       </div>
-      {f && f.count > 0 && ch && <FileList files={shown} truncated={ch.truncated} diffsCut={ch.diffsCut} />}
+      {f && f.count > 0 && ch && <FileList files={shown} truncated={ch.truncated} diffsCut={ch.diffsCut} reveal={reveal} />}
       {moreError && <Notice kind="error">{moreError}</Notice>}
       {ch && ch.nextBefore != null && (
         <Button kind="quiet" small onClick={loadMore} disabled={loadingMore || reading}>

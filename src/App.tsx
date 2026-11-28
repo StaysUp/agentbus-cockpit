@@ -19,6 +19,7 @@ import { SubscriptionApi } from './components/ConnectStep';
 import { SignInDot, signInOf } from './components/SignInDot';
 import { NewSessionDialog } from './components/NewSessionDialog';
 import { ApplyPanel, MERGE_REQUEST, refusedTooBig } from './components/Changes';
+import { copyText, fileKey, type FileBase, type FileClick } from './components/Markdown';
 import { RightPanel, usePanelTabs } from './components/RightPanel';
 import { recordFileName, saveRecord } from './data/exportRecord';
 import { SessionsColumn } from './components/SessionsColumn';
@@ -914,6 +915,22 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
   // The turn panel's chosen tabs, kept here so they outlive the panel while
   // the apply preview takes its place.
   const panelTabs = usePanelTabs();
+  // The file a local-file click asked to open in that turn's Changes tab.
+  const [fileReveal, setFileReveal] = useState<{ turnId: string; path: string; n: number } | null>(null);
+  // A Changes read that failed for the turn it was about. The tab shows this
+  // text. It is dropped when that turn is no longer the one on screen, and
+  // when a later read for it succeeds.
+  const [fileError, setFileError] = useState<{ sessionId: string; turnId: string; message: string } | null>(null);
+  // One lookup at a time on the turn on screen, so a double click does not
+  // open and copy both. A click after the person has moved starts its own
+  // read. fileSeq is that read's token: an older read finishes without
+  // touching the newer one, and without leaving the flag set.
+  const fileBusy = useRef(false);
+  const fileSeq = useRef(0);
+  const fileAt = useRef<{ session: string | null; turn: string | null } | null>(null);
+  useEffect(() => {
+    setFileError((cur) => (cur && (cur.sessionId !== selectedSessionId || cur.turnId !== selectedTurnId) ? null : cur));
+  }, [selectedSessionId, selectedTurnId]);
   useEffect(() => {
     if (!panelOpen) setApplyOpen(false);
   }, [panelOpen]);
@@ -923,6 +940,72 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
     (sessionId: string, turnId: string, before?: number) => dataSource.getTurnChanges!(sessionId, turnId, before),
     [dataSource]
   );
+  // A local file in a reply. When that path is one of the turn's changes,
+  // open the turn's Changes tab on it. Otherwise copy the full path. The
+  // Changes tab is absent without the diff route, so that case copies too.
+  // A Direct session keeps no record of its changes, so the tab cannot show
+  // the file: the click copies the path and does not open the panel.
+  const openTurnFile = (turn: Turn, base: FileBase, file: FileClick) => {
+    const here = { session: selectedSessionRef.current, turn: selectedTurnRef.current };
+    const samePlace = fileAt.current != null && fileAt.current.session === here.session && fileAt.current.turn === here.turn;
+    if (fileBusy.current && samePlace) return;
+    const load = dataSource.getTurnChanges;
+    const want = fileKey(file.path, base);
+    const direct = allSessionsRef.current?.find((s) => s.id === turn.sessionId)?.sandbox === false;
+    if (direct || !load || !dataSource.getTurnDiff || !want) {
+      copyText(file.full);
+      return;
+    }
+    const mine = ++fileSeq.current;
+    fileBusy.current = true;
+    fileAt.current = here;
+    // The session and turn on screen when this read started, and this read's
+    // own token. A newer click takes the token. A slow read then cannot put
+    // an old turn back on screen or change a tab the person has since chosen.
+    const stillHere = () => mine === fileSeq.current && selectedSessionRef.current === here.session && selectedTurnRef.current === here.turn;
+    const show = () => {
+      selectTurnLevel(turn);
+      setApplyOpen(false);
+      columns.forward('turn');
+      panelTabs.setTurnTab('changes');
+    };
+    const lookup = async (): Promise<string | undefined> => {
+      let before: number | undefined;
+      const seen = new Set<number>();
+      for (;;) {
+        const page = await load(turn.sessionId, turn.id, before);
+        const hit = page.changes.find((f) => fileKey(f.path, base) === want);
+        if (hit) return hit.path;
+        const next = page.next_before;
+        if (next == null || seen.has(next)) return undefined;
+        seen.add(next);
+        before = next;
+      }
+    };
+    lookup().then(
+      (found) => {
+        if (mine === fileSeq.current) fileBusy.current = false;
+        if (!stillHere()) return;
+        if (!found) {
+          copyText(file.full);
+          return;
+        }
+        setFileError(null);
+        show();
+        setFileReveal((cur) => ({ turnId: turn.id, path: found, n: (cur?.n ?? 0) + 1 }));
+      },
+      (err: unknown) => {
+        if (mine === fileSeq.current) fileBusy.current = false;
+        if (!stillHere()) return;
+        // Keep the API's own words. The tab shows them and does not read
+        // again. Copying would say the file was absent when it was not checked.
+        const message = err instanceof Error ? err.message : String(err);
+        setFileReveal(null);
+        setFileError({ sessionId: turn.sessionId, turnId: turn.id, message });
+        show();
+      }
+    );
+  };
   // The turn panel's Context tab: a turn's context size and parts, and the
   // session's growth.
   const loadTurnContext = useCallback((sessionId: string, turnId: string) => dataSource.getTurnContext!(sessionId, turnId), [dataSource]);
@@ -1838,6 +1921,7 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
           live={dataSource.subscribe ? liveTurns[sessionView.id] : undefined}
           selectedTurn={selectedTurn}
           onSelectTurn={clickTurn}
+          onOpenFile={openTurnFile}
           level={shownLevel}
           panelOpen={panelOpen}
           agentName={nameOf(sessionView.agent)}
@@ -1950,6 +2034,13 @@ export const App: React.FC<AppProps> = ({ dataSource: propDataSource, sourceLabe
         onSelectTurn={selectTurnLevel}
         onSelectCall={selectCall}
         onOpenEvent={openEvent}
+        onOpenFile={openTurnFile}
+        revealFile={fileReveal}
+        changesError={
+          fileError && selectedTurn && fileError.sessionId === selectedTurn.sessionId && fileError.turnId === selectedTurn.id
+            ? fileError.message
+            : undefined
+        }
         loadContext={loadContext}
         loadTurn={loadTurn}
         live={!!dataSource.subscribe}

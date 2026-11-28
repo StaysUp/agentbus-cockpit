@@ -13,7 +13,7 @@ import {
   turnStateClass,
   toolInputSummary,
 } from '../utils/format';
-import { Markdown } from './Markdown';
+import { FileBase, FileClick, Markdown } from './Markdown';
 import { Loading } from './Notice';
 import { Session, STATE } from '../words';
 import { Cost } from './Cost';
@@ -49,6 +49,14 @@ interface RightPanelProps {
   onSelectTurn?: (turn: Turn) => void;
   onSelectCall?: (turn: Turn, callId: string) => void;
   onOpenEvent?: (turn: Turn, eventId: string) => void;
+  // A click on a local file in this turn's reply or in one of its call replies.
+  // `base` is the folder the path was shown relative to.
+  onOpenFile?: (turn: Turn, base: FileBase, file: FileClick) => void;
+  // The file the Changes tab should open. `path` is that list's own path.
+  revealFile?: { turnId: string; path: string; n: number } | null;
+  // The changes read for the open turn failed. The tab shows this and does
+  // not read the list again to learn the same thing.
+  changesError?: string;
   // Reads a call's stored request (the call level's Context tab).
   loadContext?: LoadContext;
   // Reads one turn's events, to split a call's replayed history by turn.
@@ -133,6 +141,7 @@ export const RightPanel: React.FC<RightPanelProps> = (props) => {
         onTab={setCallTab}
         onLevel={props.onLevel}
         onOpenEvent={props.onOpenEvent}
+        onOpenFile={props.onOpenFile}
         loadContext={props.loadContext}
         loadTurn={props.loadTurn}
         turns={session?.turnsList}
@@ -190,6 +199,9 @@ const TurnPanel: React.FC<TurnPanelProps> = ({
   panelOpen,
   tooBig,
   rev,
+  onOpenFile,
+  revealFile,
+  changesError,
 }) => {
   // A running turn's status from its events, read each second while it runs.
   const running = !!live && turn?.state === 'running' && !!turn.detail;
@@ -592,6 +604,8 @@ const TurnPanel: React.FC<TurnPanelProps> = ({
             loadDiff={() => loadDiff(turn.sessionId, turn.id)}
             loadChanges={loadChanges ? (before?: number) => loadChanges(turn.sessionId, turn.id, before) : undefined}
             tooBig={tooBig}
+            reveal={revealFile && revealFile.turnId === turn.id ? { path: revealFile.path, n: revealFile.n } : undefined}
+            lookupError={changesError}
           />
         )}
 
@@ -619,7 +633,11 @@ const TurnPanel: React.FC<TurnPanelProps> = ({
             {(turn.reply ?? detail.agentResponse) ? (
               // Formatted as the chat shows it.
               <div className="m-agent md-reply result-md">
-                <Markdown text={turn.reply ?? detail.agentResponse ?? ''} files={{ session: turn.sessionId, folder: turn.folder }} />
+                <Markdown
+                  text={turn.reply ?? detail.agentResponse ?? ''}
+                  files={{ session: turn.sessionId, folder: turn.folder }}
+                  onFile={onOpenFile ? (file) => onOpenFile(turn, { session: turn.sessionId, folder: turn.folder }, file) : undefined}
+                />
               </div>
             ) : (
               <p className="dim">No reply yet.</p>
